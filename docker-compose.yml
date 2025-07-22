@@ -1,0 +1,189 @@
+version: '3.8'
+
+services:
+  # PostgreSQL Database
+  postgres:
+    image: postgres:15-alpine
+    container_name: quantmatrix_postgres
+    environment:
+      POSTGRES_DB: quantmatrix
+      POSTGRES_USER: quantmatrix
+      POSTGRES_PASSWORD: password
+      POSTGRES_HOST_AUTH_METHOD: trust
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+      - ./init.sql:/docker-entrypoint-initdb.d/init.sql
+    ports:
+      - "5432:5432"
+    networks:
+      - quantmatrix_network
+    healthcheck:
+      test: [ "CMD-SHELL", "pg_isready -U quantmatrix" ]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  # Redis Cache & Message Broker
+  redis:
+    image: redis:7-alpine
+    container_name: quantmatrix_redis
+    command: redis-server --appendonly yes --requirepass redispassword
+    volumes:
+      - redis_data:/data
+    ports:
+      - "6379:6379"
+    networks:
+      - quantmatrix_network
+    healthcheck:
+      test: [ "CMD", "redis-cli", "--raw", "incr", "ping" ]
+      interval: 10s
+      timeout: 3s
+      retries: 5
+
+  # FastAPI Backend
+  backend:
+    build:
+      context: .
+      dockerfile: Dockerfile.backend
+    container_name: quantmatrix_backend
+    env_file:
+      - .env
+    environment:
+      - DATABASE_URL=postgresql://quantmatrix:password@postgres:5432/quantmatrix
+      - REDIS_URL=redis://:redispassword@redis:6379/0
+      - CELERY_BROKER_URL=redis://:redispassword@redis:6379/0
+      - CELERY_RESULT_BACKEND=redis://:redispassword@redis:6379/0
+      - DEBUG=true
+      - IBKR_HOST=host.docker.internal # Override for Docker to connect to host machine
+    volumes:
+      - ./backend:/app/backend
+      - ./requirements.txt:/app/requirements.txt
+    ports:
+      - "8000:8000"
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    networks:
+      - quantmatrix_network
+    command: uvicorn backend.api.main:app --host 0.0.0.0 --port 8000 --reload
+
+  # Celery Worker
+  celery_worker:
+    build:
+      context: .
+      dockerfile: Dockerfile.backend
+    container_name: quantmatrix_celery_worker
+    env_file:
+      - .env
+    environment:
+      - DATABASE_URL=postgresql://quantmatrix:password@postgres:5432/quantmatrix
+      - REDIS_URL=redis://:redispassword@redis:6379/0
+      - CELERY_BROKER_URL=redis://:redispassword@redis:6379/0
+      - CELERY_RESULT_BACKEND=redis://:redispassword@redis:6379/0
+      - IBKR_HOST=host.docker.internal # Override for Docker to connect to host machine
+    volumes:
+      - ./backend:/app/backend
+      - ./requirements.txt:/app/requirements.txt
+    depends_on:
+      - postgres
+      - redis
+      - backend
+    networks:
+      - quantmatrix_network
+    command: celery -A backend.tasks.celery_app worker --loglevel=info
+
+  # Celery Beat Scheduler
+  celery_beat:
+    build:
+      context: .
+      dockerfile: Dockerfile.backend
+    container_name: quantmatrix_celery_beat
+    env_file:
+      - .env
+    environment:
+      - DATABASE_URL=postgresql://quantmatrix:password@postgres:5432/quantmatrix
+      - REDIS_URL=redis://:redispassword@redis:6379/0
+      - CELERY_BROKER_URL=redis://:redispassword@redis:6379/0
+      - CELERY_RESULT_BACKEND=redis://:redispassword@redis:6379/0
+      - IBKR_HOST=host.docker.internal # Override for Docker to connect to host machine
+    volumes:
+      - ./backend:/app/backend
+      - ./requirements.txt:/app/requirements.txt
+      - celery_beat_data:/app/celerybeat-schedule
+    depends_on:
+      - postgres
+      - redis
+      - backend
+    networks:
+      - quantmatrix_network
+    command: celery -A backend.tasks.celery_app beat --loglevel=info
+
+  # Flower (Celery Monitoring)
+  flower:
+    build:
+      context: .
+      dockerfile: Dockerfile.backend
+    container_name: quantmatrix_flower
+    environment:
+      - CELERY_BROKER_URL=redis://:redispassword@redis:6379/0
+      - CELERY_RESULT_BACKEND=redis://:redispassword@redis:6379/0
+    ports:
+      - "5555:5555"
+    depends_on:
+      - redis
+      - celery_worker
+    networks:
+      - quantmatrix_network
+    command: celery -A backend.tasks.celery_app flower --port=5555
+
+  # React Frontend (Development)
+  frontend:
+    build:
+      context: .
+      dockerfile: Dockerfile.frontend
+    container_name: quantmatrix_frontend
+    environment:
+      - VITE_API_URL=http://localhost:8000
+      - CHOKIDAR_USEPOLLING=true
+    volumes:
+      - ./frontend:/app
+      - /app/node_modules
+    ports:
+      - "3000:3000"
+    depends_on:
+      - backend
+    networks:
+      - quantmatrix_network
+    command: npm run dev
+
+  # Nginx Reverse Proxy (Production)
+  nginx:
+    image: nginx:alpine
+    container_name: quantmatrix_nginx
+    ports:
+      - "80:80"
+      - "443:443"
+    volumes:
+      - ./nginx.conf:/etc/nginx/nginx.conf
+      - ./ssl:/etc/nginx/ssl
+    depends_on:
+      - backend
+      - frontend
+    networks:
+      - quantmatrix_network
+    profiles:
+      - production
+
+networks:
+  quantmatrix_network:
+    driver: bridge
+
+volumes:
+  postgres_data:
+    driver: local
+  redis_data:
+    driver: local
+  celery_beat_data:
+    driver: local
