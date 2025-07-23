@@ -82,7 +82,7 @@ Strategy → StrategyRun → Signal → Notification
 ```python
 # Keep your current models working
 from backend.models import * # Current models
-from backend.models_v2 import * # New V2 models
+from backend.models import * # New V2 models
 
 # Run both systems in parallel during transition
 ```

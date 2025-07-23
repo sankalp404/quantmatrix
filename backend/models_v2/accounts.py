@@ -1,1 +1,0 @@
-# Placeholder for accounts model - will be completed in migration phase 

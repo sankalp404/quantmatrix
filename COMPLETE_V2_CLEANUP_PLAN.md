@@ -53,7 +53,7 @@ PROBLEM: ATR calculation logic scattered across 4+ files!
 
 ### **Clean API Structure:**
 ```
-backend/api_v2/
+backend/api/
 ├── routes/
 │   ├── auth.py           # Authentication (clean)
 │   ├── portfolio.py      # Portfolio data only (50 lines max)
@@ -66,7 +66,7 @@ backend/api_v2/
 
 ### **Clean Services Structure:**
 ```
-backend/services_v2/
+backend/services/
 ├── clients/
 │   ├── ibkr_client.py         # SINGLE IBKR client
 │   └── tastytrade_client.py   # SINGLE TastyTrade client
@@ -84,7 +84,7 @@ backend/services_v2/
 
 ### **Clean Models:**
 ```
-backend/models_v2/ (KEEP - already clean)
+backend/models/ (KEEP - already clean)
 ├── users.py
 ├── market_data.py
 ├── strategies.py
@@ -149,7 +149,7 @@ def get_atr_for_options(symbol):
 ### **V2 Solution - SINGLE ATR Calculator:**
 ```python
 # ONE place for ALL ATR calculations:
-backend/services_v2/analysis/atr_calculator.py
+backend/services/analysis/atr_calculator.py
 
 class ATRCalculator:
     def calculate_basic_atr(self, data) -> float:
@@ -165,7 +165,7 @@ class ATRCalculator:
         """ATR for matrix-based strategies"""
 
 # Everyone imports from ONE place:
-from backend.services_v2.analysis.atr_calculator import ATRCalculator
+from backend.services.analysis.atr_calculator import ATRCalculator
 ```
 
 ### **Benefits:**
@@ -207,7 +207,7 @@ from backend.services_v2.analysis.atr_calculator import ATRCalculator
 ```python
 # Clean separation: Routes only handle HTTP, delegate to services
 
-# api_v2/routes/portfolio.py (50 lines max)
+# api/routes/portfolio.py (50 lines max)
 @router.get("/portfolio/{user_id}")
 async def get_portfolio(user_id: int):
     # Just HTTP handling, delegate to service
@@ -228,11 +228,11 @@ async def get_tax_lots(user_id: int):
 ### **Phase 1: Create Clean Structure (Day 1-2)**
 ```bash
 # Create V2 directories
-mkdir -p backend/{api_v2/routes,services_v2/{clients,analysis,strategies,portfolio,notifications}}
+mkdir -p backend/{api/routes,services/{clients,analysis,strategies,portfolio,notifications}}
 
 # Move best implementations to V2
-cp services/enhanced_ibkr_client.py services_v2/clients/ibkr_client.py
-cp services/production_atr_calculator.py services_v2/analysis/atr_calculator.py
+cp services/enhanced_ibkr_client.py services/clients/ibkr_client.py
+cp services/production_atr_calculator.py services/analysis/atr_calculator.py
 # ... etc
 ```
 
@@ -265,15 +265,15 @@ cp services/production_atr_calculator.py services_v2/analysis/atr_calculator.py
 ### **After V2 Cleanup:**
 ```
 backend/
-├── api_v2/               # Clean, focused routes
+├── api/               # Clean, focused routes
 │   └── routes/           # Each file <100 lines
-├── services_v2/          # Single responsibility services
+├── services/          # Single responsibility services
 │   ├── clients/          # SINGLE client per broker
 │   ├── analysis/         # SINGLE ATR calculator
 │   ├── strategies/       # Clean strategy services
 │   ├── portfolio/        # Portfolio management
 │   └── notifications/    # Clean notifications
-├── models_v2/            # Clean data models
+├── models/            # Clean data models
 └── config.py             # Configuration only
 
 DELETED:

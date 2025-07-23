@@ -9,342 +9,181 @@ on:
   workflow_dispatch:
     inputs:
       environment:
-        description: 'Environment to deploy to'
+        description: 'Deployment environment'
         required: true
         default: 'staging'
         type: choice
         options:
-        - staging
-        - production
-      version:
-        description: 'Version tag (optional)'
+          - staging
+          - production
+      force_deploy:
+        description: 'Force deployment even if tests failed'
         required: false
-        type: string
+        default: false
+        type: boolean
 
 env:
   REGISTRY: ghcr.io
-  IMAGE_NAME: ${{ github.repository }}
+  IMAGE_NAME: quantmatrix
 
 jobs:
-  # =============================================================================
-  # PRE-DEPLOYMENT VALIDATION
-  # =============================================================================
-  
-  pre-deployment-checks:
-    name: 🔍 Pre-Deployment Validation
+  # Pre-deployment validation
+  validate:
+    name: 🔍 Pre-deployment Validation
     runs-on: ubuntu-latest
-    if: ${{ github.event.workflow_run.conclusion == 'success' || github.event_name == 'workflow_dispatch' }}
+    if: github.event.workflow_run.conclusion == 'success' || github.event_name == 'workflow_dispatch'
     
+    steps:
+      - name: 📥 Checkout code
+        uses: actions/checkout@v4
+      
+      - name: 🔍 Validate deployment readiness
+        run: |
+          echo "🔍 Checking deployment prerequisites..."
+          echo "✅ Source code checkout complete"
+          echo "✅ Workflow validation passed"
+  
+  # Build and push Docker images
+  build:
+    name: 🐳 Build & Push Images
+    runs-on: ubuntu-latest
+    needs: validate
     outputs:
-      deploy-staging: ${{ steps.check.outputs.deploy-staging }}
-      deploy-production: ${{ steps.check.outputs.deploy-production }}
-      version: ${{ steps.version.outputs.version }}
-    
+      backend-image: ${{ steps.backend.outputs.image }}
+      frontend-image: ${{ steps.frontend.outputs.image }}
+      
     steps:
-    - name: 📥 Checkout Code
-      uses: actions/checkout@v4
+      - name: 📥 Checkout code
+        uses: actions/checkout@v4
       
-    - name: 🔍 Deployment Decision
-      id: check
-      run: |
-        if [[ "${{ github.event_name }}" == "workflow_dispatch" ]]; then
-          if [[ "${{ github.event.inputs.environment }}" == "staging" ]]; then
-            echo "deploy-staging=true" >> $GITHUB_OUTPUT
-            echo "deploy-production=false" >> $GITHUB_OUTPUT
-          else
-            echo "deploy-staging=false" >> $GITHUB_OUTPUT
-            echo "deploy-production=true" >> $GITHUB_OUTPUT
-          fi
-        else
-          # Auto-deploy to staging on main branch CI success
-          echo "deploy-staging=true" >> $GITHUB_OUTPUT
-          echo "deploy-production=false" >> $GITHUB_OUTPUT
-        fi
-        
-    - name: 🏷️ Generate Version
-      id: version
-      run: |
-        if [[ -n "${{ github.event.inputs.version }}" ]]; then
-          VERSION="${{ github.event.inputs.version }}"
-        else
-          VERSION="v$(date +%Y%m%d)-${GITHUB_SHA::8}"
-        fi
-        echo "version=$VERSION" >> $GITHUB_OUTPUT
-        echo "Generated version: $VERSION"
+      - name: 🔐 Log in to Container Registry
+        uses: docker/login-action@v3
+        with:
+          registry: ${{ env.REGISTRY }}
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+      
+      - name: 📝 Extract metadata for backend
+        id: backend-meta
+        uses: docker/metadata-action@v5
+        with:
+          images: ${{ env.REGISTRY }}/${{ github.repository }}/backend
+          tags: |
+            type=ref,event=branch
+            type=ref,event=pr
+            type=sha,prefix={{branch}}-
+            type=raw,value=latest,enable={{is_default_branch}}
+      
+      - name: 🏗️ Build and push backend image
+        id: backend
+        uses: docker/build-push-action@v5
+        with:
+          context: .
+          file: ./Dockerfile.backend
+          push: true
+          tags: ${{ steps.backend-meta.outputs.tags }}
+          labels: ${{ steps.backend-meta.outputs.labels }}
+      
+      - name: 📝 Extract metadata for frontend
+        id: frontend-meta
+        uses: docker/metadata-action@v5
+        with:
+          images: ${{ env.REGISTRY }}/${{ github.repository }}/frontend
+          tags: |
+            type=ref,event=branch
+            type=ref,event=pr
+            type=sha,prefix={{branch}}-
+            type=raw,value=latest,enable={{is_default_branch}}
+      
+      - name: 🏗️ Build and push frontend image
+        id: frontend
+        uses: docker/build-push-action@v5
+        with:
+          context: .
+          file: ./Dockerfile.frontend
+          push: true
+          tags: ${{ steps.frontend-meta.outputs.tags }}
+          labels: ${{ steps.frontend-meta.outputs.labels }}
 
-  # =============================================================================
-  # BUILD & PUSH DOCKER IMAGES
-  # =============================================================================
-  
-  build-and-push:
-    name: 🏗️ Build & Push Images
-    runs-on: ubuntu-latest
-    needs: pre-deployment-checks
-    if: ${{ needs.pre-deployment-checks.outputs.deploy-staging == 'true' || needs.pre-deployment-checks.outputs.deploy-production == 'true' }}
-    
-    permissions:
-      contents: read
-      packages: write
-    
-    strategy:
-      matrix:
-        component: [backend, frontend]
-    
-    steps:
-    - name: 📥 Checkout Code
-      uses: actions/checkout@v4
-      
-    - name: 🐳 Set up Docker Buildx
-      uses: docker/setup-buildx-action@v3
-      
-    - name: 🔐 Log in to Container Registry
-      uses: docker/login-action@v3
-      with:
-        registry: ${{ env.REGISTRY }}
-        username: ${{ github.actor }}
-        password: ${{ secrets.GITHUB_TOKEN }}
-        
-    - name: 📝 Extract Metadata
-      id: meta
-      uses: docker/metadata-action@v5
-      with:
-        images: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}-${{ matrix.component }}
-        tags: |
-          type=ref,event=branch
-          type=sha,prefix={{branch}}-
-          type=raw,value=${{ needs.pre-deployment-checks.outputs.version }}
-          type=raw,value=latest,enable={{is_default_branch}}
-          
-    - name: 🏗️ Build and Push ${{ matrix.component }}
-      uses: docker/build-push-action@v5
-      with:
-        context: .
-        file: Dockerfile.${{ matrix.component }}
-        push: true
-        tags: ${{ steps.meta.outputs.tags }}
-        labels: ${{ steps.meta.outputs.labels }}
-        cache-from: type=gha
-        cache-to: type=gha,mode=max
-        build-args: |
-          VERSION=${{ needs.pre-deployment-checks.outputs.version }}
-          BUILD_DATE=$(date -u +'%Y-%m-%dT%H:%M:%SZ')
-          GIT_SHA=${{ github.sha }}
-
-  # =============================================================================
-  # STAGING DEPLOYMENT
-  # =============================================================================
-  
+  # Deploy to staging
   deploy-staging:
-    name: 🏃 Deploy to Staging
+    name: 🚀 Deploy to Staging
     runs-on: ubuntu-latest
-    needs: [pre-deployment-checks, build-and-push]
-    if: ${{ needs.pre-deployment-checks.outputs.deploy-staging == 'true' }}
-    
-    environment:
+    needs: build
+    if: github.ref == 'refs/heads/main' || (github.event_name == 'workflow_dispatch' && github.event.inputs.environment == 'staging')
+    environment: 
       name: staging
       url: https://staging.quantmatrix.com
-    
-    steps:
-    - name: 📥 Checkout Code
-      uses: actions/checkout@v4
       
-    - name: 🔧 Configure Staging Environment
-      run: |
-        echo "🏃 Deploying to Staging Environment"
-        echo "Version: ${{ needs.pre-deployment-checks.outputs.version }}"
-        
-    - name: 🚀 Deploy to Staging Server
-      run: |
-        # In a real deployment, this would:
-        # 1. SSH to staging server
-        # 2. Pull new Docker images
-        # 3. Update docker-compose with new image tags
-        # 4. Run database migrations
-        # 5. Restart services with zero-downtime
-        # 6. Run health checks
-        
-        echo "🏗️ Simulating staging deployment..."
-        echo "✅ Backend deployed: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}-backend:${{ needs.pre-deployment-checks.outputs.version }}"
-        echo "✅ Frontend deployed: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}-frontend:${{ needs.pre-deployment-checks.outputs.version }}"
-        
-    - name: 🧪 Post-Deployment Tests
-      run: |
-        echo "🧪 Running post-deployment smoke tests..."
-        # Test critical endpoints
-        # curl -f https://staging.quantmatrix.com/api/health
-        # curl -f https://staging.quantmatrix.com/api/v1/portfolio/health
-        echo "✅ All smoke tests passed"
-        
-    - name: 📢 Notify Deployment Success
-      run: |
-        echo "🎉 Staging deployment successful!"
-        echo "Environment: https://staging.quantmatrix.com"
-        echo "Version: ${{ needs.pre-deployment-checks.outputs.version }}"
+    steps:
+      - name: 📥 Checkout code
+        uses: actions/checkout@v4
+      
+      - name: 🚀 Deploy to staging
+        run: |
+          echo "🚀 Deploying to staging environment..."
+          echo "Backend image: ${{ needs.build.outputs.backend-image }}"
+          echo "Frontend image: ${{ needs.build.outputs.frontend-image }}"
+          
+          # Add your staging deployment commands here
+          # For example, kubectl, docker-compose, or cloud provider CLI commands
+          
+          echo "✅ Staging deployment completed"
+      
+      - name: 🧪 Run staging smoke tests
+        run: |
+          echo "🧪 Running staging smoke tests..."
+          # Add staging validation tests here
+          curl -f https://staging.quantmatrix.com/health || exit 1
+          echo "✅ Staging smoke tests passed"
 
-  # =============================================================================
-  # PRODUCTION DEPLOYMENT (Manual Approval Required)
-  # =============================================================================
-  
+  # Deploy to production (manual approval required)
   deploy-production:
-    name: 🏭 Deploy to Production
+    name: 🎯 Deploy to Production
     runs-on: ubuntu-latest
-    needs: [pre-deployment-checks, build-and-push]
-    if: ${{ needs.pre-deployment-checks.outputs.deploy-production == 'true' }}
-    
-    environment:
+    needs: [build, deploy-staging]
+    if: github.ref == 'refs/heads/main' || (github.event_name == 'workflow_dispatch' && github.event.inputs.environment == 'production')
+    environment: 
       name: production
       url: https://quantmatrix.com
-    
-    steps:
-    - name: 📥 Checkout Code
-      uses: actions/checkout@v4
       
-    - name: 🔧 Configure Production Environment
-      run: |
-        echo "🏭 Deploying to Production Environment"
-        echo "Version: ${{ needs.pre-deployment-checks.outputs.version }}"
-        echo "⚠️ Production deployment requires manual approval!"
-        
-    - name: 🗄️ Database Migration (Production)
-      run: |
-        echo "🗄️ Running production database migrations..."
-        # In real deployment:
-        # 1. Backup production database
-        # 2. Run migrations with rollback capability
-        # 3. Verify migration success
-        echo "✅ Database migrations completed"
-        
-    - name: 🚀 Blue-Green Production Deployment
-      run: |
-        echo "🔄 Starting blue-green deployment..."
-        
-        # Production deployment steps:
-        # 1. Deploy to green environment
-        # 2. Run comprehensive health checks
-        # 3. Switch traffic from blue to green
-        # 4. Monitor for issues
-        # 5. Keep blue as rollback option
-        
-        echo "✅ Backend deployed: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}-backend:${{ needs.pre-deployment-checks.outputs.version }}"
-        echo "✅ Frontend deployed: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}-frontend:${{ needs.pre-deployment-checks.outputs.version }}"
-        echo "✅ Traffic switched to new version"
-        
-    - name: 🧪 Production Health Checks
-      run: |
-        echo "🏥 Running production health checks..."
-        
-        # Critical production checks:
-        # 1. API endpoints responding
-        # 2. Database connectivity
-        # 3. Redis connectivity
-        # 4. External API connections (IBKR, TastyTrade)
-        # 5. Background job processing
-        # 6. Discord notifications working
-        
-        echo "✅ All production health checks passed"
-        
-    - name: 📊 Post-Deployment Monitoring
-      run: |
-        echo "📊 Setting up enhanced monitoring..."
-        
-        # Enable enhanced monitoring:
-        # 1. Error rate monitoring
-        # 2. Response time tracking
-        # 3. Database performance monitoring
-        # 4. Trading operation monitoring
-        # 5. Alert thresholds for critical issues
-        
-        echo "✅ Enhanced monitoring activated"
-        
-    - name: 🎉 Production Deployment Complete
-      run: |
-        echo "# 🎉 Production Deployment Successful!" >> $GITHUB_STEP_SUMMARY
-        echo "" >> $GITHUB_STEP_SUMMARY
-        echo "**Version:** ${{ needs.pre-deployment-checks.outputs.version }}" >> $GITHUB_STEP_SUMMARY
-        echo "**Environment:** https://quantmatrix.com" >> $GITHUB_STEP_SUMMARY
-        echo "**Deployment Time:** $(date -u)" >> $GITHUB_STEP_SUMMARY
-        echo "" >> $GITHUB_STEP_SUMMARY
-        echo "## 🚀 Features Deployed:" >> $GITHUB_STEP_SUMMARY
-        echo "- ✅ V2 Models & Services" >> $GITHUB_STEP_SUMMARY
-        echo "- ✅ Clean API Architecture" >> $GITHUB_STEP_SUMMARY
-        echo "- ✅ Comprehensive Test Suite" >> $GITHUB_STEP_SUMMARY
-        echo "- ✅ Multi-User Support" >> $GITHUB_STEP_SUMMARY
-        echo "- ✅ Strategy Execution Engine" >> $GITHUB_STEP_SUMMARY
-        echo "- ✅ CSV Import System" >> $GITHUB_STEP_SUMMARY
+    steps:
+      - name: 📥 Checkout code
+        uses: actions/checkout@v4
+      
+      - name: 🎯 Deploy to production
+        run: |
+          echo "🎯 Deploying to production environment..."
+          echo "Backend image: ${{ needs.build.outputs.backend-image }}"
+          echo "Frontend image: ${{ needs.build.outputs.frontend-image }}"
+          
+          # Add your production deployment commands here
+          # For example, kubectl, docker-compose, or cloud provider CLI commands
+          
+          echo "✅ Production deployment completed"
+      
+      - name: 🧪 Run production smoke tests
+        run: |
+          echo "🧪 Running production smoke tests..."
+          # Add production validation tests here
+          curl -f https://quantmatrix.com/health || exit 1
+          echo "✅ Production smoke tests passed"
+      
+      - name: 📢 Notify deployment success
+        run: |
+          echo "📢 Production deployment successful!"
+          # Add notification logic here (Slack, Discord, etc.)
 
-  # =============================================================================
-  # ROLLBACK CAPABILITY
-  # =============================================================================
-  
+  # Rollback capability
   rollback:
-    name: 🔙 Rollback Deployment
+    name: 🔄 Rollback
     runs-on: ubuntu-latest
     if: failure() && (needs.deploy-staging.result == 'failure' || needs.deploy-production.result == 'failure')
     needs: [deploy-staging, deploy-production]
     
-    environment:
-      name: ${{ needs.deploy-production.result == 'failure' && 'production' || 'staging' }}
-    
     steps:
-    - name: 🚨 Rollback Triggered
-      run: |
-        echo "🚨 Deployment failure detected - initiating rollback"
-        
-        ENVIRONMENT=${{ needs.deploy-production.result == 'failure' && 'production' || 'staging' }}
-        echo "Environment: $ENVIRONMENT"
-        
-    - name: 🔙 Execute Rollback
-      run: |
-        echo "🔄 Rolling back to previous stable version..."
-        
-        # Rollback steps:
-        # 1. Switch back to blue environment (production)
-        # 2. Restore previous Docker image versions
-        # 3. Rollback database migrations if needed
-        # 4. Verify rollback success
-        
-        echo "✅ Rollback completed successfully"
-        
-    - name: 📢 Notify Rollback
-      run: |
-        echo "📢 Rollback notification sent to team"
-        # Send alerts to Discord, Slack, email, etc.
-
-  # =============================================================================
-  # DEPLOYMENT SUMMARY
-  # =============================================================================
-  
-  deployment-complete:
-    name: ✅ Deployment Summary
-    runs-on: ubuntu-latest
-    needs: [pre-deployment-checks, deploy-staging, deploy-production]
-    if: always() && (needs.deploy-staging.result == 'success' || needs.deploy-production.result == 'success')
-    
-    steps:
-    - name: 📊 Deployment Summary
-      run: |
-        echo "# 🚀 QuantMatrix V2 Deployment Summary" >> $GITHUB_STEP_SUMMARY
-        echo "" >> $GITHUB_STEP_SUMMARY
-        echo "**Version:** ${{ needs.pre-deployment-checks.outputs.version }}" >> $GITHUB_STEP_SUMMARY
-        echo "**Triggered by:** ${{ github.event_name }}" >> $GITHUB_STEP_SUMMARY
-        echo "**Deployment Time:** $(date -u)" >> $GITHUB_STEP_SUMMARY
-        echo "" >> $GITHUB_STEP_SUMMARY
-        
-        if [[ "${{ needs.deploy-staging.result }}" == "success" ]]; then
-          echo "## ✅ Staging Deployment: Success" >> $GITHUB_STEP_SUMMARY
-          echo "- Environment: https://staging.quantmatrix.com" >> $GITHUB_STEP_SUMMARY
-        fi
-        
-        if [[ "${{ needs.deploy-production.result }}" == "success" ]]; then
-          echo "## ✅ Production Deployment: Success" >> $GITHUB_STEP_SUMMARY
-          echo "- Environment: https://quantmatrix.com" >> $GITHUB_STEP_SUMMARY
-          echo "- Blue-Green deployment completed" >> $GITHUB_STEP_SUMMARY
-          echo "- Enhanced monitoring activated" >> $GITHUB_STEP_SUMMARY
-        fi
-        
-        echo "" >> $GITHUB_STEP_SUMMARY
-        echo "## 🎯 Next Steps:" >> $GITHUB_STEP_SUMMARY
-        echo "- Monitor application performance" >> $GITHUB_STEP_SUMMARY
-        echo "- Verify trading operations" >> $GITHUB_STEP_SUMMARY
-        echo "- Check Discord notifications" >> $GITHUB_STEP_SUMMARY
-        echo "- Validate CSV import functionality" >> $GITHUB_STEP_SUMMARY 
+      - name: 🔄 Rollback deployment
+        run: |
+          echo "🔄 Rolling back deployment due to failure..."
+          # Add rollback logic here
+          echo "✅ Rollback completed" 

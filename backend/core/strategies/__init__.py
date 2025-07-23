@@ -1,1 +1,0 @@
-# QuantMatrix Trading Strategies Package 

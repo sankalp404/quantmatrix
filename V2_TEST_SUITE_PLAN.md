@@ -16,7 +16,7 @@
 
 ### **Test Structure Organization:**
 ```
-backend/tests_v2/
+backend/tests/
 ├── unit/                          # Fast, isolated tests
 │   ├── models/                    # V2 model tests
 │   │   ├── test_users.py
@@ -79,9 +79,9 @@ backend/tests_v2/
 
 **1. User Model Testing:**
 ```python
-# tests_v2/unit/models/test_users.py
+# tests/unit/models/test_users.py
 import pytest
-from backend.models_v2.users import User, UserRole
+from backend.models.users import User, UserRole
 
 class TestUserModel:
     def test_create_user_with_valid_data(self):
@@ -118,10 +118,10 @@ class TestUserModel:
 
 **2. ATR Calculator Testing (Critical!):**
 ```python
-# tests_v2/unit/services/analysis/test_atr_calculator.py
+# tests/unit/services/analysis/test_atr_calculator.py
 import pytest
 import pandas as pd
-from backend.services_v2.analysis.atr_calculator import ATRCalculator
+from backend.services.analysis.atr_calculator import ATRCalculator
 
 class TestATRCalculator:
     @pytest.fixture
@@ -166,9 +166,9 @@ class TestATRCalculator:
 
 **3. CSV Import Testing (Your 3 Files!):**
 ```python
-# tests_v2/unit/services/portfolio/test_csv_import_service.py
+# tests/unit/services/portfolio/test_csv_import_service.py
 import pytest
-from backend.models_v2.csv_import import IBKRCSVImporter, IBKR_CSV_IMPORT_CONFIGS
+from backend.models.csv_import import IBKRCSVImporter, IBKR_CSV_IMPORT_CONFIGS
 
 class TestCSVImportService:
     @pytest.fixture
@@ -313,7 +313,7 @@ class TestPerformance:
 
 ### **Coverage Command:**
 ```bash
-pytest --cov=backend/models_v2 --cov=backend/services_v2 --cov=backend/api_v2 --cov-report=html
+pytest --cov=backend/models --cov=backend/services --cov=backend/api --cov-report=html
 ```
 
 ---
@@ -354,7 +354,7 @@ Day 5: Documentation & CI/CD setup
 ### **Set Up Test Infrastructure:**
 ```bash
 # Create test structure
-mkdir -p backend/tests_v2/{unit/{models,services},integration,api,performance,fixtures}
+mkdir -p backend/tests/{unit/{models,services},integration,api,performance,fixtures}
 
 # Install test dependencies
 pip install pytest pytest-asyncio pytest-cov pytest-mock factory-boy

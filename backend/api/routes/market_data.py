@@ -1,110 +1,84 @@
-from fastapi import APIRouter, HTTPException
-from typing import Dict, Optional
+"""
+QuantMatrix V1 - Clean Market Data Routes
+Focused endpoints for market data and analysis.
+"""
+
+from fastapi import APIRouter, Depends, HTTPException, Query
+from sqlalchemy.orm import Session
+from typing import List, Optional, Dict, Any
 import logging
 from datetime import datetime
 
-from backend.services.market_data import market_data_service
+# dependencies
+from backend.database import get_db
+from backend.models.users import User
+from backend.services.market.market_data_service import MarketDataService
+from backend.services.analysis.atr_calculator import atr_calculator
+from backend.api.dependencies import get_current_user
 
 logger = logging.getLogger(__name__)
+
 router = APIRouter()
 
-@router.get("/stock-info/{symbol}")
-async def get_stock_info(symbol: str):
-    """Get comprehensive stock information including market cap, sector, etc."""
+# =============================================================================
+# MARKET DATA ENDPOINTS (Clean & Focused)
+# =============================================================================
+
+@router.get("/price/{symbol}")
+async def get_current_price(
+    symbol: str,
+    user: User = Depends(get_current_user)
+) -> Dict[str, Any]:
+    """Get current price for a symbol."""
     try:
-        if not symbol or len(symbol) > 10:
-            raise HTTPException(status_code=400, detail="Invalid symbol")
-        
-        symbol = symbol.upper().strip()
-        
-        # Get stock info from market data service
-        stock_info = await market_data_service.get_stock_info(symbol)
-        
-        if not stock_info:
-            raise HTTPException(status_code=404, detail=f"Stock info not found for {symbol}")
+        market_service = MarketDataService()
+        price = await market_service.get_current_price(symbol)
         
         return {
-            "status": "success",
-            "data": {
-                "symbol": symbol,
-                "company_name": stock_info.get('company_name', ''),
-                "market_cap": stock_info.get('market_cap', 0),
-                "sector": stock_info.get('sector', 'Other'),
-                "industry": stock_info.get('industry', 'Other'),
-                "country": stock_info.get('country', ''),
-                "currency": stock_info.get('currency', 'USD'),
-                "exchange": stock_info.get('exchange', ''),
-                "description": stock_info.get('description', ''),
-                "website": stock_info.get('website', ''),
-                "employees": stock_info.get('employees', 0),
-                "founded": stock_info.get('founded', ''),
-                "ceo": stock_info.get('ceo', ''),
-                "last_updated": datetime.now().isoformat()
-            },
+            "symbol": symbol,
+            "current_price": price,
             "timestamp": datetime.now().isoformat()
         }
         
-    except HTTPException:
-        raise
     except Exception as e:
-        logger.error(f"Error getting stock info for {symbol}: {e}")
-        raise HTTPException(status_code=500, detail=f"Failed to get stock info: {str(e)}")
+        logger.error(f"❌ Price error for {symbol}: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
 
-@router.get("/quote/{symbol}")
-async def get_stock_quote(symbol: str):
-    """Get real-time stock quote."""
+@router.get("/atr/{symbol}")
+async def get_atr_data(
+    symbol: str,
+    periods: int = Query(14, description="ATR calculation periods"),
+    user: User = Depends(get_current_user)
+) -> Dict[str, Any]:
+    """Get ATR data for a symbol."""
     try:
-        if not symbol or len(symbol) > 10:
-            raise HTTPException(status_code=400, detail="Invalid symbol")
-        
-        symbol = symbol.upper().strip()
-        
-        # Get current price from market data service
-        current_price = await market_data_service.get_current_price(symbol)
-        
-        if current_price is None:
-            raise HTTPException(status_code=404, detail=f"Quote not found for {symbol}")
+        atr_data = await atr_calculator.calculate_options_atr(symbol)
         
         return {
-            "status": "success",
-            "data": {
-                "symbol": symbol,
-                "price": current_price,
-                "timestamp": datetime.now().isoformat()
-            },
+            "symbol": symbol,
+            "atr_data": atr_data,
+            "periods": periods,
             "timestamp": datetime.now().isoformat()
         }
         
-    except HTTPException:
-        raise
     except Exception as e:
-        logger.error(f"Error getting quote for {symbol}: {e}")
-        raise HTTPException(status_code=500, detail=f"Failed to get quote: {str(e)}")
+        logger.error(f"❌ ATR error for {symbol}: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
 
-@router.get("/health")
-async def market_data_health():
-    """Health check for market data services."""
-    try:
-        # Test with a simple symbol
-        test_price = await market_data_service.get_current_price('AAPL')
-        
-        return {
-            "status": "success",
-            "data": {
-                "market_data_service": "operational" if test_price else "degraded",
-                "test_symbol": "AAPL",
-                "test_price": test_price,
-                "timestamp": datetime.now().isoformat()
-            }
-        }
-        
-    except Exception as e:
-        logger.error(f"Market data health check failed: {e}")
-        return {
-            "status": "error",
-            "data": {
-                "market_data_service": "failed",
-                "error": str(e),
-                "timestamp": datetime.now().isoformat()
-            }
-        } 
+# =============================================================================
+# PLACEHOLDER ROUTES (To be implemented)
+# =============================================================================
+
+@router.get("/historical/{symbol}")
+async def get_historical_data(
+    symbol: str,
+    days: int = Query(30, description="Number of days"),
+    user: User = Depends(get_current_user)
+) -> Dict[str, Any]:
+    """Get historical price data."""
+    # TODO: Implement with market data service
+    return {
+        "symbol": symbol,
+        "message": "Historical data endpoint - to be implemented",
+        "days": days
+    } 

@@ -23,7 +23,7 @@ Current Duplicates:
 
 ### **Clean Service Organization:**
 ```
-backend/services_v2/
+backend/services/
 ├── clients/                    # External API clients
 │   ├── ibkr_client.py         # SINGLE IBKR client (best of current two)
 │   ├── tastytrade_client.py   # SINGLE TastyTrade client  
@@ -113,13 +113,13 @@ backend/services_v2/
 ### **Phase 1: Create Clean V2 Services (Week 1)**
 ```bash
 # Create new services structure
-mkdir -p backend/services_v2/{clients,market,strategies,portfolio,notifications,analysis}
+mkdir -p backend/services/{clients,market,strategies,portfolio,notifications,analysis}
 
 # Consolidate best implementations
-cp enhanced_ibkr_client.py → services_v2/clients/ibkr_client.py
-cp enhanced_tastytrade_client.py → services_v2/clients/tastytrade_client.py  
-cp market_data.py → services_v2/market/market_data_service.py
-cp production_atr_calculator.py → services_v2/analysis/atr_calculator.py
+cp enhanced_ibkr_client.py → services/clients/ibkr_client.py
+cp enhanced_tastytrade_client.py → services/clients/tastytrade_client.py  
+cp market_data.py → services/market/market_data_service.py
+cp production_atr_calculator.py → services/analysis/atr_calculator.py
 ```
 
 ### **Phase 2: Update Import Paths (Week 1)**
@@ -128,7 +128,7 @@ cp production_atr_calculator.py → services_v2/analysis/atr_calculator.py
 from backend.services.ibkr_client import ibkr_client
 
 # To:
-from backend.services_v2.clients.ibkr_client import ibkr_client
+from backend.services.clients.ibkr_client import ibkr_client
 ```
 
 ### **Phase 3: Test & Validate (Week 1)**
@@ -145,7 +145,7 @@ from backend.services_v2.clients.ibkr_client import ibkr_client
 mv backend/services backend/services_old_backup
 
 # Rename new structure
-mv backend/services_v2 backend/services
+mv backend/services backend/services
 ```
 
 ---

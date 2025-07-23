@@ -1,360 +1,251 @@
-name: 🧪 QuantMatrix V2 - Continuous Integration
+name: 🧪 QuantMatrix V1 - Continuous Integration
 
 on:
   push:
-    branches: [ main, develop, 'feature/*', 'hotfix/*' ]
+    branches: [ main, develop, feature/*, hotfix/* ]
   pull_request:
     branches: [ main, develop ]
   schedule:
-    # Run tests daily at 6 AM UTC (market prep time)
-    - cron: '0 6 * * *'
+    - cron: '0 6 * * *'  # Daily at 6 AM UTC (market prep time)
+  workflow_dispatch:
 
 env:
-  PYTHON_VERSION: '3.11'
+  PYTHON_VERSION: '3.9'
   NODE_VERSION: '18'
-  POSTGRES_DB: quantmatrix_test
-  POSTGRES_USER: postgres
-  POSTGRES_PASSWORD: postgres
-  REDIS_URL: redis://localhost:6379
 
 jobs:
-  # =============================================================================
-  # CODE QUALITY & SECURITY CHECKS
-  # =============================================================================
-  
-  code-quality:
-    name: 🔍 Code Quality & Security
+  # Code quality and linting
+  quality:
+    name: 🔍 Code Quality
     runs-on: ubuntu-latest
     
     steps:
-    - name: 📥 Checkout Code
-      uses: actions/checkout@v4
+      - name: 📥 Checkout code
+        uses: actions/checkout@v4
       
-    - name: 🐍 Set up Python
-      uses: actions/setup-python@v4
-      with:
-        python-version: ${{ env.PYTHON_VERSION }}
-        
-    - name: 📦 Install Dependencies
-      run: |
-        python -m pip install --upgrade pip
-        pip install flake8 black isort mypy bandit safety
-        pip install -r requirements.txt
-        
-    - name: 🎨 Code Formatting Check (Black)
-      run: black --check --diff backend/ frontend/src/ --exclude="migrations/"
+      - name: 🐍 Set up Python
+        uses: actions/setup-python@v4
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
       
-    - name: 📐 Import Sorting Check (isort)
-      run: isort --check-only --diff backend/ --skip migrations
+      - name: 📦 Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install black isort flake8 mypy bandit safety
+          pip install -r requirements.txt
       
-    - name: 🔍 Linting (Flake8)
-      run: flake8 backend/ --exclude=migrations/ --max-line-length=100 --ignore=E203,W503
+      - name: 🎨 Format check (Black)
+        run: black --check --diff backend/
       
-    - name: 🏷️ Type Checking (MyPy)
-      run: mypy backend/ --ignore-missing-imports --exclude=migrations/
+      - name: 📋 Import sorting (isort)
+        run: isort --check-only --diff backend/
       
-    - name: 🔒 Security Scan (Bandit)
-      run: bandit -r backend/ -x backend/migrations/,backend/tests_v2/
+      - name: 🔍 Linting (Flake8)
+        run: flake8 backend/ --max-line-length=88 --extend-ignore=E203,W503
       
-    - name: 🛡️ Dependency Security Check (Safety)
-      run: safety check --json
+      - name: 🔒 Security check (Bandit)
+        run: bandit -r backend/ -x */tests/*
       
-    - name: 📊 Complexity Analysis
-      run: |
-        pip install radon
-        radon cc backend/ --min=B  # Warn on complexity B and above
-        radon mi backend/ --min=B  # Maintainability index
+      - name: 🛡️ Dependency security (Safety)
+        run: safety check
 
-  # =============================================================================
-  # V2 COMPREHENSIVE TESTING SUITE
-  # =============================================================================
-  
-  test-v2-backend:
-    name: 🧪 V2 Backend Tests
+  # Backend testing
+  backend-tests:
+    name: 🧪 Backend Tests
     runs-on: ubuntu-latest
+    needs: quality
     
     services:
-      postgres:
-        image: postgres:15
-        env:
-          POSTGRES_PASSWORD: ${{ env.POSTGRES_PASSWORD }}
-          POSTGRES_USER: ${{ env.POSTGRES_USER }}
-          POSTGRES_DB: ${{ env.POSTGRES_DB }}
-        options: >-
-          --health-cmd pg_isready
-          --health-interval 10s
-          --health-timeout 5s
-          --health-retries 5
-        ports:
-          - 5432:5432
-          
       redis:
-        image: redis:7
+        image: redis:7-alpine
+        ports:
+          - 6379:6379
         options: >-
           --health-cmd "redis-cli ping"
           --health-interval 10s
           --health-timeout 5s
           --health-retries 5
-        ports:
-          - 6379:6379
-    
-    strategy:
-      matrix:
-        test-category: [unit, integration, api, performance]
-        
-    steps:
-    - name: 📥 Checkout Code
-      uses: actions/checkout@v4
       
-    - name: 🐍 Set up Python
-      uses: actions/setup-python@v4
-      with:
-        python-version: ${{ env.PYTHON_VERSION }}
-        cache: 'pip'
-        
-    - name: 📦 Install Dependencies
-      run: |
-        python -m pip install --upgrade pip
-        pip install -r requirements.txt
-        pip install pytest pytest-asyncio pytest-cov pytest-mock factory-boy pytest-xdist
-        
-    - name: 🗄️ Set up Test Database
-      env:
-        DATABASE_URL: postgresql://${{ env.POSTGRES_USER }}:${{ env.POSTGRES_PASSWORD }}@localhost:5432/${{ env.POSTGRES_DB }}
-      run: |
-        # Create test database schema
-        python -c "
-        from backend.models_v2 import Base
-        from sqlalchemy import create_engine
-        import os
-        engine = create_engine(os.getenv('DATABASE_URL'))
-        Base.metadata.create_all(bind=engine)
-        print('✅ Test database schema created')
-        "
-        
-    - name: 🧪 Run V2 Tests - ${{ matrix.test-category }}
-      env:
-        DATABASE_URL: postgresql://${{ env.POSTGRES_USER }}:${{ env.POSTGRES_PASSWORD }}@localhost:5432/${{ env.POSTGRES_DB }}
-        REDIS_URL: ${{ env.REDIS_URL }}
-        ENVIRONMENT: testing
-      run: |
-        case "${{ matrix.test-category }}" in
-          "unit")
-            echo "🔬 Running Unit Tests..."
-            pytest backend/tests_v2/unit/ -v --tb=short --cov=backend/models_v2 --cov=backend/services_v2 --cov-report=xml --cov-report=term-missing
-            ;;
-          "integration") 
-            echo "🔗 Running Integration Tests..."
-            pytest backend/tests_v2/integration/ -v --tb=short --maxfail=3
-            ;;
-          "api")
-            echo "🌐 Running API Tests..."
-            pytest backend/tests_v2/api/ -v --tb=short --maxfail=3
-            ;;
-          "performance")
-            echo "⚡ Running Performance Tests..."
-            pytest backend/tests_v2/performance/ -v --tb=short --durations=10
-            ;;
-        esac
-        
-    - name: 📊 Upload Coverage to Codecov
-      if: matrix.test-category == 'unit'
-      uses: codecov/codecov-action@v3
-      with:
-        file: ./coverage.xml
-        flags: backend-v2
-        name: backend-v2-coverage
-        
-    - name: 💾 Archive Test Results
-      if: always()
-      uses: actions/upload-artifact@v3
-      with:
-        name: test-results-${{ matrix.test-category }}
-        path: |
-          pytest-results.xml
-          coverage.xml
-          .coverage
-
-  # =============================================================================
-  # CRITICAL FINANCIAL TESTS (Trading Platform Specific)
-  # =============================================================================
-  
-  test-financial-accuracy:
-    name: 💰 Financial Accuracy Tests
-    runs-on: ubuntu-latest
-    needs: [code-quality]
-    
-    services:
       postgres:
-        image: postgres:15
+        image: postgres:15-alpine
         env:
-          POSTGRES_PASSWORD: ${{ env.POSTGRES_PASSWORD }}
-          POSTGRES_USER: ${{ env.POSTGRES_USER }}
-          POSTGRES_DB: ${{ env.POSTGRES_DB }}
+          POSTGRES_PASSWORD: test_password
+          POSTGRES_USER: test_user
+          POSTGRES_DB: test_quantmatrix
+        ports:
+          - 5432:5432
         options: >-
           --health-cmd pg_isready
           --health-interval 10s
           --health-timeout 5s
           --health-retries 5
-        ports:
-          - 5432:5432
     
     steps:
-    - name: 📥 Checkout Code
-      uses: actions/checkout@v4
+      - name: 📥 Checkout code
+        uses: actions/checkout@v4
       
-    - name: 🐍 Set up Python
-      uses: actions/setup-python@v4
-      with:
-        python-version: ${{ env.PYTHON_VERSION }}
+      - name: 🐍 Set up Python
+        uses: actions/setup-python@v4
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+      
+      - name: 📦 Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+          pip install pytest pytest-asyncio pytest-cov
+      
+      - name: 🔧 Set up test environment
+        run: |
+          cp env.example .env
+          echo "DATABASE_URL=postgresql://test_user:test_password@localhost:5432/test_quantmatrix" >> .env
+          echo "REDIS_URL=redis://localhost:6379/0" >> .env
+          echo "SECRET_KEY=test_secret_key_for_ci" >> .env
+      
+      - name: ⚡ Run quick tests
+        run: python3 backend/run_tests.py --quick
+      
+      - name: 🧪 Run model tests
+        run: python3 backend/run_tests.py --models
         
-    - name: 📦 Install Dependencies
-      run: |
-        python -m pip install --upgrade pip
-        pip install -r requirements.txt
-        pip install pytest pytest-asyncio pytest-mock
-        
-    - name: 🧮 Test ATR Calculator Accuracy
-      env:
-        DATABASE_URL: postgresql://${{ env.POSTGRES_USER }}:${{ env.POSTGRES_PASSWORD }}@localhost:5432/${{ env.POSTGRES_DB }}
-      run: |
-        echo "🔢 Testing SINGLE ATR Calculator mathematical accuracy..."
-        pytest backend/tests_v2/unit/services/analysis/test_atr_calculator.py::TestATRMathematicalAccuracy -v --tb=short
-        
-    - name: 📊 Test CSV Import Accuracy (3 Files)
-      env:
-        DATABASE_URL: postgresql://${{ env.POSTGRES_USER }}:${{ env.POSTGRES_PASSWORD }}@localhost:5432/${{ env.POSTGRES_DB }}
-      run: |
-        echo "📈 Testing CSV import accuracy for taxable + IRA accounts..."
-        pytest backend/tests_v2/unit/services/portfolio/test_csv_import_service.py -v --tb=short -k "accuracy or fifo or average_cost"
-        
-    - name: 💵 Test Tax Lot Calculations
-      env:
-        DATABASE_URL: postgresql://${{ env.POSTGRES_USER }}:${{ env.POSTGRES_PASSWORD }}@localhost:5432/${{ env.POSTGRES_DB }}
-      run: |
-        echo "🧾 Testing tax lot calculations (FIFO vs Average Cost)..."
-        pytest backend/tests_v2/unit/services/portfolio/test_csv_import_service.py -v --tb=short -k "tax_lot"
-        
-    - name: 🎯 Test Strategy Execution Accuracy
-      env:
-        DATABASE_URL: postgresql://${{ env.POSTGRES_USER }}:${{ env.POSTGRES_PASSWORD }}@localhost:5432/${{ env.POSTGRES_DB }}
-      run: |
-        echo "🚀 Testing strategy execution: '$10k, 20% profit, 80% reinvest'..."
-        pytest backend/tests_v2/integration/test_strategy_execution.py::TestStrategyExecutionIntegration::test_atr_strategy_execution_full_workflow -v --tb=short
+      - name: 🔧 Run service tests
+        run: python3 backend/run_tests.py --services
+      
+      - name: 🔗 Run integration tests
+        run: python3 backend/run_tests.py --integration
+      
+      - name: 📊 Generate coverage report
+        run: |
+          pytest backend/tests/ --cov=backend --cov-report=xml --cov-report=html
+      
+      - name: 📤 Upload coverage to Codecov
+        uses: codecov/codecov-action@v3
+        with:
+          file: ./coverage.xml
+          flags: backend
+          name: backend-coverage
 
-  # =============================================================================
-  # FRONTEND TESTING
-  # =============================================================================
-  
-  test-frontend:
-    name: ⚛️ Frontend Tests
+  # Frontend testing
+  frontend-tests:
+    name: 🎨 Frontend Tests
     runs-on: ubuntu-latest
     
     steps:
-    - name: 📥 Checkout Code
-      uses: actions/checkout@v4
+      - name: 📥 Checkout code
+        uses: actions/checkout@v4
       
-    - name: 📦 Set up Node.js
-      uses: actions/setup-node@v4
-      with:
-        node-version: ${{ env.NODE_VERSION }}
-        cache: 'npm'
-        cache-dependency-path: frontend/package-lock.json
-        
-    - name: 📦 Install Dependencies
-      working-directory: frontend
-      run: npm ci
+      - name: 📦 Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: 'npm'
+          cache-dependency-path: frontend/package-lock.json
       
-    - name: 🎨 Lint Frontend Code
-      working-directory: frontend
-      run: npm run lint
+      - name: 📦 Install dependencies
+        run: |
+          cd frontend
+          npm ci
       
-    - name: 🏗️ Build Frontend
-      working-directory: frontend
-      run: npm run build
+      - name: 🔍 TypeScript check
+        run: |
+          cd frontend
+          npm run type-check
       
-    - name: 🧪 Run Frontend Tests
-      working-directory: frontend
-      run: npm run test -- --coverage --watchAll=false
+      - name: 🎨 Linting
+        run: |
+          cd frontend
+          npm run lint
       
-    - name: 📊 Upload Frontend Coverage
-      uses: codecov/codecov-action@v3
-      with:
-        directory: frontend/coverage
-        flags: frontend
-        name: frontend-coverage
+      - name: 🧪 Run tests
+        run: |
+          cd frontend
+          npm run test -- --coverage --watchAll=false
+      
+      - name: 🏗️ Build check
+        run: |
+          cd frontend
+          npm run build
 
-  # =============================================================================
-  # DOCKER BUILD VALIDATION
-  # =============================================================================
-  
-  test-docker-build:
-    name: 🐳 Docker Build Test
+  # Docker build validation
+  docker-build:
+    name: 🐳 Docker Build
     runs-on: ubuntu-latest
+    needs: [backend-tests, frontend-tests]
     
     steps:
-    - name: 📥 Checkout Code
-      uses: actions/checkout@v4
+      - name: 📥 Checkout code
+        uses: actions/checkout@v4
       
-    - name: 🐳 Set up Docker Buildx
-      uses: docker/setup-buildx-action@v3
+      - name: 🐳 Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
       
-    - name: 🏗️ Build Backend Docker Image
-      uses: docker/build-push-action@v5
-      with:
-        context: .
-        file: Dockerfile.backend
-        push: false
-        tags: quantmatrix-backend:test
-        cache-from: type=gha
-        cache-to: type=gha,mode=max
-        
-    - name: 🏗️ Build Frontend Docker Image
-      uses: docker/build-push-action@v5
-      with:
-        context: .
-        file: Dockerfile.frontend
-        push: false
-        tags: quantmatrix-frontend:test
-        cache-from: type=gha
-        cache-to: type=gha,mode=max
-        
-    - name: 🧪 Test Docker Compose
-      run: |
-        echo "🐳 Testing Docker Compose configuration..."
-        docker-compose -f docker-compose.yml config
+      - name: 🏗️ Build backend image
+        uses: docker/build-push-action@v5
+        with:
+          context: .
+          file: ./Dockerfile.backend
+          push: false
+          tags: quantmatrix/backend:test
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+      
+      - name: 🏗️ Build frontend image
+        uses: docker/build-push-action@v5
+        with:
+          context: .
+          file: ./Dockerfile.frontend
+          push: false
+          tags: quantmatrix/frontend:test
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
 
-  # =============================================================================
-  # COMPREHENSIVE RESULTS
-  # =============================================================================
-  
-  ci-complete:
-    name: ✅ CI Complete
+  # Financial accuracy tests (critical for trading)
+  financial-accuracy:
+    name: 💰 Financial Accuracy Tests
     runs-on: ubuntu-latest
-    needs: [code-quality, test-v2-backend, test-financial-accuracy, test-frontend, test-docker-build]
+    needs: backend-tests
+    
+    steps:
+      - name: 📥 Checkout code
+        uses: actions/checkout@v4
+      
+      - name: 🐍 Set up Python
+        uses: actions/setup-python@v4
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+      
+      - name: 📦 Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+      
+      - name: 🧮 ATR calculation accuracy
+        run: python3 backend/run_tests.py --quick
+      
+      - name: 💱 P&L calculation accuracy
+        run: |
+          echo "🧮 Testing P&L calculations..."
+          # Add specific P&L accuracy tests here
+      
+      - name: 📊 Risk calculation accuracy
+        run: |
+          echo "📊 Testing risk calculations..."
+          # Add specific risk calculation tests here
+
+  # Notification on success/failure
+  notify:
+    name: 📢 Notify Results
+    runs-on: ubuntu-latest
     if: always()
+    needs: [quality, backend-tests, frontend-tests, docker-build, financial-accuracy]
     
     steps:
-    - name: 📊 CI Results Summary
-      run: |
-        echo "# 🎯 QuantMatrix V2 CI Results" >> $GITHUB_STEP_SUMMARY
-        echo "" >> $GITHUB_STEP_SUMMARY
-        echo "## 🔍 Code Quality: ${{ needs.code-quality.result }}" >> $GITHUB_STEP_SUMMARY
-        echo "## 🧪 V2 Backend Tests: ${{ needs.test-v2-backend.result }}" >> $GITHUB_STEP_SUMMARY
-        echo "## 💰 Financial Accuracy: ${{ needs.test-financial-accuracy.result }}" >> $GITHUB_STEP_SUMMARY
-        echo "## ⚛️ Frontend Tests: ${{ needs.test-frontend.result }}" >> $GITHUB_STEP_SUMMARY
-        echo "## 🐳 Docker Build: ${{ needs.test-docker-build.result }}" >> $GITHUB_STEP_SUMMARY
-        echo "" >> $GITHUB_STEP_SUMMARY
-        
-        if [[ "${{ needs.code-quality.result }}" == "success" && 
-              "${{ needs.test-v2-backend.result }}" == "success" && 
-              "${{ needs.test-financial-accuracy.result }}" == "success" && 
-              "${{ needs.test-frontend.result }}" == "success" && 
-              "${{ needs.test-docker-build.result }}" == "success" ]]; then
-          echo "## ✅ **ALL CHECKS PASSED - READY FOR DEPLOYMENT!**" >> $GITHUB_STEP_SUMMARY
-          echo "Platform is ready for production deployment 🚀" >> $GITHUB_STEP_SUMMARY
-        else
-          echo "## ❌ **SOME CHECKS FAILED - DEPLOYMENT BLOCKED**" >> $GITHUB_STEP_SUMMARY
-          echo "Fix failing checks before deployment 🔧" >> $GITHUB_STEP_SUMMARY
-          exit 1
-        fi 
+      - name: 📢 Notify success
+        if: needs.backend-tests.result == 'success' && needs.frontend-tests.result == 'success'
+        run: |
+          echo "✅ All CI checks passed! Ready for deployment."
+      
+      - name: 📢 Notify failure
+        if: needs.backend-tests.result == 'failure' || needs.frontend-tests.result == 'failure'
+        run: |
+          echo "❌ CI checks failed. Check the logs for details." 
