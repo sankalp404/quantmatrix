@@ -9,10 +9,12 @@ from collections import defaultdict
 from sqlalchemy.orm import Session
 from sqlalchemy import and_, func, desc
 import random # Added for tax optimization simulation
+import pandas as pd
 
 from backend.models import get_db, SessionLocal
 from backend.models.portfolio import Account, Holding, PortfolioSnapshot
 from backend.models.tax_lots import TaxLot
+from backend.models.transactions import Dividend
 from backend.services.portfolio_sync import portfolio_sync_service
 from backend.services.ibkr_client import ibkr_client
 from backend.services.market_data import market_data_service
@@ -905,7 +907,7 @@ async def get_all_statements(days: int = 30, db: Session = Depends(get_db)):
             
             transactions_query = db.query(Transaction).filter(
                 Transaction.transaction_date >= cutoff_date
-            ).order_by(Transaction.transaction_date.desc()).limit(100)
+            ).order_by(Transaction.transaction_date.desc()).limit(1000)  # Increased from 100 to 1000
             
             db_transactions = transactions_query.all()
             
@@ -1202,17 +1204,138 @@ async def get_dividend_history(account_id: str, days: int = 365):
 
 @router.get("/dividends")
 async def get_dividends(account_id: Optional[str] = None, days: int = 365, db: Session = Depends(get_db)):
-    """Get dividend payments - Returns empty results until real IBKR dividend data is synced"""
+    """Get dividend payments from real IBKR data"""
     try:
-        # NO FAKE DATA - Return empty dividend results
-        logger.info("No dividend data available - returning empty results (no fake data)")
+        logger.info(f"Fetching real dividend data for {days} days")
         
-        return {
-            "status": "success",
-            "data": {
-                "dividends": [],
-                "projections": [],
-                "summary": {
+        # Get all dividends from IBKR (if no specific account_id provided, get from primary account)
+        if not account_id:
+            # Default to IBKR account U19490886 based on the context from the user
+            account_id = "U19490886"
+        
+        try:
+            # Fetch real dividend data from IBKR
+            dividends = await ibkr_client.get_dividend_history(account_id, days)
+            
+            if dividends:
+                # Calculate summary statistics
+                total_dividends = sum(d.get('total_dividend', 0) for d in dividends)
+                total_tax_withheld = sum(d.get('tax_withheld', 0) for d in dividends)
+                net_dividends = sum(d.get('net_dividend', 0) for d in dividends)
+                
+                # Calculate additional metrics
+                dividend_stocks = set(d.get('symbol', '') for d in dividends)
+                avg_dividend = total_dividends / len(dividends) if dividends else 0
+                
+                # Estimate annual income (extrapolate based on days)
+                annual_multiplier = 365 / days if days > 0 else 1
+                estimated_annual_income = total_dividends * annual_multiplier
+                
+                summary = {
+                    "accounts_processed": 1,
+                    "total_dividend_payments": len(dividends),
+                    "total_gross_dividends": round(total_dividends, 2),
+                    "total_tax_withheld": round(total_tax_withheld, 2),
+                    "total_net_dividends": round(net_dividends, 2),
+                    "average_dividend": round(avg_dividend, 2),
+                    "dividend_yield": 0.0,  # Would need portfolio value to calculate
+                    "dividend_stocks_count": len(dividend_stocks),
+                    "total_annual_income": round(estimated_annual_income, 2),
+                    "avg_monthly_income": round(estimated_annual_income / 12, 2),
+                    "next_month_income": 0.0,  # Would need upcoming dividend data
+                    "growth_rate": 0.0,  # Would need historical comparison
+                    "message": f"Real dividend data from IBKR account {account_id}"
+                }
+                
+                logger.info(f"✅ Found {len(dividends)} dividend payments totaling ${total_dividends:.2f}")
+                
+            else:
+                # No dividends found but connection successful
+                summary = {
+                    "accounts_processed": 1,
+                    "total_dividend_payments": 0,
+                    "total_gross_dividends": 0.0,
+                    "total_tax_withheld": 0.0,
+                    "total_net_dividends": 0.0,
+                    "average_dividend": 0.0,
+                    "dividend_yield": 0.0,
+                    "dividend_stocks_count": 0,
+                    "total_annual_income": 0.0,
+                    "avg_monthly_income": 0.0,
+                    "next_month_income": 0.0,
+                    "growth_rate": 0.0,
+                    "message": f"No dividend payments found in IBKR account {account_id} for the last {days} days. This could mean: 1) No dividend-paying stocks held, 2) No dividends paid during this period, 3) Positions acquired after ex-dividend dates."
+                }
+                
+                logger.info(f"❌ No dividend payments found in account {account_id} for {days} days")
+
+        except Exception as ibkr_error:
+            logger.error(f"IBKR dividend fetch failed: {ibkr_error}")
+            
+            # Fallback to database data if IBKR fails
+            try:
+                logger.info("Falling back to database dividend data...")
+                db_dividends = db.query(Dividend).order_by(Dividend.ex_date.desc()).limit(100).all()
+                
+                if db_dividends:
+                    dividends = []
+                    for div in db_dividends:
+                        dividends.append({
+                            'symbol': div.symbol,
+                            'ex_date': div.ex_date.strftime('%Y-%m-%d'),
+                            'pay_date': div.pay_date.strftime('%Y-%m-%d') if div.pay_date else None,
+                            'dividend_per_share': float(div.dividend_per_share),
+                            'total_dividend': float(div.total_dividend),
+                            'tax_withheld': float(div.tax_withheld or 0),
+                            'net_dividend': float(div.total_dividend) - float(div.tax_withheld or 0),
+                            'account': str(div.account_id),
+                            'currency': div.currency,
+                            'source': f"{div.source}_db"
+                        })
+                    
+                    total_dividends = sum(d['total_dividend'] for d in dividends)
+                    total_tax_withheld = sum(d['tax_withheld'] for d in dividends)
+                    net_dividends = sum(d['net_dividend'] for d in dividends)
+                    
+                    summary = {
+                        "accounts_processed": 1,
+                        "total_dividend_payments": len(dividends),
+                        "total_gross_dividends": round(total_dividends, 2),
+                        "total_tax_withheld": round(total_tax_withheld, 2),
+                        "total_net_dividends": round(net_dividends, 2),
+                        "average_dividend": round(total_dividends / len(dividends), 2) if dividends else 0,
+                        "dividend_yield": 0.0,
+                        "dividend_stocks_count": len(set(d['symbol'] for d in dividends)),
+                        "total_annual_income": round(total_dividends * (365 / days), 2),
+                        "avg_monthly_income": round(total_dividends * (365 / days) / 12, 2),
+                        "next_month_income": 0.0,
+                        "growth_rate": 0.0,
+                        "message": f"Database dividend data - {len(dividends)} payments (IBKR connection failed)"
+                    }
+                    
+                else:
+                    # No database data either
+                    dividends = []
+                    summary = {
+                        "accounts_processed": 0,
+                        "total_dividend_payments": 0,
+                        "total_gross_dividends": 0.0,
+                        "total_tax_withheld": 0.0,
+                        "total_net_dividends": 0.0,
+                        "average_dividend": 0.0,
+                        "dividend_yield": 0.0,
+                        "dividend_stocks_count": 0,
+                        "total_annual_income": 0.0,
+                        "avg_monthly_income": 0.0,
+                        "next_month_income": 0.0,
+                        "growth_rate": 0.0,
+                        "message": f"No dividend data available - IBKR failed: {str(ibkr_error)}"
+                    }
+                    
+            except Exception as db_error:
+                logger.error(f"Database fallback also failed: {db_error}")
+                dividends = []
+                summary = {
                     "accounts_processed": 0,
                     "total_dividend_payments": 0,
                     "total_gross_dividends": 0.0,
@@ -1225,8 +1348,15 @@ async def get_dividends(account_id: Optional[str] = None, days: int = 365, db: S
                     "avg_monthly_income": 0.0,
                     "next_month_income": 0.0,
                     "growth_rate": 0.0,
-                    "message": "No dividend history available. Connect real IBKR account with dividend payments."
-                },
+                    "message": f"Failed to fetch dividend data from IBKR: {str(ibkr_error)}"
+                }
+        
+        return {
+            "status": "success",
+            "data": {
+                "dividends": dividends,
+                "projections": [],
+                "summary": summary,
                 "upcoming_dividends": [],
                 "analysis": {
                     "quarterly_trend": [],
@@ -1239,6 +1369,346 @@ async def get_dividends(account_id: Optional[str] = None, days: int = 365, db: S
     except Exception as e:
         logger.error(f"Error getting dividends: {e}")
         raise HTTPException(status_code=500, detail=f"Failed to get dividends: {str(e)}")
+
+@router.post("/dividends/sync")
+async def sync_dividends_to_database(account_id: Optional[str] = None, days: int = 365, db: Session = Depends(get_db)):
+    """Sync dividend data from IBKR to database for better performance and projections"""
+    try:
+        if not account_id:
+            account_id = "U19490886"  # Default IBKR account
+            
+        logger.info(f"🔄 Syncing dividend data to database for account {account_id}")
+        
+        # Get fresh dividend data from IBKR
+        dividends = await ibkr_client.get_dividend_history(account_id, days)
+        
+        if not dividends:
+            return {
+                "status": "success",
+                "message": "No dividends found from IBKR",
+                "synced_count": 0
+            }
+        
+        # Find or create account record
+        account = db.query(Account).filter(Account.account_number == account_id).first()
+        if not account:
+            # Create account if it doesn't exist
+            account = Account(
+                account_number=account_id,
+                account_type="taxable",  # Default
+                broker="IBKR",
+                is_active=True
+            )
+            db.add(account)
+            db.commit()
+            db.refresh(account)
+            logger.info(f"✅ Created account record for {account_id}")
+        
+        synced_count = 0
+        skipped_count = 0
+        error_count = 0
+        
+        for dividend_data in dividends:
+            # Use individual transaction for each dividend to avoid cascade failures
+            individual_db = SessionLocal()
+            try:
+                logger.info(f"🔍 Processing dividend: {dividend_data['symbol']} - ${dividend_data['total_dividend']} on {dividend_data['ex_date']}")
+                
+                # Re-get account in this transaction
+                individual_account = individual_db.query(Account).filter(Account.account_number == account_id).first()
+                if not individual_account:
+                    logger.error(f"❌ Account {account_id} not found in individual transaction")
+                    error_count += 1
+                    continue
+                
+                # Parse and validate date first
+                try:
+                    ex_date_parsed = pd.to_datetime(dividend_data['ex_date']).replace(tzinfo=None)
+                except Exception as date_error:
+                    logger.error(f"❌ Invalid ex_date for {dividend_data['symbol']}: {dividend_data['ex_date']} - {date_error}")
+                    error_count += 1
+                    continue
+                
+                # Check if dividend already exists (avoid duplicates)
+                existing = individual_db.query(Dividend).filter(
+                    Dividend.account_id == individual_account.id,
+                    Dividend.symbol == dividend_data['symbol'],
+                    Dividend.ex_date == ex_date_parsed
+                ).first()
+                
+                if existing:
+                    logger.info(f"⏭️ Skipping duplicate dividend for {dividend_data['symbol']} on {dividend_data['ex_date']}")
+                    skipped_count += 1
+                    continue
+                
+                # Calculate required fields with validation
+                try:
+                    total_dividend = float(dividend_data['total_dividend'])
+                    tax_withheld = float(dividend_data.get('tax_withheld', 0))
+                    net_dividend = total_dividend - tax_withheld
+                    dividend_per_share = float(dividend_data['dividend_per_share'])
+                    
+                    # Calculate shares if missing, with validation
+                    if dividend_per_share == 0:
+                        logger.error(f"❌ Zero dividend_per_share for {dividend_data['symbol']}")
+                        error_count += 1
+                        continue
+                        
+                    shares_held = float(dividend_data.get('shares', total_dividend / dividend_per_share))
+                    
+                except (ValueError, ZeroDivisionError) as calc_error:
+                    logger.error(f"❌ Error calculating fields for {dividend_data['symbol']}: {calc_error}")
+                    error_count += 1
+                    continue
+                
+                # Create new dividend record using correct field names
+                dividend = Dividend(
+                    account_id=individual_account.id,
+                    external_id=dividend_data.get('id', f"ibkr_{dividend_data['symbol']}_{dividend_data['ex_date']}"),
+                    symbol=dividend_data['symbol'],
+                    ex_date=ex_date_parsed,
+                    pay_date=pd.to_datetime(dividend_data['pay_date']).replace(tzinfo=None) if dividend_data.get('pay_date') else None,
+                    dividend_per_share=dividend_per_share,
+                    shares_held=shares_held,
+                    total_dividend=total_dividend,
+                    tax_withheld=tax_withheld,
+                    net_dividend=net_dividend,
+                    currency=dividend_data.get('currency', 'USD'),
+                    frequency=dividend_data.get('frequency', 'quarterly'),
+                    dividend_type=dividend_data.get('dividend_type', 'ordinary'),
+                    source=dividend_data.get('source', 'ibkr'),
+                    synced_at=datetime.now(),
+                    last_updated=datetime.now()
+                )
+                
+                individual_db.add(dividend)
+                individual_db.commit()
+                synced_count += 1
+                logger.info(f"✅ Added dividend: {dividend_data['symbol']} - ${total_dividend}")
+                
+            except Exception as div_error:
+                logger.error(f"❌ Error syncing dividend {dividend_data.get('symbol', 'UNKNOWN')}: {div_error}")
+                import traceback
+                logger.error(f"   Traceback: {traceback.format_exc()}")
+                individual_db.rollback()
+                error_count += 1
+            finally:
+                individual_db.close()
+        
+        logger.info(f"✅ Dividend sync summary: {synced_count} synced, {skipped_count} skipped, {error_count} errors")
+        
+        return {
+            "status": "success",
+            "message": f"Dividend sync complete for account {account_id}",
+            "synced_count": synced_count,
+            "skipped_count": skipped_count,
+            "error_count": error_count,
+            "total_processed": len(dividends)
+        }
+        
+    except Exception as e:
+        logger.error(f"❌ Error syncing dividends: {e}")
+        db.rollback()
+        raise HTTPException(status_code=500, detail=f"Failed to sync dividends: {str(e)}")
+
+@router.post("/sync/historical-data")
+async def sync_historical_data(days: int = 730, account_id: Optional[str] = None, db: Session = Depends(get_db)):
+    """
+    CRITICAL: Sync comprehensive historical data from IBKR to database using chunked retrieval.
+    
+    This endpoint is designed to solve the missing historical transaction problem by:
+    1. Using chunked retrieval to get data from May 2024 onwards
+    2. Storing all transactions and tax lots in the database
+    3. Enabling the statements endpoint to have complete historical data
+    """
+    try:
+        if not account_id:
+            account_id = "U19490886"  # Default IBKR account
+            
+        logger.info(f"🔄 Starting comprehensive historical data sync for account {account_id} ({days} days)")
+        
+        # Import enhanced client
+        from backend.services.enhanced_ibkr_client import EnhancedIBKRClient
+        enhanced_ibkr_client = EnhancedIBKRClient()
+        
+        # Connect to IBKR
+        if not await enhanced_ibkr_client.connect_with_retry():
+            raise HTTPException(status_code=500, detail="Failed to connect to IBKR")
+        
+        try:
+            # Get historical transactions using chunked approach (this will trigger for days > 90)
+            logger.info(f"📊 Fetching historical transactions for {days} days...")
+            historical_transactions = await enhanced_ibkr_client.get_enhanced_account_statements(account_id, days)
+            
+            logger.info(f"✅ Retrieved {len(historical_transactions)} historical transactions")
+            
+            # Sync transactions to database
+            synced_transactions = await _sync_transactions_to_db(db, account_id, historical_transactions, "IBKR")
+            
+            # Get historical tax lots
+            logger.info(f"📊 Fetching historical tax lots...")
+            historical_tax_lots = await enhanced_ibkr_client.get_enhanced_tax_lots(account_id)
+            
+            logger.info(f"✅ Retrieved {len(historical_tax_lots)} historical tax lots")
+            
+            # Sync tax lots to database  
+            synced_tax_lots = await _sync_tax_lots_to_db(db, account_id, historical_tax_lots, "IBKR")
+            
+            # Analyze results
+            dates = [txn.get('date', '') for txn in historical_transactions if txn.get('date')]
+            oldest_date = min(dates) if dates else 'N/A'
+            newest_date = max(dates) if dates else 'N/A'
+            
+            transactions_2024 = len([txn for txn in historical_transactions if '2024' in txn.get('date', '')])
+            
+            return {
+                "status": "success",
+                "message": f"Historical data sync complete for account {account_id}",
+                "details": {
+                    "days_requested": days,
+                    "transactions_retrieved": len(historical_transactions),
+                    "transactions_synced": synced_transactions,
+                    "tax_lots_retrieved": len(historical_tax_lots),
+                    "tax_lots_synced": synced_tax_lots,
+                    "date_range": f"{oldest_date} to {newest_date}",
+                    "transactions_2024": transactions_2024,
+                    "chunked_retrieval_used": days > 90
+                },
+                "next_steps": "Use /api/v1/portfolio/statements to view the complete historical data from database"
+            }
+            
+        finally:
+            await enhanced_ibkr_client.disconnect()
+            
+    except Exception as e:
+        logger.error(f"❌ Error in historical data sync: {e}")
+        raise HTTPException(status_code=500, detail=f"Failed to sync historical data: {str(e)}")
+
+@router.post("/sync/csv-import")
+async def import_csv_statements(db: Session = Depends(get_db)):
+    """
+    CRITICAL: Import historical transaction data from IBKR CSV activity statements.
+    
+    This solves the missing historical data issue by parsing the provided CSV files
+    from the user's IBKR statements covering May 9, 2024 to July 10, 2025.
+    """
+    try:
+        logger.info(f"🔄 Starting CSV import for IBKR historical data")
+        
+        # Import the CSV parser
+        from backend.services.csv_parser import parse_multiple_csv_files
+        
+        # CSV files provided by user (now in backend directory for Docker access)
+        csv_files = [
+            "/app/backend/U19490886_20240509_20250430.csv",
+            "/app/backend/U19490886_20250501_20250710.csv"
+        ]
+        
+        # Check if files exist
+        import os
+        existing_files = [f for f in csv_files if os.path.exists(f)]
+        
+        if not existing_files:
+            raise HTTPException(status_code=404, detail="CSV files not found in expected location")
+        
+        logger.info(f"📄 Found {len(existing_files)} CSV files to process")
+        
+        # Parse CSV files
+        parsed_data = parse_multiple_csv_files(existing_files)
+        
+        if not parsed_data['trades']:
+            raise HTTPException(status_code=400, detail="No trade data found in CSV files")
+        
+        logger.info(f"✅ Parsed {len(parsed_data['trades'])} transactions from CSV files")
+        
+        # Get account info
+        account_number = parsed_data['account_info'].get('account_number', 'U19490886')
+        
+        # Sync parsed transactions to database
+        synced_transactions = await _sync_transactions_to_db(db, account_number, parsed_data['trades'], "IBKR")
+        
+        # Analyze date range
+        summary = parsed_data.get('summary', {})
+        date_range = summary.get('date_range', {})
+        
+        # Count 2024 transactions specifically
+        transactions_2024 = len([t for t in parsed_data['trades'] if '2024' in t['date']])
+        
+        return {
+            "status": "success",
+            "message": f"CSV import complete for account {account_number}",
+            "details": {
+                "files_processed": len(existing_files),
+                "transactions_parsed": len(parsed_data['trades']),
+                "transactions_synced": synced_transactions,
+                "date_range": date_range,
+                "transactions_2024": transactions_2024,
+                "unique_symbols": summary.get('unique_symbols', 0),
+                "account_number": account_number,
+                "csv_files": [os.path.basename(f) for f in existing_files]
+            },
+            "next_steps": "Use /api/v1/portfolio/statements to view the complete historical data including 2024 transactions"
+        }
+        
+    except Exception as e:
+        logger.error(f"❌ Error in CSV import: {e}")
+        raise HTTPException(status_code=500, detail=f"Failed to import CSV data: {str(e)}")
+
+@router.post("/generate-tax-lots")
+async def generate_tax_lots_from_transactions(account_id: Optional[str] = None, db: Session = Depends(get_db)):
+    """
+    CRITICAL: Generate proper tax lots from imported transaction history.
+    
+    This creates accurate cost basis tracking using FIFO method from the 438 
+    imported CSV transactions, enabling proper tax calculations and P&L analysis.
+    """
+    try:
+        logger.info(f"🔄 Starting tax lot generation from transaction history")
+        
+        # Import the tax lot generator
+        from backend.services.tax_lot_generator import tax_lot_generator
+        
+        # Convert account_id string to integer if provided
+        account_id_int = None
+        if account_id:
+            # Find account by account_number
+            account = db.query(Account).filter(Account.account_number == account_id).first()
+            if not account:
+                raise HTTPException(status_code=404, detail=f"Account {account_id} not found")
+            account_id_int = account.id
+        
+        # Generate tax lots from transaction history
+        result = tax_lot_generator.generate_tax_lots_from_transactions(account_id_int)
+        
+        if 'error' in result:
+            raise HTTPException(status_code=400, detail=result['error'])
+        
+        # Run reconciliation to verify accuracy
+        reconciliation = tax_lot_generator.reconcile_tax_lots_with_current_holdings(account_id_int)
+        
+        return {
+            "status": "success",
+            "message": f"Tax lots generated successfully",
+            "details": {
+                "tax_lots_created": result.get('tax_lots_created', 0),
+                "transactions_processed": result.get('transactions_processed', 0),
+                "symbols_processed": result.get('symbols_processed', 0),
+                "total_cost_basis": result.get('total_cost_basis', 0),
+                "total_current_value": result.get('total_current_value', 0),
+                "total_unrealized_pnl": result.get('total_unrealized_pnl', 0),
+                "long_term_lots": result.get('long_term_lots', 0),
+                "short_term_lots": result.get('short_term_lots', 0),
+                "unique_symbols": result.get('unique_symbols', 0),
+                "oldest_lot_date": result.get('oldest_lot_date'),
+                "newest_lot_date": result.get('newest_lot_date'),
+                "reconciliation": reconciliation
+            },
+            "next_steps": "Tax lots are now available in Holdings page. Use /api/v1/portfolio/tax-lots/{symbol} to view specific lots."
+        }
+        
+    except Exception as e:
+        logger.error(f"❌ Error generating tax lots: {e}")
+        raise HTTPException(status_code=500, detail=f"Failed to generate tax lots: {str(e)}")
 
 @router.post("/sync-transactions")
 async def sync_transaction_data(account_id: Optional[str] = None, days: int = 365):
@@ -2693,3 +3163,640 @@ async def get_enhanced_ibkr_status():
             "error": str(e),
             "timestamp": datetime.utcnow().isoformat()
         }
+
+@router.post("/sync/enhanced-comprehensive")
+async def sync_enhanced_comprehensive_data(
+    days_back: int = 365,
+    sync_transactions: bool = True,
+    sync_tax_lots: bool = True,
+    sync_portfolios: bool = True,
+    db: Session = Depends(get_db)
+):
+    """
+    COMPREHENSIVE DATABASE SYNC using Enhanced IBKR and TastyTrade clients.
+    
+    This is the ultimate sync endpoint that:
+    1. Uses Enhanced IBKR client for real transaction and tax lot data
+    2. Uses Enhanced TastyTrade client for real transaction and tax lot data  
+    3. Syncs everything to database with proper deduplication
+    4. Uses market data service for current prices (no subscription needed)
+    """
+    try:
+        logger.info(f"🚀 Starting COMPREHENSIVE enhanced sync (last {days_back} days)")
+        
+        # Import enhanced clients
+        from backend.services.enhanced_ibkr_client import enhanced_ibkr_client
+        from backend.services.enhanced_tastytrade_client import enhanced_tastytrade_client
+        
+        sync_results = {
+            "status": "success",
+            "timestamp": datetime.utcnow().isoformat(),
+            "ibkr_results": {},
+            "tastytrade_results": {},
+            "database_results": {},
+            "summary": {}
+        }
+        
+        # ========== ENHANCED IBKR SYNC ==========
+        logger.info("📊 Step 1: Enhanced IBKR Data Sync")
+        
+        ibkr_connected = await enhanced_ibkr_client.connect_with_retry(max_attempts=2)
+        if ibkr_connected:
+            logger.info("✅ Enhanced IBKR connected successfully")
+            
+            for account_id in enhanced_ibkr_client.managed_accounts:
+                logger.info(f"📋 Syncing Enhanced IBKR account: {account_id}")
+                
+                account_results = {
+                    "account_id": account_id,
+                    "transactions_synced": 0,
+                    "tax_lots_synced": 0,
+                    "errors": []
+                }
+                
+                try:
+                    # Get enhanced transactions
+                    if sync_transactions:
+                        transactions = await enhanced_ibkr_client.get_enhanced_account_statements(account_id, days_back)
+                        
+                        # Sync to database
+                        transactions_synced = await _sync_transactions_to_db(db, account_id, transactions, 'IBKR')
+                        account_results["transactions_synced"] = transactions_synced
+                        logger.info(f"✅ Synced {transactions_synced} IBKR transactions to database")
+                    
+                    # Get enhanced tax lots
+                    if sync_tax_lots:
+                        tax_lots = await enhanced_ibkr_client.get_enhanced_tax_lots(account_id)
+                        
+                        # Sync to database
+                        tax_lots_synced = await _sync_tax_lots_to_db(db, account_id, tax_lots, 'IBKR')
+                        account_results["tax_lots_synced"] = tax_lots_synced
+                        logger.info(f"✅ Synced {tax_lots_synced} IBKR tax lots to database")
+                    
+                except Exception as e:
+                    error_msg = f"Error syncing IBKR account {account_id}: {str(e)}"
+                    logger.error(error_msg)
+                    account_results["errors"].append(error_msg)
+                
+                sync_results["ibkr_results"][account_id] = account_results
+            
+            await enhanced_ibkr_client.disconnect()
+        else:
+            sync_results["ibkr_results"]["error"] = "Failed to connect to Enhanced IBKR"
+        
+        # ========== ENHANCED TASTYTRADE SYNC ==========
+        logger.info("🥪 Step 2: Enhanced TastyTrade Data Sync")
+        
+        tt_connected = await enhanced_tastytrade_client.connect_with_retry(max_attempts=2)
+        if tt_connected:
+            logger.info("✅ Enhanced TastyTrade connected successfully")
+            
+            for account in enhanced_tastytrade_client.accounts:
+                account_id = account.account_number
+                logger.info(f"📋 Syncing Enhanced TastyTrade account: {account_id}")
+                
+                account_results = {
+                    "account_id": account_id,
+                    "transactions_synced": 0,
+                    "tax_lots_synced": 0,
+                    "errors": []
+                }
+                
+                try:
+                    # Get enhanced transactions
+                    if sync_transactions:
+                        transactions = await enhanced_tastytrade_client.get_enhanced_account_statements(account_id, days_back)
+                        
+                        # Sync to database
+                        transactions_synced = await _sync_transactions_to_db(db, account_id, transactions, 'TASTYTRADE')
+                        account_results["transactions_synced"] = transactions_synced
+                        logger.info(f"✅ Synced {transactions_synced} TastyTrade transactions to database")
+                    
+                    # Get enhanced tax lots
+                    if sync_tax_lots:
+                        tax_lots = await enhanced_tastytrade_client.get_enhanced_tax_lots(account_id)
+                        
+                        # Sync to database
+                        tax_lots_synced = await _sync_tax_lots_to_db(db, account_id, tax_lots, 'TASTYTRADE')
+                        account_results["tax_lots_synced"] = tax_lots_synced
+                        logger.info(f"✅ Synced {tax_lots_synced} TastyTrade tax lots to database")
+                    
+                except Exception as e:
+                    error_msg = f"Error syncing TastyTrade account {account_id}: {str(e)}"
+                    logger.error(error_msg)
+                    account_results["errors"].append(error_msg)
+                
+                sync_results["tastytrade_results"][account_id] = account_results
+            
+            await enhanced_tastytrade_client.disconnect()
+        else:
+            sync_results["tastytrade_results"]["error"] = "Failed to connect to Enhanced TastyTrade"
+        
+        # ========== PORTFOLIO SYNC ==========
+        if sync_portfolios:
+            logger.info("📈 Step 3: Portfolio Holdings Sync")
+            try:
+                portfolio_sync_result = await portfolio_sync_service.sync_all_accounts()
+                sync_results["database_results"]["portfolio_sync"] = portfolio_sync_result
+            except Exception as e:
+                sync_results["database_results"]["portfolio_sync"] = {"error": str(e)}
+        
+        # ========== SUMMARY ==========
+        total_transactions = sum(
+            result.get("transactions_synced", 0) 
+            for results in [sync_results["ibkr_results"], sync_results["tastytrade_results"]]
+            for result in results.values()
+            if isinstance(result, dict)
+        )
+        
+        total_tax_lots = sum(
+            result.get("tax_lots_synced", 0)
+            for results in [sync_results["ibkr_results"], sync_results["tastytrade_results"]]
+            for result in results.values()
+            if isinstance(result, dict)
+        )
+        
+        sync_results["summary"] = {
+            "total_transactions_synced": total_transactions,
+            "total_tax_lots_synced": total_tax_lots,
+            "ibkr_accounts_processed": len(sync_results["ibkr_results"]),
+            "tastytrade_accounts_processed": len(sync_results["tastytrade_results"]),
+            "sync_duration_seconds": (datetime.utcnow() - datetime.fromisoformat(sync_results["timestamp"].replace('Z', '+00:00'))).total_seconds()
+        }
+        
+        logger.info(f"🎉 COMPREHENSIVE sync completed: {total_transactions} transactions, {total_tax_lots} tax lots")
+        
+        return sync_results
+        
+    except Exception as e:
+        logger.error(f"❌ Error in comprehensive enhanced sync: {e}")
+        raise HTTPException(status_code=500, detail=f"Comprehensive sync failed: {str(e)}")
+
+async def _sync_transactions_to_db(
+    db: Session, 
+    account_id: str, 
+    transactions: List[Dict], 
+    broker: str
+) -> int:
+    """Sync transactions to database with correct field mapping"""
+    from backend.models.transactions import Transaction
+    from backend.models.portfolio import Account
+    
+    if not transactions:
+        return 0
+    
+    # Get or create account
+    account = db.query(Account).filter(Account.account_number == account_id).first()
+    if not account:
+        account = Account(
+            user_id=1,  # Default user ID
+            account_number=account_id,
+            account_name=f"{broker} {account_id}",
+            account_type='taxable',
+            broker=broker,
+            is_active=True
+        )
+        db.add(account)
+        db.flush()
+    
+    synced_count = 0
+    for txn_data in transactions:
+        try:
+            # Check for existing transaction (deduplication) - FIXED
+            external_id = txn_data.get('execution_id') or txn_data.get('id') or f"txn_{txn_data['symbol']}_{txn_data['date']}_{txn_data.get('time', '00:00:00')}"
+            
+            existing = db.query(Transaction).filter(
+                Transaction.account_id == account.id,
+                Transaction.external_id == external_id
+            ).first()
+            
+            if existing:
+                continue  # Skip duplicates
+            
+            # Map enhanced client data to database schema
+            transaction_date_str = f"{txn_data['date']} {txn_data.get('time', '00:00:00')}"
+            transaction_date = datetime.strptime(transaction_date_str, '%Y-%m-%d %H:%M:%S')
+            
+            settlement_date = None
+            if txn_data.get('settlement_date'):
+                settlement_date = datetime.strptime(txn_data['settlement_date'], '%Y-%m-%d')
+            
+            # Create new transaction with correct field mapping
+            transaction = Transaction(
+                account_id=account.id,
+                external_id=external_id,  # Use the cleaned external_id
+                order_id=txn_data.get('order_id'),
+                execution_id=txn_data.get('execution_id'),
+                symbol=txn_data['symbol'],
+                description=txn_data.get('description', ''),
+                transaction_type=txn_data['action'],  # Maps to 'BUY' or 'SELL'
+                action=txn_data.get('type', txn_data['action']),  # BOT/SLD style
+                quantity=float(txn_data['quantity']),
+                price=float(txn_data['price']),
+                amount=float(txn_data['amount']),
+                commission=float(txn_data.get('commission', 0)),
+                fees=float(txn_data.get('fees', 0)),
+                net_amount=float(txn_data.get('net_amount', txn_data['amount'])),
+                currency=txn_data.get('currency', 'USD'),
+                exchange=txn_data.get('exchange', ''),
+                contract_type=txn_data.get('contract_type', 'STK'),
+                transaction_date=transaction_date,
+                settlement_date=settlement_date,
+                source=txn_data.get('source', broker.lower())
+            )
+            
+            db.add(transaction)
+            synced_count += 1
+            
+        except Exception as e:
+            logger.error(f"Error syncing transaction {txn_data}: {e}")
+            continue
+    
+    db.commit()
+    return synced_count
+
+async def _sync_tax_lots_to_db(
+    db: Session, 
+    account_id: str, 
+    tax_lots: List[Dict], 
+    broker: str
+) -> int:
+    """Sync tax lots to database with correct field mapping"""
+    from backend.models.tax_lots import TaxLot
+    from backend.models.portfolio import Account, Holding
+    
+    if not tax_lots:
+        return 0
+    
+    # Get account
+    account = db.query(Account).filter(Account.account_number == account_id).first()
+    if not account:
+        return 0
+    
+    synced_count = 0
+    for lot_data in tax_lots:
+        try:
+            # Get or create holding
+            holding = db.query(Holding).filter(
+                Holding.account_id == account.id,
+                Holding.symbol == lot_data['symbol']
+            ).first()
+            
+            if not holding:
+                # Create holding if it doesn't exist
+                holding = Holding(
+                    account_id=account.id,
+                    symbol=lot_data['symbol'],
+                    quantity=lot_data['quantity'],
+                    average_cost=lot_data['cost_per_share'],
+                    current_price=lot_data['current_price'],
+                    market_value=lot_data['current_value'],
+                    unrealized_pnl=lot_data['unrealized_pnl'],
+                    unrealized_pnl_pct=lot_data['unrealized_pnl_pct'],
+                    contract_type=lot_data.get('contract_type', 'STK'),
+                    currency=lot_data.get('currency', 'USD')
+                )
+                db.add(holding)
+                db.flush()
+            
+            # Check for existing tax lot (deduplication)
+            existing_lot = db.query(TaxLot).filter(
+                TaxLot.holding_id == holding.id,
+                TaxLot.account_id == account_id,
+                TaxLot.symbol == lot_data['symbol'],
+                TaxLot.purchase_date == datetime.strptime(lot_data['acquisition_date'], '%Y-%m-%d').date()
+            ).first()
+            
+            if existing_lot:
+                continue  # Skip duplicates
+            
+            # Map enhanced client data to database schema
+            acquisition_date = datetime.strptime(lot_data['acquisition_date'], '%Y-%m-%d')
+            
+            # Create new tax lot with correct field mapping
+            tax_lot = TaxLot(
+                holding_id=holding.id,
+                symbol=lot_data['symbol'],
+                account_id=account_id,
+                purchase_date=acquisition_date,  # Maps acquisition_date -> purchase_date
+                shares_purchased=lot_data['quantity'],  # Maps quantity -> shares_purchased
+                cost_per_share=lot_data['cost_per_share'],
+                total_cost=lot_data['cost_basis'],  # Maps cost_basis -> total_cost
+                shares_remaining=lot_data['quantity'],  # Initially all shares remain
+                shares_sold=0.0,  # No shares sold initially
+                is_long_term=lot_data['is_long_term'],
+                commission=0.0  # Enhanced clients don't provide per-lot commission
+            )
+            
+            db.add(tax_lot)
+            synced_count += 1
+            
+        except Exception as e:
+            logger.error(f"Error syncing tax lot {lot_data}: {e}")
+            continue
+    
+    db.commit()
+    return synced_count
+
+@router.get("/enhanced/holdings")
+async def get_enhanced_holdings_for_frontend():
+    """
+    Get real-time holdings data using Enhanced IBKR and TastyTrade clients.
+    Serves data directly to frontend without requiring database sync.
+    """
+    try:
+        logger.info("🚀 Fetching enhanced holdings for frontend...")
+        
+        # Import enhanced clients
+        from backend.services.enhanced_ibkr_client import enhanced_ibkr_client
+        from backend.services.enhanced_tastytrade_client import enhanced_tastytrade_client
+        
+        all_holdings = []
+        
+        # ========== ENHANCED IBKR HOLDINGS ==========
+        try:
+            ibkr_connected = await enhanced_ibkr_client.connect_with_retry(max_attempts=1)
+            if ibkr_connected:
+                logger.info("✅ Enhanced IBKR connected for holdings")
+                
+                # Get IBKR account info
+                for account_id in enhanced_ibkr_client.managed_accounts:
+                    account_info = await enhanced_ibkr_client.get_account_info(account_id)
+                    
+                    # Get tax lots which contain position data
+                    tax_lots = await enhanced_ibkr_client.get_enhanced_tax_lots(account_id)
+                    
+                    # Group tax lots by symbol to create holdings
+                    holdings_by_symbol = {}
+                    for lot in tax_lots:
+                        symbol = lot['symbol']
+                        if symbol not in holdings_by_symbol:
+                            holdings_by_symbol[symbol] = {
+                                'id': f"ibkr_{account_id}_{symbol}",
+                                'symbol': symbol,
+                                'account_number': account_id,
+                                'broker': 'IBKR',
+                                'shares': 0,
+                                'current_price': lot['current_price'],
+                                'market_value': 0,
+                                'cost_basis': 0,
+                                'average_cost': 0,
+                                'unrealized_pnl': 0,
+                                'unrealized_pnl_pct': 0,
+                                'day_pnl': 0,
+                                'day_pnl_pct': 0,
+                                'sector': 'Technology',  # Default
+                                'industry': 'Software',  # Default
+                                'last_updated': datetime.utcnow().isoformat()
+                            }
+                        
+                        # Aggregate data
+                        holding = holdings_by_symbol[symbol]
+                        holding['shares'] += lot['quantity']
+                        holding['cost_basis'] += lot['cost_basis']
+                        holding['market_value'] += lot['current_value']
+                        holding['unrealized_pnl'] += lot['unrealized_pnl']
+                    
+                    # Calculate averages
+                    for holding in holdings_by_symbol.values():
+                        if holding['shares'] > 0:
+                            holding['average_cost'] = holding['cost_basis'] / holding['shares']
+                            holding['unrealized_pnl_pct'] = (holding['unrealized_pnl'] / holding['cost_basis'] * 100) if holding['cost_basis'] > 0 else 0
+                            all_holdings.append(holding)
+                
+                await enhanced_ibkr_client.disconnect()
+            else:
+                logger.warning("Failed to connect to Enhanced IBKR for holdings")
+        except Exception as e:
+            logger.error(f"Error getting IBKR enhanced holdings: {e}")
+        
+        # ========== ENHANCED TASTYTRADE HOLDINGS ==========
+        try:
+            tt_connected = await enhanced_tastytrade_client.connect_with_retry(max_attempts=1)
+            if tt_connected:
+                logger.info("✅ Enhanced TastyTrade connected for holdings")
+                
+                for account in enhanced_tastytrade_client.accounts:
+                    account_id = account.account_number
+                    
+                    # Get tax lots which contain position data
+                    tax_lots = await enhanced_tastytrade_client.get_enhanced_tax_lots(account_id)
+                    
+                    # Group tax lots by symbol to create holdings
+                    holdings_by_symbol = {}
+                    for lot in tax_lots:
+                        symbol = lot['symbol']
+                        if symbol not in holdings_by_symbol:
+                            holdings_by_symbol[symbol] = {
+                                'id': f"tt_{account_id}_{symbol}",
+                                'symbol': symbol,
+                                'account_number': account_id,
+                                'broker': 'TASTYTRADE',
+                                'shares': 0,
+                                'current_price': lot['current_price'],
+                                'market_value': 0,
+                                'cost_basis': 0,
+                                'average_cost': 0,
+                                'unrealized_pnl': 0,
+                                'unrealized_pnl_pct': 0,
+                                'day_pnl': 0,
+                                'day_pnl_pct': 0,
+                                'sector': 'Options' if lot.get('contract_type') == 'Equity Option' else 'Equity',
+                                'industry': 'Trading',
+                                'last_updated': datetime.utcnow().isoformat()
+                            }
+                        
+                        # Aggregate data
+                        holding = holdings_by_symbol[symbol]
+                        holding['shares'] += lot['quantity']
+                        holding['cost_basis'] += lot['cost_basis']
+                        holding['market_value'] += lot['current_value']
+                        holding['unrealized_pnl'] += lot['unrealized_pnl']
+                    
+                    # Calculate averages
+                    for holding in holdings_by_symbol.values():
+                        if holding['shares'] > 0:
+                            holding['average_cost'] = holding['cost_basis'] / holding['shares']
+                            holding['unrealized_pnl_pct'] = (holding['unrealized_pnl'] / holding['cost_basis'] * 100) if holding['cost_basis'] > 0 else 0
+                            all_holdings.append(holding)
+                
+                await enhanced_tastytrade_client.disconnect()
+            else:
+                logger.warning("Failed to connect to Enhanced TastyTrade for holdings")
+        except Exception as e:
+            logger.error(f"Error getting TastyTrade enhanced holdings: {e}")
+        
+        logger.info(f"✅ Enhanced holdings: {len(all_holdings)} total positions")
+        
+        return {
+            "status": "success",
+            "data": {
+                "holdings": all_holdings,
+                "total_holdings": len(all_holdings),
+                "total_market_value": sum(h['market_value'] for h in all_holdings),
+                "total_unrealized_pnl": sum(h['unrealized_pnl'] for h in all_holdings),
+                "data_source": "enhanced_clients_realtime"
+            },
+            "timestamp": datetime.utcnow().isoformat()
+        }
+        
+    except Exception as e:
+        logger.error(f"❌ Error getting enhanced holdings: {e}")
+        raise HTTPException(status_code=500, detail=f"Enhanced holdings failed: {str(e)}")
+
+@router.get("/enhanced/transactions")
+async def get_enhanced_transactions_for_frontend(days: int = 30):
+    """
+    Get real-time transaction data using Enhanced IBKR and TastyTrade clients.
+    Serves data directly to frontend without requiring database sync.
+    """
+    try:
+        logger.info(f"🚀 Fetching enhanced transactions for frontend (last {days} days)...")
+        
+        # Import enhanced clients
+        from backend.services.enhanced_ibkr_client import enhanced_ibkr_client
+        from backend.services.enhanced_tastytrade_client import enhanced_tastytrade_client
+        
+        all_transactions = []
+        
+        # ========== ENHANCED IBKR TRANSACTIONS ==========
+        try:
+            ibkr_connected = await enhanced_ibkr_client.connect_with_retry(max_attempts=1)
+            if ibkr_connected:
+                logger.info("✅ Enhanced IBKR connected for transactions")
+                
+                for account_id in enhanced_ibkr_client.managed_accounts:
+                    transactions = await enhanced_ibkr_client.get_enhanced_account_statements(account_id, days)
+                    all_transactions.extend(transactions)
+                
+                await enhanced_ibkr_client.disconnect()
+            else:
+                logger.warning("Failed to connect to Enhanced IBKR for transactions")
+        except Exception as e:
+            logger.error(f"Error getting IBKR enhanced transactions: {e}")
+        
+        # ========== ENHANCED TASTYTRADE TRANSACTIONS ==========
+        try:
+            tt_connected = await enhanced_tastytrade_client.connect_with_retry(max_attempts=1)
+            if tt_connected:
+                logger.info("✅ Enhanced TastyTrade connected for transactions")
+                
+                for account in enhanced_tastytrade_client.accounts:
+                    account_id = account.account_number
+                    transactions = await enhanced_tastytrade_client.get_enhanced_account_statements(account_id, days)
+                    all_transactions.extend(transactions)
+                
+                await enhanced_tastytrade_client.disconnect()
+            else:
+                logger.warning("Failed to connect to Enhanced TastyTrade for transactions")
+        except Exception as e:
+            logger.error(f"Error getting TastyTrade enhanced transactions: {e}")
+        
+        # Sort by date (newest first)
+        all_transactions.sort(key=lambda x: f"{x['date']} {x['time']}", reverse=True)
+        
+        # Calculate summary
+        total_value = sum(abs(t['amount']) for t in all_transactions)
+        total_commission = sum(t.get('commission', 0) for t in all_transactions)
+        buy_count = len([t for t in all_transactions if t['action'] == 'BUY'])
+        sell_count = len([t for t in all_transactions if t['action'] == 'SELL'])
+        
+        logger.info(f"✅ Enhanced transactions: {len(all_transactions)} total transactions")
+        
+        return {
+            "status": "success",
+            "data": {
+                "transactions": all_transactions,
+                "summary": {
+                    "total_transactions": len(all_transactions),
+                    "total_value": total_value,
+                    "total_commission": total_commission,
+                    "buy_count": buy_count,
+                    "sell_count": sell_count,
+                    "period_days": days
+                },
+                "data_source": "enhanced_clients_realtime"
+            },
+            "timestamp": datetime.utcnow().isoformat()
+        }
+        
+    except Exception as e:
+        logger.error(f"❌ Error getting enhanced transactions: {e}")
+        raise HTTPException(status_code=500, detail=f"Enhanced transactions failed: {str(e)}")
+
+@router.get("/enhanced/tax-lots/{symbol}")
+async def get_enhanced_tax_lots_for_symbol(symbol: str, account_id: Optional[str] = None):
+    """
+    Get real-time tax lots for a specific symbol using Enhanced clients.
+    """
+    try:
+        logger.info(f"🚀 Fetching enhanced tax lots for {symbol}")
+        
+        # Import enhanced clients
+        from backend.services.enhanced_ibkr_client import enhanced_ibkr_client
+        from backend.services.enhanced_tastytrade_client import enhanced_tastytrade_client
+        
+        all_tax_lots = []
+        
+        # ========== ENHANCED IBKR TAX LOTS ==========
+        try:
+            ibkr_connected = await enhanced_ibkr_client.connect_with_retry(max_attempts=1)
+            if ibkr_connected:
+                
+                accounts_to_check = [account_id] if account_id else enhanced_ibkr_client.managed_accounts
+                
+                for acct_id in accounts_to_check:
+                    tax_lots = await enhanced_ibkr_client.get_enhanced_tax_lots(acct_id)
+                    
+                    # Filter for the specific symbol
+                    symbol_lots = [lot for lot in tax_lots if lot['symbol'] == symbol]
+                    all_tax_lots.extend(symbol_lots)
+                
+                await enhanced_ibkr_client.disconnect()
+        except Exception as e:
+            logger.error(f"Error getting IBKR tax lots for {symbol}: {e}")
+        
+        # ========== ENHANCED TASTYTRADE TAX LOTS ==========
+        try:
+            tt_connected = await enhanced_tastytrade_client.connect_with_retry(max_attempts=1)
+            if tt_connected:
+                
+                accounts_to_check = [account_id] if account_id else [acc.account_number for acc in enhanced_tastytrade_client.accounts]
+                
+                for acct_id in accounts_to_check:
+                    if any(acc.account_number == acct_id for acc in enhanced_tastytrade_client.accounts):
+                        tax_lots = await enhanced_tastytrade_client.get_enhanced_tax_lots(acct_id)
+                        
+                        # Filter for the specific symbol
+                        symbol_lots = [lot for lot in tax_lots if lot['symbol'] == symbol]
+                        all_tax_lots.extend(symbol_lots)
+                
+                await enhanced_tastytrade_client.disconnect()
+        except Exception as e:
+            logger.error(f"Error getting TastyTrade tax lots for {symbol}: {e}")
+        
+        # Calculate totals
+        total_shares = sum(lot['quantity'] for lot in all_tax_lots)
+        total_cost_basis = sum(lot['cost_basis'] for lot in all_tax_lots)
+        total_current_value = sum(lot['current_value'] for lot in all_tax_lots)
+        average_cost = total_cost_basis / total_shares if total_shares > 0 else 0
+        
+        logger.info(f"✅ Enhanced tax lots for {symbol}: {len(all_tax_lots)} lots")
+        
+        return {
+            "status": "success",
+            "data": {
+                "symbol": symbol,
+                "tax_lots": all_tax_lots,
+                "total_lots": len(all_tax_lots),
+                "total_shares": total_shares,
+                "total_cost_basis": total_cost_basis,
+                "total_current_value": total_current_value,
+                "average_cost": average_cost,
+                "data_source": "enhanced_clients_realtime"
+            },
+            "timestamp": datetime.utcnow().isoformat()
+        }
+    except Exception as e:
+        logger.error(f"❌ Error getting enhanced tax lots for {symbol}: {e}")
+        raise HTTPException(status_code=500, detail=f"Enhanced tax lots failed: {str(e)}")

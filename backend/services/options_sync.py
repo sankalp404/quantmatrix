@@ -317,47 +317,79 @@ class UnifiedOptionsSync:
             return None
     
     def _parse_ibkr_option_from_holding(self, holding: Holding) -> Optional[Dict[str, Any]]:
-        """Parse IBKR option details from holding data (limited info available)"""
+        """
+        STOP GUESSING! Get real IBKR option data or return None.
+        
+        The previous implementation was creating FAKE option data by guessing 
+        call vs put types and using placeholder strikes. This is completely wrong
+        for a production trading system.
+        """
         try:
-            # IBKR stores options with just underlying symbol, not full option symbol
-            # We'll create a synthetic symbol and basic option data
-            underlying_symbol = holding.symbol
+            # CRITICAL: Only process if we have a real IBKR option symbol
+            if not holding.symbol or holding.contract_type != 'OPT':
+                logger.debug(f"Skipping non-option holding: {holding.symbol} ({holding.contract_type})")
+                return None
+                
+            # Try to parse real IBKR option symbol format
+            # IBKR option symbols are like: AAPL250117C00225000
+            symbol = holding.symbol
             
-            # Better heuristic for call vs put classification
-            # Calculate P&L percentage to estimate option type
-            if holding.market_value > 0 and holding.quantity != 0:
-                pnl_pct = (holding.unrealized_pnl / (holding.average_cost * abs(holding.quantity))) * 100
-                
-                # Improved heuristic:
-                # - Very high cost options (>$5000) with big losses are likely calls  
-                # - Medium cost options with moderate losses could be either
-                # - Low cost options (<$1000) with losses are likely puts
-                # - Positive P&L suggests the option is still in-the-money
-                
-                if holding.average_cost > 5000:
-                    estimated_type = OptionType.CALL  # Expensive = likely calls
-                elif holding.average_cost < 100:
-                    estimated_type = OptionType.PUT   # Cheap = likely puts  
-                elif pnl_pct > -50:  # Less than 50% loss
-                    estimated_type = OptionType.CALL  # Still valuable = likely calls
+            if len(symbol) < 15:
+                logger.warning(f"IBKR option symbol too short: {symbol}")
+                return None
+            
+            # Parse real option symbol components
+            try:
+                # Extract underlying (first 3-6 characters)
+                if symbol[:3] in ['SPY', 'QQQ', 'IWM']:  # Common 3-char symbols
+                    underlying = symbol[:3]
+                    date_start = 3
+                elif symbol[:4] in ['AAPL', 'MSFT', 'GOOGL']:  # Common 4-char symbols  
+                    underlying = symbol[:4]
+                    date_start = 4
+                elif symbol[:5] in ['TSLA']:  # Some 5-char symbols
+                    underlying = symbol[:5]
+                    date_start = 5
                 else:
-                    estimated_type = OptionType.PUT   # Heavy losses = likely puts
-            else:
-                # Default fallback
-                estimated_type = OptionType.CALL
-            
-            # Create synthetic option data with available information
-            synthetic_symbol = f"{underlying_symbol}_OPT_{holding.id}"  # Use holding ID for uniqueness
-            
-            return {
-                'symbol': synthetic_symbol,
-                'underlying_symbol': underlying_symbol,
-                'strike_price': Decimal('100.00'),  # Better placeholder - use round number
-                'expiration_date': datetime(2025, 12, 31),  # Placeholder - need to fix IBKR sync to get real data
-                'option_type': estimated_type,
-                'multiplier': 100,
-                'source': 'IBKR_LIMITED'
-            }
+                    # Default to 4 characters for most stocks
+                    underlying = symbol[:4].rstrip()
+                    date_start = len(underlying)
+                
+                # Parse expiration date (YYMMDD format)
+                date_part = symbol[date_start:date_start+6]
+                exp_date = datetime.strptime(f"20{date_part}", "%Y%m%d")
+                
+                # Parse option type (C or P)
+                option_type_char = symbol[date_start+6]
+                if option_type_char.upper() not in ['C', 'P']:
+                    logger.warning(f"Invalid option type character: {option_type_char} in {symbol}")
+                    return None
+                    
+                option_type = OptionType.CALL if option_type_char.upper() == 'C' else OptionType.PUT
+                
+                # Parse strike price (remaining digits in cents)
+                strike_part = symbol[date_start+7:]
+                if not strike_part.isdigit():
+                    logger.warning(f"Invalid strike price format: {strike_part} in {symbol}")
+                    return None
+                    
+                strike_price = Decimal(str(float(strike_part) / 1000.0))
+                
+                logger.info(f"✅ Parsed real IBKR option: {underlying} {option_type.value.upper()} ${strike_price} exp {exp_date.date()}")
+                
+                return {
+                    'symbol': symbol,
+                    'underlying_symbol': underlying,
+                    'strike_price': strike_price,
+                    'expiration_date': exp_date,
+                    'option_type': option_type,
+                    'multiplier': 100,
+                    'source': 'IBKR_REAL'
+                }
+                
+            except Exception as parse_error:
+                logger.error(f"Failed to parse IBKR option symbol {symbol}: {parse_error}")
+                return None
             
         except Exception as e:
             logger.warning(f"Could not parse IBKR option from holding {holding.symbol}: {e}")

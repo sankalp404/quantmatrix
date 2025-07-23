@@ -22,7 +22,8 @@ from backend.api.routes import (
     tasks,
     screener,
     tastytrade,
-    options
+    options,
+    database
 )
 
 # Configure logging
@@ -90,6 +91,7 @@ app.include_router(tasks.router, prefix="/api/v1/tasks", tags=["tasks"])
 app.include_router(screener.router, prefix="/api/v1/screener", tags=["screener"])
 app.include_router(tastytrade.router, prefix="/api/v1/tastytrade", tags=["tastytrade"])
 app.include_router(options.router, prefix="/api/v1/options", tags=["options"])
+app.include_router(database.router, tags=["database"])
 
 @app.get("/")
 async def root():

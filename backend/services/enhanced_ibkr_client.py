@@ -35,6 +35,7 @@ except ImportError:
 
 try:
     from backend.config import settings
+    from backend.services.market_data import market_data_service
 except ImportError:
     from config import settings
 
@@ -280,7 +281,7 @@ class EnhancedIBKRClient:
         """
         Get comprehensive account statements with enhanced error handling.
         
-        This is the key method for syncing transactions and tax lots.
+        Uses multiple methods to fetch complete historical data including chunked requests.
         """
         if not await self._ensure_connected():
             return []
@@ -294,105 +295,238 @@ class EnhancedIBKRClient:
             
             transactions = []
             
-            # Method 1: Try to get executions (trades)
-            try:
-                executions = self.ib.executions()
-                logger.info(f"📈 Found {len(executions)} total executions")
-                
-                for execution in executions:
-                    if execution.execution.acctNumber == account_id:
-                        # Parse execution time
-                        exec_time = pd.to_datetime(execution.execution.time).replace(tzinfo=None)
-                        if exec_time >= start_date:
-                            
-                            transaction = {
-                                'id': execution.execution.execId,
-                                'order_id': execution.execution.orderId,
-                                'account': execution.execution.acctNumber,
-                                'symbol': execution.contract.symbol,
-                                'description': f"{execution.contract.symbol} {execution.contract.secType}",
-                                'type': 'TRADE',
-                                'action': 'BUY' if execution.execution.side == 'BOT' else 'SELL',
-                                'quantity': float(execution.execution.shares),
-                                'price': float(execution.execution.price),
-                                'amount': float(execution.execution.shares) * float(execution.execution.price),
-                                'commission': 0.0,  # Will be updated from commission report
-                                'currency': execution.contract.currency or 'USD',
-                                'exchange': execution.execution.exchange,
-                                'date': exec_time.strftime('%Y-%m-%d'),
-                                'time': exec_time.strftime('%H:%M:%S'),
-                                'settlement_date': (exec_time + timedelta(days=2)).strftime('%Y-%m-%d'),
-                                'source': 'ibkr_enhanced',
-                                'contract_type': execution.contract.secType,
-                                'execution_id': execution.execution.execId
-                            }
-                            
-                            # Get commission if available
-                            if hasattr(execution, 'commissionReport') and execution.commissionReport:
-                                transaction['commission'] = float(execution.commissionReport.commission)
-                                transaction['amount'] = transaction['amount'] + transaction['commission']
-                            
-                            transactions.append(transaction)
-                            
-            except Exception as e:
-                logger.error(f"❌ Error getting executions: {e}")
+            # ENHANCED APPROACH: Use multiple methods to get complete historical data
             
-            # Method 2: Get trades (alternative approach)
+            # Method 1: Get recent trades from current session (limited historical range)
             try:
                 trades = self.ib.trades()
-                logger.info(f"🔄 Found {len(trades)} total trades")
+                logger.info(f"🔄 Found {len(trades)} trades in current session")
                 
                 for trade in trades:
-                    if (hasattr(trade, 'execution') and 
-                        trade.execution and 
-                        trade.execution.acctNumber == account_id):
+                    for fill in trade.fills:
+                        execution = fill.execution
+                        contract = fill.contract
                         
-                        exec_time = pd.to_datetime(trade.execution.time).replace(tzinfo=None)
-                        if exec_time >= start_date:
+                        if execution.acctNumber != account_id:
+                            continue
                             
-                            # Check if we already have this execution
-                            existing = next((t for t in transactions if t.get('execution_id') == trade.execution.execId), None)
-                            if not existing:
-                                transaction = {
-                                    'id': trade.execution.execId,
-                                    'order_id': trade.execution.orderId,
-                                    'account': trade.execution.acctNumber,
-                                    'symbol': trade.contract.symbol,
-                                    'description': f"{trade.contract.symbol} {trade.contract.secType}",
-                                    'type': 'TRADE',
-                                    'action': 'BUY' if trade.execution.side == 'BOT' else 'SELL',
-                                    'quantity': float(trade.execution.shares),
-                                    'price': float(trade.execution.price),
-                                    'amount': float(trade.execution.shares) * float(trade.execution.price),
-                                    'commission': 0.0,
-                                    'currency': trade.contract.currency or 'USD',
-                                    'exchange': trade.execution.exchange,
-                                    'date': exec_time.strftime('%Y-%m-%d'),
-                                    'time': exec_time.strftime('%H:%M:%S'),
-                                    'settlement_date': (exec_time + timedelta(days=2)).strftime('%Y-%m-%d'),
-                                    'source': 'ibkr_enhanced_trades',
-                                    'contract_type': trade.contract.secType,
-                                    'execution_id': trade.execution.execId
-                                }
-                                
-                                if hasattr(trade, 'commissionReport') and trade.commissionReport:
-                                    transaction['commission'] = float(trade.commissionReport.commission)
-                                    
-                                transactions.append(transaction)
-                
+                        exec_time = pd.to_datetime(execution.time).replace(tzinfo=None)
+                        if exec_time < start_date:
+                            continue
+                        
+                        transaction = {
+                            'id': execution.execId,
+                            'order_id': execution.orderId,
+                            'account': execution.acctNumber,
+                            'symbol': contract.symbol,
+                            'description': f"{contract.symbol} {contract.secType}",
+                            'type': 'TRADE',
+                            'action': 'BUY' if execution.side == 'BOT' else 'SELL',
+                            'quantity': float(execution.shares),
+                            'price': float(execution.price),
+                            'amount': float(execution.shares) * float(execution.price),
+                            'commission': float(fill.commissionReport.commission) if fill.commissionReport else 0.0,
+                            'currency': contract.currency or 'USD',
+                            'exchange': execution.exchange,
+                            'date': exec_time.strftime('%Y-%m-%d'),
+                            'time': exec_time.strftime('%H:%M:%S'),
+                            'settlement_date': (exec_time + timedelta(days=2)).strftime('%Y-%m-%d'),
+                            'source': 'ibkr_enhanced_trades',
+                            'contract_type': contract.secType,
+                            'execution_id': execution.execId,
+                            'net_amount': float(execution.shares) * float(execution.price) + (float(fill.commissionReport.commission) if fill.commissionReport else 0.0)
+                        }
+                        
+                        transactions.append(transaction)
+                        
             except Exception as e:
                 logger.error(f"❌ Error getting trades: {e}")
             
-            logger.info(f"✅ Enhanced statements: {len(transactions)} transactions for {account_id}")
+            # Method 2: Standalone executions (limited info, no contract details)
+            try:
+                executions = self.ib.executions()
+                logger.info(f"📈 Found {len(executions)} standalone executions")
+                
+                # Create a set of execution IDs we already processed from trades
+                processed_exec_ids = {t['execution_id'] for t in transactions}
+                
+                for execution in executions:
+                    if execution.acctNumber == account_id and execution.execId not in processed_exec_ids:
+                        exec_time = pd.to_datetime(execution.time).replace(tzinfo=None)
+                        if exec_time >= start_date:
+                            
+                            transaction = {
+                                'id': execution.execId,
+                                'order_id': execution.orderId,
+                                'account': execution.acctNumber,
+                                'symbol': 'UNKNOWN',  # No contract info available
+                                'description': f"Execution {execution.execId}",
+                                'type': 'TRADE',
+                                'action': 'BUY' if execution.side == 'BOT' else 'SELL',
+                                'quantity': float(execution.shares),
+                                'price': float(execution.price),
+                                'amount': float(execution.shares) * float(execution.price),
+                                'commission': 0.0,  # No commission info available
+                                'currency': 'USD',  # Default
+                                'exchange': execution.exchange,
+                                'date': exec_time.strftime('%Y-%m-%d'),
+                                'time': exec_time.strftime('%H:%M:%S'),
+                                'settlement_date': (exec_time + timedelta(days=2)).strftime('%Y-%m-%d'),
+                                'source': 'ibkr_enhanced_standalone',
+                                'contract_type': 'STK',  # Default
+                                'execution_id': execution.execId,
+                                'net_amount': float(execution.shares) * float(execution.price)
+                            }
+                            
+                            transactions.append(transaction)
+                
+            except Exception as e:
+                logger.error(f"❌ Error getting standalone executions: {e}")
+            
+            # Method 3: CHUNKED HISTORICAL DATA RETRIEVAL (for data older than TWS session)
+            if days > 90:  # Only use chunked approach for longer periods
+                logger.info(f"🔄 Using chunked retrieval for {days} days (longer than 90 days)")
+                try:
+                    historical_transactions = await self._get_chunked_historical_executions(account_id, start_date, end_date)
+                    
+                    # Deduplicate against existing transactions
+                    existing_exec_ids = {t['execution_id'] for t in transactions}
+                    new_historical = [t for t in historical_transactions if t['execution_id'] not in existing_exec_ids]
+                    
+                    if new_historical:
+                        transactions.extend(new_historical)
+                        logger.info(f"📊 Added {len(new_historical)} historical transactions from chunked retrieval")
+                    else:
+                        logger.info("📊 No new historical transactions found in chunked retrieval")
+                        
+                except Exception as e:
+                    logger.error(f"❌ Error in chunked historical retrieval: {e}")
+            
+            # Sort by date/time descending
+            transactions.sort(key=lambda x: f"{x['date']} {x['time']}", reverse=True)
+            
+            logger.info(f"✅ Enhanced statements: {len(transactions)} transactions for {account_id} (range: {start_date.date()} to {end_date.date()})")
             return transactions
             
         except Exception as e:
             logger.error(f"❌ Error in enhanced account statements: {e}")
             return []
     
+    async def _get_chunked_historical_executions(self, account_id: str, start_date: datetime, end_date: datetime) -> List[Dict]:
+        """
+        Get historical executions using chunked date ranges to work around IBKR limitations.
+        
+        IBKR's execution history is limited, so we break down large requests into smaller chunks.
+        This helps retrieve data from much further back (e.g., May 2024).
+        """
+        if not await self._ensure_connected():
+            return []
+        
+        try:
+            logger.info(f"📅 Chunked historical retrieval: {start_date.date()} to {end_date.date()}")
+            
+            all_historical_transactions = []
+            chunk_size_days = 30  # Process 30 days at a time
+            
+            current_end = end_date
+            total_chunks = 0
+            
+            while current_end > start_date:
+                current_start = max(start_date, current_end - timedelta(days=chunk_size_days))
+                total_chunks += 1
+                
+                logger.info(f"📊 Processing chunk {total_chunks}: {current_start.date()} to {current_end.date()}")
+                
+                try:
+                    # Use IBKR's reqExecutions with date filter
+                    from ib_insync import ExecutionFilter
+                    
+                    # Create execution filter for this time range
+                    exec_filter = ExecutionFilter()
+                    exec_filter.acctCode = account_id
+                    # Note: IBKR's ExecutionFilter doesn't support date ranges directly
+                    # So we'll get all executions and filter by date locally
+                    
+                    # Request executions (this gets ALL executions for the account)
+                    # Fix asyncio event loop issue
+                    try:
+                        executions = await self.ib.reqExecutionsAsync(exec_filter)
+                    except AttributeError:
+                        # Fallback to synchronous method if async version doesn't exist
+                        executions = self.ib.reqExecutions(exec_filter)
+                    
+                    if executions:
+                        logger.info(f"🔍 Got {len(executions)} total executions from IBKR")
+                        
+                        # Filter by our date range locally
+                        chunk_transactions = []
+                        for execution_detail in executions:
+                            execution = execution_detail.execution
+                            contract = execution_detail.contract
+                            
+                            # Parse execution time and filter by date range
+                            exec_time = pd.to_datetime(execution.time).replace(tzinfo=None)
+                            
+                            if current_start <= exec_time <= current_end:
+                                transaction = {
+                                    'id': execution.execId,
+                                    'order_id': execution.orderId,
+                                    'account': execution.acctNumber,
+                                    'symbol': contract.symbol,
+                                    'description': f"{contract.symbol} {contract.secType} - Historical",
+                                    'type': 'TRADE',
+                                    'action': 'BUY' if execution.side == 'BOT' else 'SELL',
+                                    'quantity': float(execution.shares),
+                                    'price': float(execution.price),
+                                    'amount': float(execution.shares) * float(execution.price),
+                                    'commission': 0.0,  # Commission info may not be available in historical data
+                                    'currency': contract.currency or 'USD',
+                                    'exchange': execution.exchange,
+                                    'date': exec_time.strftime('%Y-%m-%d'),
+                                    'time': exec_time.strftime('%H:%M:%S'),
+                                    'settlement_date': (exec_time + timedelta(days=2)).strftime('%Y-%m-%d'),
+                                    'source': 'ibkr_chunked_historical',
+                                    'contract_type': contract.secType,
+                                    'execution_id': execution.execId,
+                                    'net_amount': float(execution.shares) * float(execution.price)
+                                }
+                                
+                                chunk_transactions.append(transaction)
+                        
+                        if chunk_transactions:
+                            all_historical_transactions.extend(chunk_transactions)
+                            logger.info(f"✅ Chunk {total_chunks}: Found {len(chunk_transactions)} transactions")
+                        else:
+                            logger.info(f"📊 Chunk {total_chunks}: No transactions in date range")
+                    
+                    else:
+                        logger.info(f"📊 Chunk {total_chunks}: No executions returned from IBKR")
+                    
+                    # Small delay between chunks to avoid overwhelming IBKR API
+                    await asyncio.sleep(0.5)
+                    
+                except Exception as chunk_error:
+                    logger.error(f"❌ Error in chunk {total_chunks} ({current_start.date()} to {current_end.date()}): {chunk_error}")
+                
+                # Move to previous chunk
+                current_end = current_start - timedelta(days=1)
+                
+                # Safety limit to prevent infinite loops
+                if total_chunks > 50:  # Max ~4 years of data
+                    logger.warning(f"⚠️ Reached safety limit of {total_chunks} chunks")
+                    break
+            
+            logger.info(f"🎯 Chunked retrieval complete: {len(all_historical_transactions)} historical transactions from {total_chunks} chunks")
+            return all_historical_transactions
+            
+        except Exception as e:
+            logger.error(f"❌ Error in chunked historical executions: {e}")
+            return []
+    
     async def get_enhanced_tax_lots(self, account_id: str) -> List[Dict]:
         """
         Get enhanced tax lots using multiple methods for maximum coverage.
+        FIXED: Better fallback when trades don't exist + proper market price handling
         """
         if not await self._ensure_connected():
             return []
@@ -411,82 +545,222 @@ class EnhancedIBKRClient:
                     
                     # Try to get detailed executions for this symbol
                     try:
-                        # Get executions for this contract
-                        executions = self.ib.executions()
+                        # ENHANCED APPROACH: Try multiple methods to get historical trade data
+                        
+                        # Method 1: Get all executions for this account and filter by symbol
+                        all_executions = self.ib.executions(account_id)
                         symbol_executions = [
-                            exec for exec in executions 
-                            if (exec.contract.symbol == position.contract.symbol and
-                                exec.execution.acctNumber == account_id and
-                                exec.execution.side == 'BOT')  # Only buys
+                            exec for exec in all_executions 
+                            if (exec.contract.symbol == position.contract.symbol and 
+                                exec.execution.side == 'BOT')  # Only buy orders create tax lots
                         ]
                         
-                        # Sort by execution time
-                        symbol_executions.sort(key=lambda x: x.execution.time)
+                        logger.info(f"Found {len(symbol_executions)} historical executions for {position.contract.symbol}")
                         
-                        # Create tax lots from executions
-                        for i, execution in enumerate(symbol_executions):
-                            exec_time = pd.to_datetime(execution.execution.time).replace(tzinfo=None)
+                        # Method 2: Also try trades() as a backup
+                        trades = self.ib.trades()
+                        symbol_trades = []
+                        
+                        for trade in trades:
+                            # Check if this trade is for our symbol and account
+                            if (trade.contract.symbol == position.contract.symbol and
+                                any(fill.execution.acctNumber == account_id and fill.execution.side == 'BOT' 
+                                    for fill in trade.fills)):
+                                symbol_trades.append(trade)
+                        
+                        logger.info(f"Found {len(symbol_trades)} historical trades for {position.contract.symbol}")
+                        
+                        # Combine both approaches - prefer executions if available
+                        historical_data_found = len(symbol_executions) > 0 or len(symbol_trades) > 0
+                        
+                        if historical_data_found:
+                            # PRIORITY 1: Use direct executions data (more reliable)
+                            if symbol_executions:
+                                logger.info(f"Processing {len(symbol_executions)} executions for {position.contract.symbol}")
+                                
+                                # Sort executions by time
+                                symbol_executions.sort(key=lambda exec: exec.execution.time)
+                                
+                                for exec_data in symbol_executions:
+                                    execution = exec_data.execution
+                                    contract = exec_data.contract
+                                    
+                                    # Ensure this is the right account and side
+                                    if execution.acctNumber != account_id or execution.side != 'BOT':
+                                        continue
+                                    
+                                    exec_time = pd.to_datetime(execution.time).replace(tzinfo=None)
+                                    days_held = (datetime.now() - exec_time).days
+                                    
+                                    # Get current market price
+                                    try:
+                                        current_price = await market_data_service.get_current_price(position.contract.symbol)
+                                        if not current_price or current_price <= 0:
+                                            current_price = position.avgCost
+                                    except Exception as e:
+                                        logger.warning(f"Market data service unavailable for {position.contract.symbol}: {e}")
+                                        current_price = position.avgCost
+                                    
+                                    cost_per_share = execution.price
+                                    shares = execution.shares
+                                    current_value = shares * current_price
+                                    cost_basis = shares * cost_per_share
+                                    unrealized_pnl = current_value - cost_basis
+                                    unrealized_pnl_pct = (unrealized_pnl / cost_basis * 100) if cost_basis > 0 else 0
+                                    
+                                    tax_lot = {
+                                        'lot_id': f"enhanced_ibkr_{execution.execId}",
+                                        'account_id': account_id,
+                                        'symbol': position.contract.symbol,
+                                        'acquisition_date': exec_time.strftime('%Y-%m-%d'),
+                                        'quantity': float(shares),
+                                        'cost_per_share': float(cost_per_share),
+                                        'current_price': float(current_price),
+                                        'cost_basis': float(cost_basis),
+                                        'current_value': float(current_value),
+                                        'unrealized_pnl': float(unrealized_pnl),
+                                        'unrealized_pnl_pct': float(unrealized_pnl_pct),
+                                        'days_held': days_held,
+                                        'is_long_term': days_held >= 365,
+                                        'contract_type': position.contract.secType,
+                                        'currency': position.contract.currency or 'USD',
+                                        'execution_id': execution.execId,
+                                        'source': 'ibkr_real_execution'
+                                    }
+                                    
+                                    tax_lots.append(tax_lot)
+                                    
+                            # PRIORITY 2: Fall back to trades data if no executions
+                            elif symbol_trades:
+                                logger.info(f"Falling back to trades data for {position.contract.symbol}")
+                                
+                                # Sort by first fill execution time
+                                symbol_trades.sort(key=lambda trade: min(fill.execution.time for fill in trade.fills))
+                                
+                                # Create tax lots from trade fills
+                                for trade in symbol_trades:
+                                    for fill in trade.fills:
+                                        execution = fill.execution
+                                        contract = fill.contract
+                                        
+                                        # Only process buys for this account
+                                        if execution.acctNumber != account_id or execution.side != 'BOT':
+                                            continue
+                                            
+                                        exec_time = pd.to_datetime(execution.time).replace(tzinfo=None)
+                                        days_held = (datetime.now() - exec_time).days
+                                        
+                                        # Get current market price
+                                        try:
+                                            current_price = await market_data_service.get_current_price(position.contract.symbol)
+                                            if not current_price or current_price <= 0:
+                                                current_price = position.avgCost
+                                        except Exception as e:
+                                            logger.warning(f"Market data service unavailable for {position.contract.symbol}: {e}")
+                                            current_price = position.avgCost
+                                        
+                                        cost_per_share = execution.price
+                                        shares = execution.shares
+                                        current_value = shares * current_price
+                                        cost_basis = shares * cost_per_share
+                                        unrealized_pnl = current_value - cost_basis
+                                        unrealized_pnl_pct = (unrealized_pnl / cost_basis * 100) if cost_basis > 0 else 0
+                                        
+                                        tax_lot = {
+                                            'lot_id': f"enhanced_ibkr_{execution.execId}",
+                                            'account_id': account_id,
+                                            'symbol': position.contract.symbol,
+                                            'acquisition_date': exec_time.strftime('%Y-%m-%d'),
+                                            'quantity': float(shares),
+                                            'cost_per_share': float(cost_per_share),
+                                            'current_price': float(current_price),
+                                            'cost_basis': float(cost_basis),
+                                            'current_value': float(current_value),
+                                            'unrealized_pnl': float(unrealized_pnl),
+                                            'unrealized_pnl_pct': float(unrealized_pnl_pct),
+                                            'days_held': days_held,
+                                            'is_long_term': days_held >= 365,
+                                            'contract_type': position.contract.secType,
+                                            'currency': position.contract.currency or 'USD',
+                                            'execution_id': execution.execId,
+                                            'source': 'ibkr_real_trade'
+                                        }
+                                        
+                                        tax_lots.append(tax_lot)
+                        else:
+                            # LAST RESORT: No historical data found, create estimated tax lot
+                            logger.error(f"❌ NO REAL TAX LOT DATA FOUND for {position.contract.symbol} - using ESTIMATED tax lot (this should be avoided!)")
+                            logger.error(f"   - Executions found: {len(symbol_executions) if 'symbol_executions' in locals() else 0}")
+                            logger.error(f"   - Trades found: {len(symbol_trades) if 'symbol_trades' in locals() else 0}")
+                            logger.error(f"   - This indicates missing historical trade data from IBKR")
                             
-                            # Calculate days held
-                            days_held = (datetime.now() - exec_time).days
+                            # Get current market price safely
+                            try:
+                                current_price = await market_data_service.get_current_price(position.contract.symbol)
+                                if not current_price or current_price <= 0:
+                                    current_price = position.avgCost
+                            except Exception as e:
+                                logger.warning(f"Market data failed for {position.contract.symbol}: {e}")
+                                current_price = position.avgCost
                             
-                            # Get current market price
-                            current_price = position.marketPrice if position.marketPrice else execution.execution.price
-                            
-                            cost_per_share = execution.execution.price
-                            shares = execution.execution.shares
-                            current_value = shares * current_price
-                            cost_basis = shares * cost_per_share
+                            # Create estimated tax lot from position data
+                            cost_basis = float(position.position * position.avgCost)
+                            current_value = float(position.position * current_price)
                             unrealized_pnl = current_value - cost_basis
                             unrealized_pnl_pct = (unrealized_pnl / cost_basis * 100) if cost_basis > 0 else 0
                             
                             tax_lot = {
-                                'lot_id': f"enhanced_ibkr_{execution.execution.execId}",
+                                'lot_id': f"⚠️_ESTIMATED_{position.contract.symbol}_{account_id}",
                                 'account_id': account_id,
                                 'symbol': position.contract.symbol,
-                                'acquisition_date': exec_time.strftime('%Y-%m-%d'),
-                                'quantity': float(shares),
-                                'cost_per_share': float(cost_per_share),
+                                'acquisition_date': '2024-05-09',  # Default to your start date
+                                'quantity': float(position.position),
+                                'cost_per_share': float(position.avgCost),
                                 'current_price': float(current_price),
-                                'cost_basis': float(cost_basis),
-                                'current_value': float(current_value),
-                                'unrealized_pnl': float(unrealized_pnl),
-                                'unrealized_pnl_pct': float(unrealized_pnl_pct),
-                                'days_held': days_held,
-                                'is_long_term': days_held >= 365,
+                                'cost_basis': cost_basis,
+                                'current_value': current_value,
+                                'unrealized_pnl': unrealized_pnl,
+                                'unrealized_pnl_pct': unrealized_pnl_pct,
+                                'days_held': (datetime.now() - datetime.strptime('2024-05-09', '%Y-%m-%d')).days,
+                                'is_long_term': True,  # Assume long-term for estimated
                                 'contract_type': position.contract.secType,
                                 'currency': position.contract.currency or 'USD',
-                                'execution_id': execution.execution.execId,
-                                'source': 'ibkr_enhanced'
+                                'execution_id': None,
+                                'source': '⚠️_ESTIMATED_TAX_LOT_⚠️'
                             }
                             
                             tax_lots.append(tax_lot)
-                            
+                        
                     except Exception as e:
                         logger.error(f"❌ Error processing tax lots for {position.contract.symbol}: {e}")
                         
-                        # Fallback: Create estimated tax lot from position
-                        tax_lot = {
-                            'lot_id': f"estimated_{position.contract.symbol}_{account_id}",
-                            'account_id': account_id,
-                            'symbol': position.contract.symbol,
-                            'acquisition_date': '2024-05-09',  # Default to your start date
-                            'quantity': float(position.position),
-                            'cost_per_share': float(position.avgCost),
-                            'current_price': float(position.marketPrice) if position.marketPrice else float(position.avgCost),
-                            'cost_basis': float(position.position * position.avgCost),
-                            'current_value': float(position.marketValue) if position.marketValue else float(position.position * position.avgCost),
-                            'unrealized_pnl': float(position.unrealizedPNL) if position.unrealizedPNL else 0.0,
-                            'unrealized_pnl_pct': 0.0,
-                            'days_held': 0,
-                            'is_long_term': False,
-                            'contract_type': position.contract.secType,
-                            'currency': position.contract.currency or 'USD',
-                            'execution_id': None,
-                            'source': 'ibkr_estimated'
-                        }
-                        
-                        tax_lots.append(tax_lot)
+                        # LAST RESORT FALLBACK: Create basic estimated tax lot
+                        try:
+                            tax_lot = {
+                                'lot_id': f"basic_{position.contract.symbol}_{account_id}",
+                                'account_id': account_id,
+                                'symbol': position.contract.symbol,
+                                'acquisition_date': '2024-05-09',
+                                'quantity': float(position.position),
+                                'cost_per_share': float(position.avgCost),
+                                'current_price': float(position.avgCost),  # Fallback to avg cost
+                                'cost_basis': float(position.position * position.avgCost),
+                                'current_value': float(position.position * position.avgCost),
+                                'unrealized_pnl': 0.0,  # Can't calculate without current price
+                                'unrealized_pnl_pct': 0.0,
+                                'days_held': 0,
+                                'is_long_term': False,
+                                'contract_type': position.contract.secType,
+                                'currency': position.contract.currency or 'USD',
+                                'execution_id': None,
+                                'source': 'ibkr_basic_fallback'
+                            }
+                            
+                            tax_lots.append(tax_lot)
+                            logger.info(f"Created basic fallback tax lot for {position.contract.symbol}")
+                            
+                        except Exception as fallback_error:
+                            logger.error(f"❌ Even fallback failed for {position.contract.symbol}: {fallback_error}")
             
             logger.info(f"✅ Enhanced tax lots: {len(tax_lots)} lots for {account_id}")
             return tax_lots

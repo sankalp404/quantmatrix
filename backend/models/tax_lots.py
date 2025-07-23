@@ -23,7 +23,7 @@ class TaxLot(Base):
     holding_id = Column(Integer, ForeignKey("holdings.id", ondelete="CASCADE"))
     
     # Tax lot details
-    symbol = Column(String(10), nullable=False, index=True)
+    symbol = Column(String(50), nullable=False, index=True)  # Increased from 10 to 50 for options symbols
     account_id = Column(String(20), nullable=False)
     
     # Purchase information

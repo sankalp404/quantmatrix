@@ -39,7 +39,8 @@ import {
 import { FiTrendingUp, FiTrendingDown, FiDollarSign, FiPieChart, FiActivity, FiRefreshCw, FiFilter } from 'react-icons/fi';
 import { PieChart, Pie, Cell, ResponsiveContainer, Tooltip, Legend } from 'recharts';
 import { portfolioApi, handleApiError } from '../services/api';
-import AccountSelector from '../components/AccountSelector';
+import AccountFilterWrapper from '../components/AccountFilterWrapper';
+import { transformPortfolioToAccounts } from '../hooks/useAccountFilter';
 
 interface DashboardData {
   total_value: number;
@@ -171,11 +172,17 @@ const Dashboard: React.FC = () => {
     }).format(value);
   };
 
-  const formatPercent = (value: number) => {
+  const formatPercent = (value: number | undefined | null) => {
+    if (value === undefined || value === null || isNaN(value)) {
+      return '0.00%';
+    }
     return `${value >= 0 ? '+' : ''}${value.toFixed(2)}%`;
   };
 
-  const getChangeColor = (value: number) => {
+  const getChangeColor = (value: number | undefined | null) => {
+    if (value === undefined || value === null || isNaN(value)) {
+      return 'gray.500';
+    }
     return value >= 0 ? 'green.500' : 'red.500';
   };
 
@@ -230,246 +237,277 @@ const Dashboard: React.FC = () => {
           </Text>
         </Box>
 
-        {/* Unified Account Selector */}
-        <AccountSelector
+        {/* Unified Account Filter */}
+        <AccountFilterWrapper
+          data={dashboardData.top_performers || []}
           accounts={dashboardData.accounts_summary}
-          selectedAccount={selectedBrokerage === 'all' ? 'all' : selectedBrokerage}
+          loading={loading}
+          error={error}
+          config={{
+            showAllOption: true,
+            showSummary: true,
+            variant: 'detailed',
+            size: 'md'
+          }}
           onAccountChange={(accountId) => setSelectedBrokerage(accountId)}
-          showAllOption={true}
-          showSummary={true}
-          variant="detailed"
-        />
+        >
+          {(filteredData, filterState) => (
+            <>
+              {/* Main Dashboard Content */}
+              <Grid templateColumns={{ base: "1fr", md: "repeat(2, 1fr)", lg: "repeat(4, 1fr)" }} gap={6}>
+                {/* Total Portfolio Value */}
+                <Card bg={cardBg} borderColor={borderColor}>
+                  <CardBody>
+                    <Stat>
+                      <StatLabel>
+                        <HStack>
+                          <FiDollarSign />
+                          <Text>Total Value</Text>
+                        </HStack>
+                      </StatLabel>
+                      <StatNumber>{formatCurrency(dashboardData.total_value)}</StatNumber>
+                      <StatHelpText>
+                        <StatArrow type={dashboardData.day_change >= 0 ? 'increase' : 'decrease'} />
+                        {formatPercent(dashboardData.day_change_pct)} today
+                      </StatHelpText>
+                    </Stat>
+                  </CardBody>
+                </Card>
 
-        {/* Main Dashboard Content */}
-        <SimpleGrid columns={{ base: 1, lg: 2 }} spacing={6}>
-          {/* Portfolio Overview */}
-          <Card bg={cardBg}>
-            <CardHeader>
-              <HStack justify="space-between">
-                <Text fontSize="lg" fontWeight="bold">Portfolio Overview</Text>
-                <Button
-                  leftIcon={<FiRefreshCw />}
-                  onClick={syncPortfolioData}
-                  isLoading={syncing}
-                  loadingText="Syncing..."
-                  colorScheme="blue"
-                  size="sm"
-                >
-                  Sync Portfolio
-                </Button>
-              </HStack>
-            </CardHeader>
-            <CardBody>
-              <SimpleGrid columns={2} spacing={4}>
-                <Stat>
-                  <StatLabel>Total Value</StatLabel>
-                  <StatNumber>{formatCurrency(dashboardData.total_value)}</StatNumber>
-                  <StatHelpText>
-                    <StatArrow type={dashboardData.total_unrealized_pnl >= 0 ? 'increase' : 'decrease'} />
-                    {dashboardData.total_unrealized_pnl_pct.toFixed(2)}%
-                  </StatHelpText>
-                </Stat>
-                <Stat>
-                  <StatLabel>Day Change</StatLabel>
-                  <StatNumber color={getChangeColor(dashboardData.day_change)}>
-                    {formatCurrency(dashboardData.day_change)}
-                  </StatNumber>
-                  <StatHelpText>
-                    <StatArrow type={dashboardData.day_change >= 0 ? 'increase' : 'decrease'} />
-                    {dashboardData.day_change_pct.toFixed(2)}%
-                  </StatHelpText>
-                </Stat>
-              </SimpleGrid>
-            </CardBody>
-          </Card>
+                {/* Unrealized P&L */}
+                <Card bg={cardBg} borderColor={borderColor}>
+                  <CardBody>
+                    <Stat>
+                      <StatLabel>
+                        <HStack>
+                          <FiTrendingUp />
+                          <Text>Unrealized P&L</Text>
+                        </HStack>
+                      </StatLabel>
+                      <StatNumber color={getChangeColor(dashboardData.total_unrealized_pnl)}>
+                        {formatCurrency(dashboardData.total_unrealized_pnl)}
+                      </StatNumber>
+                      <StatHelpText>
+                        {formatPercent(dashboardData.total_unrealized_pnl_pct)} total return
+                      </StatHelpText>
+                    </Stat>
+                  </CardBody>
+                </Card>
 
-          {/* Key Metrics Row */}
-          <SimpleGrid columns={{ base: 1, md: 2, lg: 4 }} spacing={6} mb={8}>
-            <Card bg={cardBg} border="1px" borderColor={borderColor}>
-              <CardBody>
-                <Stat>
-                  <StatLabel>Total Positions</StatLabel>
-                  <StatNumber fontSize="2xl">{dashboardData.holdings_count}</StatNumber>
-                  <StatHelpText>
-                    Across {dashboardData.accounts_count} accounts
-                  </StatHelpText>
-                </Stat>
-              </CardBody>
-            </Card>
+                {/* Day Change */}
+                <Card bg={cardBg} borderColor={borderColor}>
+                  <CardBody>
+                    <Stat>
+                      <StatLabel>
+                        <HStack>
+                          <FiActivity />
+                          <Text>Day Change</Text>
+                        </HStack>
+                      </StatLabel>
+                      <StatNumber color={getChangeColor(dashboardData.day_change)}>
+                        {formatCurrency(dashboardData.day_change)}
+                      </StatNumber>
+                      <StatHelpText>
+                        <StatArrow type={dashboardData.day_change >= 0 ? 'increase' : 'decrease'} />
+                        {formatPercent(dashboardData.day_change_pct)}
+                      </StatHelpText>
+                    </Stat>
+                  </CardBody>
+                </Card>
 
-            <Card bg={cardBg} border="1px" borderColor={borderColor}>
-              <CardBody>
-                <Stat>
-                  <StatLabel>Cost Basis</StatLabel>
-                  <StatNumber fontSize="2xl">{formatCurrency(dashboardData.total_cost_basis)}</StatNumber>
-                  <StatHelpText>
-                    Total invested capital
-                  </StatHelpText>
-                </Stat>
-              </CardBody>
-            </Card>
+                {/* Holdings Count */}
+                <Card bg={cardBg} borderColor={borderColor}>
+                  <CardBody>
+                    <Stat>
+                      <StatLabel>
+                        <HStack>
+                          <FiPieChart />
+                          <Text>Holdings</Text>
+                        </HStack>
+                      </StatLabel>
+                      <StatNumber>{dashboardData.holdings_count}</StatNumber>
+                      <StatHelpText>
+                        {dashboardData.accounts_count} accounts
+                      </StatHelpText>
+                    </Stat>
+                  </CardBody>
+                </Card>
+              </Grid>
 
-            <Card bg={cardBg} border="1px" borderColor={borderColor}>
-              <CardBody>
-                <Stat>
-                  <StatLabel>Day Change</StatLabel>
-                  <StatNumber fontSize="2xl" color={getChangeColor(dashboardData.day_change)}>
-                    {formatCurrency(dashboardData.day_change)}
-                  </StatNumber>
-                  <StatHelpText>
-                    <StatArrow type={dashboardData.day_change >= 0 ? "increase" : "decrease"} />
-                    {formatPercent(dashboardData.day_change_pct)}
-                  </StatHelpText>
-                </Stat>
-              </CardBody>
-            </Card>
-          </SimpleGrid>
+              {/* Secondary metrics and charts */}
+              <Grid templateColumns={{ base: "1fr", lg: "2fr 1fr" }} gap={6}>
+                {/* Sector Allocation */}
+                <Card bg={cardBg} borderColor={borderColor}>
+                  <CardHeader>
+                    <Heading size="md">Sector Allocation</Heading>
+                  </CardHeader>
+                  <CardBody>
+                    {dashboardData.sector_allocation && dashboardData.sector_allocation.length > 0 ? (
+                      <ResponsiveContainer width="100%" height={300}>
+                        <PieChart>
+                          <Pie
+                            data={dashboardData.sector_allocation}
+                            cx="50%"
+                            cy="50%"
+                            labelLine={false}
+                            outerRadius={80}
+                            fill="#8884d8"
+                            dataKey="value"
+                            label={({ name, percent }) => `${name}: ${(percent * 100).toFixed(0)}%`}
+                          >
+                            {dashboardData.sector_allocation.map((entry, index) => (
+                              <Cell key={`cell-${index}`} fill={CHART_COLORS[index % CHART_COLORS.length]} />
+                            ))}
+                          </Pie>
+                          <Tooltip formatter={(value) => formatCurrency(Number(value))} />
+                          <Legend />
+                        </PieChart>
+                      </ResponsiveContainer>
+                    ) : (
+                      <Box textAlign="center" py={8}>
+                        <Text color="gray.500">No sector data available</Text>
+                      </Box>
+                    )}
+                  </CardBody>
+                </Card>
 
-          {/* Accounts Summary */}
-          <Card bg={cardBg} border="1px" borderColor={borderColor} mb={8}>
-            <CardHeader>
-              <Text fontSize="lg" fontWeight="semibold">Accounts Summary</Text>
-            </CardHeader>
-            <CardBody>
-              <TableContainer>
-                <Table size="sm">
-                  <Thead>
-                    <Tr>
-                      <Th>Account</Th>
-                      <Th>Brokerage</Th>
-                      <Th isNumeric>Value</Th>
-                      <Th isNumeric>P&L</Th>
-                      <Th isNumeric>Positions</Th>
-                      <Th isNumeric>Allocation</Th>
-                    </Tr>
-                  </Thead>
-                  <Tbody>
-                    {dashboardData.accounts_summary.map((account) => (
-                      <Tr key={account.account_id}>
-                        <Td>
-                          <VStack align="start" spacing={1}>
-                            <Text fontWeight="bold">{account.account_name}</Text>
-                            <Text fontSize="xs" color="gray.500">{account.account_id}</Text>
-                          </VStack>
-                        </Td>
-                        <Td>
-                          <Badge colorScheme={account.broker === 'IBKR' ? 'blue' : 'orange'}>
-                            {account.broker}
-                          </Badge>
-                        </Td>
-                        <Td isNumeric>{formatCurrency(account.total_value)}</Td>
-                        <Td isNumeric color={getChangeColor(account.unrealized_pnl)}>
-                          {formatCurrency(account.unrealized_pnl)}
-                        </Td>
-                        <Td isNumeric>{account.positions_count}</Td>
-                        <Td isNumeric>{account.allocation_pct.toFixed(1)}%</Td>
-                      </Tr>
-                    ))}
-                  </Tbody>
-                </Table>
-              </TableContainer>
-            </CardBody>
-          </Card>
-
-          {/* Charts and Performance Row */}
-          <Grid templateColumns={{ base: '1fr', lg: '1fr 1fr' }} gap={8} mb={8}>
-            {/* Sector Allocation */}
-            <Card bg={cardBg} border="1px" borderColor={borderColor}>
-              <CardHeader>
-                <Text fontSize="lg" fontWeight="semibold">Sector Allocation</Text>
-              </CardHeader>
-              <CardBody>
-                {dashboardData.sector_allocation.length > 0 ? (
-                  <Box height="300px">
-                    <ResponsiveContainer width="100%" height="100%">
-                      <PieChart>
-                        <Pie
-                          data={dashboardData.sector_allocation}
-                          cx="50%"
-                          cy="50%"
-                          labelLine={false}
-                          label={({ name, percentage }) => `${name} ${percentage.toFixed(1)}%`}
-                          outerRadius={80}
-                          fill="#8884d8"
-                          dataKey="value"
-                        >
-                          {dashboardData.sector_allocation.map((entry, index) => (
-                            <Cell key={`cell-${index}`} fill={CHART_COLORS[index % CHART_COLORS.length]} />
-                          ))}
-                        </Pie>
-                        <Tooltip formatter={(value) => formatCurrency(value as number)} />
-                      </PieChart>
-                    </ResponsiveContainer>
-                  </Box>
-                ) : (
-                  <Text color="gray.500" textAlign="center" py={8}>
-                    No sector data available
-                  </Text>
-                )}
-              </CardBody>
-            </Card>
-
-            {/* Top Performers */}
-            <Card bg={cardBg} border="1px" borderColor={borderColor}>
-              <CardHeader>
-                <Text fontSize="lg" fontWeight="semibold">Top Performers</Text>
-              </CardHeader>
-              <CardBody>
-                <VStack spacing={4} align="stretch">
-                  {dashboardData.top_performers.length > 0 ?
-                    dashboardData.top_performers.map((holding, index) => (
-                      <Flex key={`${holding.symbol}-${holding.account_id}`} justify="space-between" align="center">
-                        <VStack align="start" spacing={0}>
-                          <Text fontWeight="bold">{holding.symbol}</Text>
-                          <HStack spacing={2}>
-                            <Badge size="sm" colorScheme={holding.brokerage === 'IBKR' ? 'blue' : 'orange'}>
-                              {holding.brokerage}
-                            </Badge>
-                            <Text fontSize="xs" color="gray.500">{holding.sector}</Text>
+                {/* Account Summary */}
+                <Card bg={cardBg} borderColor={borderColor}>
+                  <CardHeader>
+                    <Heading size="md">Account Summary</Heading>
+                  </CardHeader>
+                  <CardBody>
+                    <VStack spacing={4} align="stretch">
+                      {dashboardData.accounts_summary.map((account, index) => (
+                        <Box key={account.account_id}>
+                          <HStack justify="space-between" mb={2}>
+                            <VStack align="start" spacing={0}>
+                              <Text fontWeight="medium" fontSize="sm">
+                                {account.account_name}
+                              </Text>
+                              <Badge colorScheme={account.broker === 'IBKR' ? 'blue' : 'orange'} size="sm">
+                                {account.broker}
+                              </Badge>
+                            </VStack>
+                            <VStack align="end" spacing={0}>
+                              <Text fontWeight="bold" fontSize="sm">
+                                {formatCurrency(account.total_value)}
+                              </Text>
+                              <Text
+                                fontSize="xs"
+                                color={getChangeColor(account.unrealized_pnl_pct)}
+                              >
+                                {formatPercent(account.unrealized_pnl_pct)}
+                              </Text>
+                            </VStack>
                           </HStack>
-                        </VStack>
-                        <VStack align="end" spacing={0}>
-                          <Text fontWeight="bold">{formatCurrency(holding.market_value)}</Text>
-                          <Text fontSize="sm" color="green.500">
-                            {formatPercent(holding.unrealized_pnl_pct)}
-                          </Text>
-                        </VStack>
-                      </Flex>
-                    )) :
-                    <Text color="gray.500" textAlign="center">No positions available</Text>
-                  }
-                </VStack>
-              </CardBody>
-            </Card>
-          </Grid>
+                          <Progress
+                            value={account.allocation_pct || 0}
+                            size="sm"
+                            colorScheme={(account.unrealized_pnl_pct || 0) >= 0 ? 'green' : 'red'}
+                            borderRadius="md"
+                          />
+                          {index < dashboardData.accounts_summary.length - 1 && <Divider mt={4} />}
+                        </Box>
+                      ))}
+                    </VStack>
+                  </CardBody>
+                </Card>
+              </Grid>
 
-          {/* Bottom Row - Top Losers */}
-          {dashboardData.top_losers.length > 0 && (
-            <Card bg={cardBg} border="1px" borderColor={borderColor}>
-              <CardHeader>
-                <Text fontSize="lg" fontWeight="semibold">Top Losers</Text>
-              </CardHeader>
-              <CardBody>
-                <SimpleGrid columns={{ base: 1, md: 2, lg: 5 }} spacing={4}>
-                  {dashboardData.top_losers.map((holding, index) => (
-                    <Box key={`${holding.symbol}-${holding.account_id}`} p={3} borderRadius="md" bg="red.50" border="1px" borderColor="red.200">
-                      <VStack spacing={2}>
-                        <Text fontWeight="bold">{holding.symbol}</Text>
-                        <Text fontSize="sm" color="red.600">
-                          {formatPercent(holding.unrealized_pnl_pct)}
-                        </Text>
-                        <Text fontSize="xs">{formatCurrency(holding.market_value)}</Text>
-                        <Badge size="sm" colorScheme={holding.brokerage === 'IBKR' ? 'blue' : 'orange'}>
-                          {holding.brokerage}
-                        </Badge>
-                      </VStack>
-                    </Box>
-                  ))}
-                </SimpleGrid>
-              </CardBody>
-            </Card>
+              {/* Top Performers and Losers */}
+              <Grid templateColumns={{ base: "1fr", lg: "1fr 1fr" }} gap={6}>
+                {/* Top Performers */}
+                <Card bg={cardBg} borderColor={borderColor}>
+                  <CardHeader>
+                    <HStack justify="space-between">
+                      <Heading size="md">Top Performers</Heading>
+                      <Badge colorScheme="green">
+                        {dashboardData.top_performers.length} holdings
+                      </Badge>
+                    </HStack>
+                  </CardHeader>
+                  <CardBody>
+                    {dashboardData.top_performers.length > 0 ? (
+                      <TableContainer>
+                        <Table size="sm">
+                          <Thead>
+                            <Tr>
+                              <Th>Symbol</Th>
+                              <Th isNumeric>Value</Th>
+                              <Th isNumeric>P&L %</Th>
+                            </Tr>
+                          </Thead>
+                          <Tbody>
+                            {dashboardData.top_performers.map((holding, index) => (
+                              <Tr key={index}>
+                                <Td fontWeight="medium">{holding.symbol}</Td>
+                                <Td isNumeric>{formatCurrency(holding.market_value)}</Td>
+                                <Td isNumeric>
+                                  <Text color="green.500" fontWeight="medium">
+                                    +{formatPercent(holding.unrealized_pnl_pct)}
+                                  </Text>
+                                </Td>
+                              </Tr>
+                            ))}
+                          </Tbody>
+                        </Table>
+                      </TableContainer>
+                    ) : (
+                      <Box textAlign="center" py={4}>
+                        <Text color="gray.500" fontSize="sm">No performance data available</Text>
+                      </Box>
+                    )}
+                  </CardBody>
+                </Card>
+
+                {/* Top Losers */}
+                <Card bg={cardBg} borderColor={borderColor}>
+                  <CardHeader>
+                    <HStack justify="space-between">
+                      <Heading size="md">Biggest Losers</Heading>
+                      <Badge colorScheme="red">
+                        {dashboardData.top_losers.length} holdings
+                      </Badge>
+                    </HStack>
+                  </CardHeader>
+                  <CardBody>
+                    {dashboardData.top_losers.length > 0 ? (
+                      <TableContainer>
+                        <Table size="sm">
+                          <Thead>
+                            <Tr>
+                              <Th>Symbol</Th>
+                              <Th isNumeric>Value</Th>
+                              <Th isNumeric>P&L %</Th>
+                            </Tr>
+                          </Thead>
+                          <Tbody>
+                            {dashboardData.top_losers.map((holding, index) => (
+                              <Tr key={index}>
+                                <Td fontWeight="medium">{holding.symbol}</Td>
+                                <Td isNumeric>{formatCurrency(holding.market_value)}</Td>
+                                <Td isNumeric>
+                                  <Text color="red.500" fontWeight="medium">
+                                    {formatPercent(holding.unrealized_pnl_pct)}
+                                  </Text>
+                                </Td>
+                              </Tr>
+                            ))}
+                          </Tbody>
+                        </Table>
+                      </TableContainer>
+                    ) : (
+                      <Box textAlign="center" py={4}>
+                        <Text color="gray.500" fontSize="sm">No performance data available</Text>
+                      </Box>
+                    )}
+                  </CardBody>
+                </Card>
+              </Grid>
+            </>
           )}
-        </SimpleGrid>
+        </AccountFilterWrapper>
       </VStack>
     </Box>
   );
