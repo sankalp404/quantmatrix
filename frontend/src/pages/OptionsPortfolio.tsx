@@ -494,29 +494,7 @@ const OptionsPortfolio: React.FC = () => {
     fetchOptionsData(); // Call without account filter to get all data
   };
 
-  // Filter and sort positions
-  const filteredPositions = useMemo(() => {
-    return positions.filter(position => {
-      const matchesSearch = position.underlying_symbol.toLowerCase().includes(searchTerm.toLowerCase()) ||
-        position.symbol.toLowerCase().includes(searchTerm.toLowerCase());
-      const matchesType = filterType === 'all' ||
-        (filterType === 'calls' && position.option_type === 'call') ||
-        (filterType === 'puts' && position.option_type === 'put');
-      return matchesSearch && matchesType;
-    });
-  }, [positions, searchTerm, filterType]);
-
-  const sortedPositions = useMemo(() => {
-    return [...filteredPositions].sort((a, b) => {
-      switch (sortBy) {
-        case 'days_to_expiration': return a.days_to_expiration - b.days_to_expiration;
-        case 'unrealized_pnl': return b.unrealized_pnl - a.unrealized_pnl;
-        case 'market_value': return b.market_value - a.market_value;
-        case 'underlying_symbol': return a.underlying_symbol.localeCompare(b.underlying_symbol);
-        default: return 0;
-      }
-    });
-  }, [filteredPositions, sortBy]);
+  // Note: Filtering and sorting is now handled inside AccountFilterWrapper
 
   // Enhanced data for charts
   const typeDistribution = useMemo(() => {
@@ -718,9 +696,9 @@ const OptionsPortfolio: React.FC = () => {
             // Use filtered positions directly instead of triggering new API calls
             // The filtering is already handled by AccountFilterWrapper
 
-            // Use the filtered positions instead of the original positions
-            const filteredAndSortedPositions = useMemo(() => {
-              let filtered = accountFilteredPositions.filter(position => {
+            // Filter positions without pre-sorting (let SortableTable handle sorting)
+            const filteredPositions = useMemo(() => {
+              return accountFilteredPositions.filter(position => {
                 const matchesSearch = position.underlying_symbol.toLowerCase().includes(searchTerm.toLowerCase()) ||
                   position.symbol.toLowerCase().includes(searchTerm.toLowerCase());
                 const matchesType = filterType === 'all' ||
@@ -728,22 +706,12 @@ const OptionsPortfolio: React.FC = () => {
                   (filterType === 'puts' && position.option_type === 'put');
                 return matchesSearch && matchesType;
               });
-
-              return filtered.sort((a, b) => {
-                switch (sortBy) {
-                  case 'days_to_expiration': return a.days_to_expiration - b.days_to_expiration;
-                  case 'unrealized_pnl': return b.unrealized_pnl - a.unrealized_pnl;
-                  case 'market_value': return b.market_value - a.market_value;
-                  case 'underlying_symbol': return a.underlying_symbol.localeCompare(b.underlying_symbol);
-                  default: return 0;
-                }
-              });
-            }, [accountFilteredPositions, searchTerm, filterType, sortBy]);
+            }, [accountFilteredPositions, searchTerm, filterType]);
 
             // Recalculate underlyings based on filtered positions
             const filteredUnderlyings = useMemo(() => {
               const underlyingsMap: Record<string, UnderlyingGroup> = {};
-              filteredAndSortedPositions.forEach(position => {
+              filteredPositions.forEach(position => {
                 if (!underlyingsMap[position.underlying_symbol]) {
                   underlyingsMap[position.underlying_symbol] = { calls: [], puts: [], total_value: 0, total_pnl: 0 };
                 }
@@ -758,11 +726,11 @@ const OptionsPortfolio: React.FC = () => {
                 underlyingsMap[position.underlying_symbol].total_pnl += position.unrealized_pnl;
               });
               return underlyingsMap;
-            }, [filteredAndSortedPositions]);
+            }, [filteredPositions]);
 
             // Calculate dynamic summary from filtered positions
             const filteredSummary = useMemo(() => {
-              if (filteredAndSortedPositions.length === 0) {
+              if (filteredPositions.length === 0) {
                 return {
                   total_positions: 0,
                   total_market_value: 0,
@@ -774,14 +742,14 @@ const OptionsPortfolio: React.FC = () => {
                 };
               }
 
-              const totalValue = filteredAndSortedPositions.reduce((sum, pos) => sum + pos.market_value, 0);
-              const totalPnL = filteredAndSortedPositions.reduce((sum, pos) => sum + pos.unrealized_pnl, 0);
-              const totalDayPnL = filteredAndSortedPositions.reduce((sum, pos) => sum + pos.day_pnl, 0);
-              const callsCount = filteredAndSortedPositions.filter(pos => pos.option_type === 'call').length;
-              const putsCount = filteredAndSortedPositions.filter(pos => pos.option_type === 'put').length;
+              const totalValue = filteredPositions.reduce((sum, pos) => sum + pos.market_value, 0);
+              const totalPnL = filteredPositions.reduce((sum, pos) => sum + pos.unrealized_pnl, 0);
+              const totalDayPnL = filteredPositions.reduce((sum, pos) => sum + pos.day_pnl, 0);
+              const callsCount = filteredPositions.filter(pos => pos.option_type === 'call').length;
+              const putsCount = filteredPositions.filter(pos => pos.option_type === 'put').length;
 
               return {
-                total_positions: filteredAndSortedPositions.length,
+                total_positions: filteredPositions.length,
                 total_market_value: totalValue,
                 total_unrealized_pnl: totalPnL,
                 total_unrealized_pnl_pct: totalValue > 0 ? (totalPnL / totalValue) * 100 : 0,
@@ -789,7 +757,7 @@ const OptionsPortfolio: React.FC = () => {
                 calls_count: callsCount,
                 puts_count: putsCount
               };
-            }, [filteredAndSortedPositions]);
+            }, [filteredPositions]);
 
             return (
               <VStack spacing={4} align="stretch">
@@ -852,7 +820,11 @@ const OptionsPortfolio: React.FC = () => {
 
                       <Select
                         value={sortBy}
-                        onChange={(e) => setSortBy(e.target.value)}
+                        onChange={(e) => {
+                          const newSort = e.target.value;
+                          setSortBy(newSort);
+                          console.log('Sort changed to:', newSort);
+                        }}
                         maxW="200px"
                       >
                         <option value="days_to_expiration">Sort by DTE</option>
@@ -862,7 +834,7 @@ const OptionsPortfolio: React.FC = () => {
                       </Select>
 
                       <Badge variant="outline" p={2} fontSize="sm">
-                        {filteredAndSortedPositions.length} positions
+                        {filteredPositions.length} positions
                       </Badge>
                     </Flex>
                   </CardBody>
@@ -871,7 +843,7 @@ const OptionsPortfolio: React.FC = () => {
                 {/* Tabs */}
                 <Tabs variant="enclosed" colorScheme="blue">
                   <TabList>
-                    <Tab>All Positions ({filteredAndSortedPositions.length})</Tab>
+                    <Tab>All Positions ({filteredPositions.length})</Tab>
                     <Tab>By Symbol ({Object.keys(filteredUnderlyings).length})</Tab>
                     <Tab>Analytics</Tab>
                   </TabList>
@@ -886,15 +858,16 @@ const OptionsPortfolio: React.FC = () => {
                             <HStack justify="space-between">
                               <Heading size="md">All Options Positions</Heading>
                               <Badge variant="outline" p={2} fontSize="sm">
-                                {filteredAndSortedPositions.length} positions
+                                {filteredPositions.length} positions
                               </Badge>
                             </HStack>
                           </CardHeader>
                           <CardBody>
                             <SortableTable
-                              data={filteredAndSortedPositions}
+                              key={`options-${sortBy}-${filteredPositions.length}`}
+                              data={filteredPositions}
                               columns={optionsColumns}
-                              defaultSortBy="days_to_expiration"
+                              defaultSortBy={sortBy}
                               defaultSortOrder="asc"
                               emptyMessage="No options positions found"
                             />
@@ -927,7 +900,28 @@ const OptionsPortfolio: React.FC = () => {
 
                         <SimpleGrid columns={{ base: 1, lg: 2 }} spacing={6}>
                           {(Object.entries(filteredUnderlyings) as [string, UnderlyingGroup][])
-                            .sort(([, a], [, b]) => Math.abs(b.total_value) - Math.abs(a.total_value))
+                            .sort(([symbolA, dataA], [symbolB, dataB]) => {
+                              // Apply sorting based on sortBy state
+                              switch (sortBy) {
+                                case 'days_to_expiration':
+                                  // Average days to expiration for the underlying
+                                  const avgDaysA = [...dataA.calls, ...dataA.puts].reduce((sum, pos) => sum + pos.days_to_expiration, 0) / (dataA.calls.length + dataA.puts.length) || 0;
+                                  const avgDaysB = [...dataB.calls, ...dataB.puts].reduce((sum, pos) => sum + pos.days_to_expiration, 0) / (dataB.calls.length + dataB.puts.length) || 0;
+                                  return avgDaysA - avgDaysB;
+                                
+                                case 'unrealized_pnl':
+                                  return dataB.total_pnl - dataA.total_pnl;
+                                
+                                case 'market_value':
+                                  return Math.abs(dataB.total_value) - Math.abs(dataA.total_value);
+                                
+                                case 'underlying_symbol':
+                                  return symbolA.localeCompare(symbolB);
+                                
+                                default:
+                                  return Math.abs(dataB.total_value) - Math.abs(dataA.total_value);
+                              }
+                            })
                             .map(([symbol, data]) => (
                               <UnderlyingCard
                                 key={symbol}

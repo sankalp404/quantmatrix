@@ -86,8 +86,8 @@ class Holding(Base):
     
     # Indexes for fast queries
     __table_args__ = (
+        Index('idx_holdings_symbol', 'symbol'),  # Made unique
         Index('idx_account_symbol', 'account_id', 'symbol'),
-        Index('idx_symbol', 'symbol'),
         Index('idx_margin_priority', 'margin_priority'),
     )
 

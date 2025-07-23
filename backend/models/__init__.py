@@ -1,46 +1,74 @@
-from sqlalchemy import create_engine, MetaData
+"""
+QuantMatrix Database Models
+==========================
+
+Centralized model imports for the QuantMatrix application.
+All database models are imported here for easy access.
+"""
+
 from sqlalchemy.ext.declarative import declarative_base
-from sqlalchemy.orm import sessionmaker
-from backend.config import settings
 
-# Database setup
-engine = create_engine(settings.DATABASE_URL, echo=settings.DEBUG)
-SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
-
-# Base class for all models
+# Create the Base class for all models
 Base = declarative_base()
-metadata = MetaData()
 
-# Dependency injection for database sessions
-def get_db():
-    db = SessionLocal()
-    try:
-        yield db
-    finally:
-        db.close()
+# Core User Management
+from .user import User, UserRole
 
-def create_tables():
-    """Create all database tables."""
-    Base.metadata.create_all(bind=engine)
-
-# Import all models to ensure they are registered
-# Legacy models (to be migrated)
-from .trade import Trade, TradeSignal
-from .alert import Alert, AlertCondition, AlertTemplate, AlertHistory
-from .user import User
-
-# New comprehensive portfolio management models
-from .portfolio import (
-    Account, Holding, Category, HoldingCategory, PortfolioSnapshot,
-    AccountType, TransactionType
+# Account Management
+from .account import (
+    BrokerAccount, AccountCredentials, AccountSync,
+    BrokerType, AccountType, AccountStatus
 )
+
+# Instruments & Positions
+from .instrument import Instrument, InstrumentAlias, InstrumentType
+from .position import Position, PositionHistory, PositionType
+
+# Transactions & Tax Management
+from .transaction import Transaction, Dividend, TransactionSyncStatus
 from .tax_lots import TaxLot, TaxLotSale, TaxStrategy, TaxReport
-from .signals import (
-    Strategy, StrategyRun, Signal, Notification, MarketDataCache,
-    SignalType, SignalStatus, StrategyType, NotificationType
+
+# Market Data
+from .market_data import (
+    StockInfo, PriceData, ATRData, SectorMetrics,
+    MarketDataSync, DataQuality
 )
+
+# Strategies (avoiding conflicts - import from main strategies.py)
+from .strategy import (
+    Strategy, StrategyRun, StrategyPerformance, BacktestRun,
+    StrategyType, StrategyStatus
+)
+
+# Signals (avoiding notification conflict)
+from .signals import Signal, MarketDataCache
+
+# Notifications (main notifications model)
+from .notification import (
+    Notification, NotificationTemplate, NotificationPreference, NotificationDelivery
+)
+
+# Alerts & Audit
+from .alert import Alert, AlertCondition, AlertTemplate, AlertHistory
+from .audit import AuditLog, DataChangeLog, SecurityEvent
+
+# CSV Import & Integration
+from .csv_import import CSVImport
+from .strategy_integration import StrategyService, StrategyExecution
+
+# Market Analysis
+from .market_analysis import (
+    MarketAnalysisCache, StockUniverse, ScanHistory,
+    PolygonApiUsage, MarketDataProvider
+)
+
+# Options Trading
 from .options import (
-    TastytradeAccount, OptionPosition, OptionInstrument, OptionGreeks,
-    TradingStrategy, CapitalAllocation, StrategyPerformance, RiskMetrics
+    TastytradeAccount, OptionPosition, OptionGreeks, TradingStrategy
 )
-from .transactions import Transaction, Dividend, TransactionSyncStatus 
+
+# Portfolio Management (avoiding account conflicts)
+from .portfolio import Holding, Category, HoldingCategory, PortfolioSnapshot
+
+# Trading
+from .trade import Trade, TradeSignal 

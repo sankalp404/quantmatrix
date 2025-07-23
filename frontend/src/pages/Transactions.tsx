@@ -240,52 +240,8 @@ const Transactions: React.FC = () => {
   // Transform portfolio data for account selector
   const accounts = portfolioData ? transformPortfolioToAccounts(portfolioData) : [];
 
-  // Enhanced filtering
-  const filteredTransactions = useMemo(() => {
-    return transactions.filter(transaction => {
-      const matchesSearch = transaction.symbol.toLowerCase().includes(searchTerm.toLowerCase()) ||
-        transaction.description.toLowerCase().includes(searchTerm.toLowerCase()) ||
-        transaction.order_id?.toLowerCase().includes(searchTerm.toLowerCase());
-      const matchesType = selectedType === 'all' || transaction.type === selectedType;
-      const matchesExchange = selectedExchange === 'all' || transaction.exchange === selectedExchange;
-
-      return matchesSearch && matchesType && matchesExchange;
-    });
-  }, [transactions, searchTerm, selectedType, selectedExchange]);
-
-  // Enhanced sorting
-  const sortedTransactions = useMemo(() => {
-    return [...filteredTransactions].sort((a, b) => {
-      switch (sortBy) {
-        case 'date': return new Date(b.date + ' ' + b.time).getTime() - new Date(a.date + ' ' + a.time).getTime();
-        case 'symbol': return a.symbol.localeCompare(b.symbol);
-        case 'amount': return b.amount - a.amount;
-        case 'quantity': return b.quantity - a.quantity;
-        default: return 0;
-      }
-    });
-  }, [filteredTransactions, sortBy]);
-
-  // Get unique exchanges for filter
+  // Get unique exchanges for filter (from all transactions for dropdown)
   const uniqueExchanges = [...new Set(transactions.map(t => t.exchange))];
-
-  // Calculate filtered summary
-  const filteredSummary = useMemo(() => {
-    if (filteredTransactions.length === 0) return null;
-
-    const buys = filteredTransactions.filter(t => t.type === 'BUY');
-    const sells = filteredTransactions.filter(t => t.type === 'SELL');
-
-    return {
-      total_transactions: filteredTransactions.length,
-      total_value: filteredTransactions.reduce((sum, t) => sum + t.amount, 0),
-      total_commission: filteredTransactions.reduce((sum, t) => sum + t.commission, 0),
-      buy_count: buys.length,
-      sell_count: sells.length,
-      net_buy_value: buys.reduce((sum, t) => sum + t.amount, 0),
-      net_sell_value: sells.reduce((sum, t) => sum + t.amount, 0),
-    };
-  }, [filteredTransactions]);
 
   if (loading) {
     return (
@@ -393,148 +349,194 @@ const Transactions: React.FC = () => {
             size: 'md'
           }}
         >
-          {(accountFilteredTransactions, filterState) => (
-            <VStack spacing={6} align="stretch">
-              {/* Enhanced Filters */}
-              <Card bg={bgColor} borderColor={borderColor}>
-                <CardBody>
-                  <VStack spacing={4}>
-                    <Flex wrap="wrap" gap={4} align="center" width="full">
-                      <InputGroup maxW="300px">
-                        <InputLeftElement pointerEvents="none">
-                          <SearchIcon color="gray.300" />
-                        </InputLeftElement>
-                        <Input
-                          placeholder="Search transactions..."
-                          value={searchTerm}
-                          onChange={(e) => setSearchTerm(e.target.value)}
-                        />
-                      </InputGroup>
+          {(accountFilteredTransactions, filterState) => {
+            // Enhanced filtering based on account-filtered transactions
+            const filteredTransactions = useMemo(() => {
+              return accountFilteredTransactions.filter(transaction => {
+                const matchesSearch = transaction.symbol.toLowerCase().includes(searchTerm.toLowerCase()) ||
+                  transaction.description.toLowerCase().includes(searchTerm.toLowerCase()) ||
+                  transaction.order_id?.toLowerCase().includes(searchTerm.toLowerCase());
+                const matchesType = selectedType === 'all' || transaction.type === selectedType;
+                const matchesExchange = selectedExchange === 'all' || transaction.exchange === selectedExchange;
 
-                      <Select
-                        value={selectedType}
-                        onChange={(e) => setSelectedType(e.target.value)}
-                        maxW="150px"
-                      >
-                        <option value="all">All Types</option>
-                        <option value="BUY">Buys Only</option>
-                        <option value="SELL">Sells Only</option>
-                      </Select>
+                return matchesSearch && matchesType && matchesExchange;
+              });
+            }, [accountFilteredTransactions, searchTerm, selectedType, selectedExchange]);
 
-                      <Select
-                        value={selectedExchange}
-                        onChange={(e) => setSelectedExchange(e.target.value)}
-                        maxW="150px"
-                      >
-                        <option value="all">All Exchanges</option>
-                        {uniqueExchanges.map(exchange => (
-                          <option key={exchange} value={exchange}>{exchange}</option>
-                        ))}
-                      </Select>
+            // Enhanced sorting
+            const sortedTransactions = useMemo(() => {
+              return [...filteredTransactions].sort((a, b) => {
+                switch (sortBy) {
+                  case 'date': return new Date(b.date + ' ' + b.time).getTime() - new Date(a.date + ' ' + a.time).getTime();
+                  case 'symbol': return a.symbol.localeCompare(b.symbol);
+                  case 'amount': return b.amount - a.amount;
+                  case 'quantity': return b.quantity - a.quantity;
+                  default: return 0;
+                }
+              });
+            }, [filteredTransactions, sortBy]);
 
-                      <Select
-                        value={dateRange}
-                        onChange={(e) => setDateRange(Number(e.target.value))}
-                        maxW="150px"
-                      >
-                        <option value={7}>Last 7 days</option>
-                        <option value={30}>Last 30 days</option>
-                        <option value={90}>Last 90 days</option>
-                        <option value={365}>Last year</option>
-                      </Select>
+            // Calculate filtered summary
+            const filteredSummary = useMemo(() => {
+              if (filteredTransactions.length === 0) return null;
 
-                      <Select
-                        value={sortBy}
-                        onChange={(e) => setSortBy(e.target.value)}
-                        maxW="200px"
-                      >
-                        <option value="date">Sort by Date</option>
-                        <option value="symbol">Sort by Symbol</option>
-                        <option value="amount">Sort by Amount</option>
-                        <option value="quantity">Sort by Quantity</option>
-                      </Select>
-                    </Flex>
+              const buys = filteredTransactions.filter(t => t.type === 'BUY');
+              const sells = filteredTransactions.filter(t => t.type === 'SELL');
 
-                    {/* Filter Summary */}
-                    <HStack spacing={4} wrap="wrap">
-                      <Badge variant="outline" p={2} fontSize="sm">
-                        {sortedTransactions.length} of {transactions.length} transactions
-                      </Badge>
-                      {filteredSummary && (
-                        <>
-                          <Badge colorScheme="green" variant="outline" p={2} fontSize="sm">
-                            ${filteredSummary.net_buy_value.toLocaleString()} buys
-                          </Badge>
-                          <Badge colorScheme="red" variant="outline" p={2} fontSize="sm">
-                            ${filteredSummary.net_sell_value.toLocaleString()} sells
-                          </Badge>
-                        </>
-                      )}
+              return {
+                total_transactions: filteredTransactions.length,
+                total_value: filteredTransactions.reduce((sum, t) => sum + t.amount, 0),
+                total_commission: filteredTransactions.reduce((sum, t) => sum + t.commission, 0),
+                buy_count: buys.length,
+                sell_count: sells.length,
+                net_buy_value: buys.reduce((sum, t) => sum + t.amount, 0),
+                net_sell_value: sells.reduce((sum, t) => sum + t.amount, 0),
+              };
+            }, [filteredTransactions]);
+
+            return (
+              <VStack spacing={6} align="stretch">
+                {/* Enhanced Filters */}
+                <Card bg={bgColor} borderColor={borderColor}>
+                  <CardBody>
+                    <VStack spacing={4}>
+                      <Flex wrap="wrap" gap={4} align="center" width="full">
+                        <InputGroup maxW="300px">
+                          <InputLeftElement pointerEvents="none">
+                            <SearchIcon color="gray.300" />
+                          </InputLeftElement>
+                          <Input
+                            placeholder="Search transactions..."
+                            value={searchTerm}
+                            onChange={(e) => setSearchTerm(e.target.value)}
+                          />
+                        </InputGroup>
+
+                        <Select
+                          value={selectedType}
+                          onChange={(e) => setSelectedType(e.target.value)}
+                          maxW="150px"
+                        >
+                          <option value="all">All Types</option>
+                          <option value="BUY">Buys Only</option>
+                          <option value="SELL">Sells Only</option>
+                        </Select>
+
+                        <Select
+                          value={selectedExchange}
+                          onChange={(e) => setSelectedExchange(e.target.value)}
+                          maxW="150px"
+                        >
+                          <option value="all">All Exchanges</option>
+                          {uniqueExchanges.map(exchange => (
+                            <option key={exchange} value={exchange}>{exchange}</option>
+                          ))}
+                        </Select>
+
+                        <Select
+                          value={dateRange}
+                          onChange={(e) => setDateRange(Number(e.target.value))}
+                          maxW="150px"
+                        >
+                          <option value={7}>Last 7 days</option>
+                          <option value={30}>Last 30 days</option>
+                          <option value={90}>Last 90 days</option>
+                          <option value={365}>Last year</option>
+                        </Select>
+
+                        <Select
+                          value={sortBy}
+                          onChange={(e) => setSortBy(e.target.value)}
+                          maxW="200px"
+                        >
+                          <option value="date">Sort by Date</option>
+                          <option value="symbol">Sort by Symbol</option>
+                          <option value="amount">Sort by Amount</option>
+                          <option value="quantity">Sort by Quantity</option>
+                        </Select>
+                      </Flex>
+
+                      {/* Filter Summary */}
+                      <HStack spacing={4} wrap="wrap">
+                        <Badge variant="outline" p={2} fontSize="sm">
+                          {sortedTransactions.length} of {transactions.length} transactions
+                        </Badge>
+                        {filteredSummary && (
+                          <>
+                            <Badge colorScheme="green" variant="outline" p={2} fontSize="sm">
+                              ${filteredSummary.net_buy_value.toLocaleString()} buys
+                            </Badge>
+                            <Badge colorScheme="red" variant="outline" p={2} fontSize="sm">
+                              ${filteredSummary.net_sell_value.toLocaleString()} sells
+                            </Badge>
+                          </>
+                        )}
+                      </HStack>
+                    </VStack>
+                  </CardBody>
+                </Card>
+
+                {/* Enhanced Transactions Table */}
+                <Card bg={bgColor} borderColor={borderColor}>
+                  <CardHeader>
+                    <HStack justify="space-between">
+                      <Heading size="md">Transactions</Heading>
+                      <HStack>
+                        <Icon as={FiCalendar} />
+                        <Text fontSize="sm" color="gray.600">
+                          Showing last {dateRange} days
+                        </Text>
+                      </HStack>
                     </HStack>
-                  </VStack>
-                </CardBody>
-              </Card>
+                  </CardHeader>
+                  <CardBody>
+                    <TableContainer>
+                      <Table size="sm" variant="simple">
+                        <Thead>
+                          <Tr>
+                            <Th>Date & Time</Th>
+                            <Th>Type</Th>
+                            <Th>Symbol</Th>
+                            <Th isNumeric>Quantity</Th>
+                            <Th isNumeric>Price</Th>
+                            <Th isNumeric>Gross Amount</Th>
+                            <Th isNumeric>Net Amount</Th>
+                            <Th>Account</Th>
+                          </Tr>
+                        </Thead>
+                        <Tbody>
+                          {sortedTransactions.map((transaction) => (
+                            <TransactionRow key={transaction.id} transaction={transaction} />
+                          ))}
+                        </Tbody>
+                      </Table>
+                    </TableContainer>
 
-              {/* Enhanced Transactions Table */}
-              <Card bg={bgColor} borderColor={borderColor}>
-                <CardHeader>
-                  <HStack justify="space-between">
-                    <Heading size="md">Transactions</Heading>
-                    <HStack>
-                      <Icon as={FiCalendar} />
-                      <Text fontSize="sm" color="gray.600">
-                        Showing last {dateRange} days
-                      </Text>
-                    </HStack>
-                  </HStack>
-                </CardHeader>
-                <CardBody>
-                  <TableContainer>
-                    <Table size="sm" variant="simple">
-                      <Thead>
-                        <Tr>
-                          <Th>Date & Time</Th>
-                          <Th>Type</Th>
-                          <Th>Symbol</Th>
-                          <Th isNumeric>Quantity</Th>
-                          <Th isNumeric>Price</Th>
-                          <Th isNumeric>Gross Amount</Th>
-                          <Th isNumeric>Net Amount</Th>
-                          <Th>Account</Th>
-                        </Tr>
-                      </Thead>
-                      <Tbody>
-                        {sortedTransactions.map((transaction) => (
-                          <TransactionRow key={transaction.id} transaction={transaction} />
-                        ))}
-                      </Tbody>
-                    </Table>
-                  </TableContainer>
-
-                  {sortedTransactions.length === 0 && (
-                    <Box textAlign="center" py={8}>
-                      <Alert status="info" justifyContent="center">
-                        <AlertIcon />
-                        <VStack spacing={2}>
-                          <Text color="gray.600" fontWeight="medium">
-                            {transactions.length === 0
-                              ? "No transaction data available"
-                              : "No transactions match your current filters"
-                            }
-                          </Text>
-                          {transactions.length === 0 && (
-                            <Text fontSize="sm" color="gray.500">
-                              Real IBKR transaction data requires live connection. No sample data provided.
+                    {sortedTransactions.length === 0 && (
+                      <Box textAlign="center" py={8}>
+                        <Alert status="info" justifyContent="center">
+                          <AlertIcon />
+                          <VStack spacing={2}>
+                            <Text color="gray.600" fontWeight="medium">
+                              {transactions.length === 0
+                                ? "No transaction data available"
+                                : "No transactions match your current filters"
+                              }
                             </Text>
-                          )}
-                        </VStack>
-                      </Alert>
-                    </Box>
-                  )}
-                </CardBody>
-              </Card>
-            </VStack>
-          )}
+                            {transactions.length === 0 && (
+                              <Text fontSize="sm" color="gray.500">
+                                Real IBKR transaction data requires live connection. No sample data provided.
+                              </Text>
+                            )}
+                          </VStack>
+                        </Alert>
+                      </Box>
+                    )}
+                  </CardBody>
+                </Card>
+              </VStack>
+            );
+          }}
         </AccountFilterWrapper>
       </VStack>
     </Container>

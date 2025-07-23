@@ -41,12 +41,14 @@ import { HoldingsTableSkeleton, LoadingSpinner } from '../components/LoadingStat
 interface TaxLot {
   id: string;
   shares: number;
+  shares_purchased?: number;
+  shares_remaining?: number;
   purchase_date: string;
   cost_per_share: number;
-  current_value: number;
-  unrealized_pnl: number;
-  unrealized_pnl_pct: number;
-  days_held: number;
+  current_value?: number;
+  unrealized_pnl?: number;
+  unrealized_pnl_pct?: number;
+  days_held?: number;
   is_long_term: boolean;
 }
 
@@ -133,6 +135,12 @@ const HoldingCard: React.FC<{
   const [taxLots, setTaxLots] = useState<TaxLot[]>([]);
   const [loadingTaxLots, setLoadingTaxLots] = useState(false);
   const [taxLotsError, setTaxLotsError] = useState<string | null>(null);
+  const [taxLotDiscrepancy, setTaxLotDiscrepancy] = useState<{
+    hasDiscrepancy: boolean;
+    holdingShares: number;
+    taxLotShares: number;
+    difference: number;
+  } | null>(null);
 
   useEffect(() => {
     if (!isLoading && holding?.id) {
@@ -151,7 +159,28 @@ const HoldingCard: React.FC<{
       const result = await portfolioApi.getHoldingTaxLots(holding.id);
 
       if (result.status === 'success' && result.data?.tax_lots) {
-        setTaxLots(result.data.tax_lots.length > 0 ? result.data.tax_lots : []);
+        const lots = result.data.tax_lots.length > 0 ? result.data.tax_lots : [];
+        setTaxLots(lots);
+
+        // Calculate tax lot discrepancy
+        if (lots.length > 0) {
+          const taxLotTotalShares = lots.reduce((sum, lot) => sum + (lot.shares_remaining || lot.shares || 0), 0);
+          const holdingShares = holding.shares;
+          const difference = Math.abs(holdingShares - taxLotTotalShares);
+          
+          if (difference > 0.01) { // Allow for small rounding differences
+            setTaxLotDiscrepancy({
+              hasDiscrepancy: true,
+              holdingShares: holdingShares,
+              taxLotShares: taxLotTotalShares,
+              difference: difference
+            });
+          } else {
+            setTaxLotDiscrepancy(null);
+          }
+        } else {
+          setTaxLotDiscrepancy(null);
+        }
 
         // Log performance if available
         if (result.data.processing_time_ms) {
@@ -159,6 +188,7 @@ const HoldingCard: React.FC<{
         }
       } else {
         setTaxLots([]);
+        setTaxLotDiscrepancy(null);
         setTaxLotsError('Tax lots data unavailable');
       }
     } catch (error) {
@@ -281,11 +311,26 @@ const HoldingCard: React.FC<{
               Tax Lots ({taxLots.length})
             </Button>
 
-            <Collapse in={isTaxLotsOpen} animateOpacity>
-              <VStack spacing={2} mt={3} align="stretch">
-                {taxLotsError ? (
-                  <Text fontSize="sm" color="red.500">{taxLotsError}</Text>
-                ) : taxLots.length > 0 ? (
+                      <Collapse in={isTaxLotsOpen} animateOpacity>
+            <VStack spacing={2} mt={3} align="stretch">
+              {/* Tax Lot Discrepancy Alert */}
+              {taxLotDiscrepancy?.hasDiscrepancy && (
+                <Alert status="warning" size="sm" borderRadius="md">
+                  <AlertIcon />
+                  <Box flex="1">
+                    <Text fontSize="sm" fontWeight="bold">Tax Lot Discrepancy</Text>
+                    <Text fontSize="xs">
+                      Holding: {taxLotDiscrepancy.holdingShares} shares | 
+                      Tax Lots: {taxLotDiscrepancy.taxLotShares} shares | 
+                      Difference: {taxLotDiscrepancy.difference.toFixed(2)}
+                    </Text>
+                  </Box>
+                </Alert>
+              )}
+              
+              {taxLotsError ? (
+                <Text fontSize="sm" color="red.500">{taxLotsError}</Text>
+              ) : taxLots.length > 0 ? (
                   taxLots.map((lot, index) => (
                     <Box
                       key={lot.id}
@@ -297,26 +342,37 @@ const HoldingCard: React.FC<{
                     >
                       <Grid templateColumns="repeat(4, 1fr)" gap={2} fontSize="sm">
                         <VStack align="start" spacing={0}>
-                          <Text fontWeight="medium">{lot.shares} shares</Text>
-                          <Text color="gray.500">{lot.purchase_date}</Text>
+                          <Text fontWeight="medium">{lot.shares_remaining || lot.shares || 0} shares</Text>
+                          <Text color="gray.500">{lot.purchase_date?.slice(0, 10)}</Text>
                         </VStack>
                         <VStack align="start" spacing={0}>
-                          <Text>${lot.cost_per_share.toFixed(2)}</Text>
+                          <Text>${lot.cost_per_share?.toFixed(2)}</Text>
                           <Text color="gray.500">Cost/share</Text>
                         </VStack>
                         <VStack align="start" spacing={0}>
-                          <Text color={lot.unrealized_pnl >= 0 ? 'green.500' : 'red.500'}>
-                            ${lot.unrealized_pnl > 0 ? '+' : ''}{lot.unrealized_pnl.toFixed(2)}
-                          </Text>
-                          <Text color="gray.500">
-                            {lot.unrealized_pnl_pct > 0 ? '+' : ''}{lot.unrealized_pnl_pct.toFixed(1)}%
-                          </Text>
+                          {lot.unrealized_pnl !== undefined ? (
+                            <>
+                              <Text color={lot.unrealized_pnl >= 0 ? 'green.500' : 'red.500'}>
+                                ${lot.unrealized_pnl > 0 ? '+' : ''}{lot.unrealized_pnl.toFixed(2)}
+                              </Text>
+                              <Text color="gray.500">
+                                {lot.unrealized_pnl_pct && lot.unrealized_pnl_pct > 0 ? '+' : ''}{lot.unrealized_pnl_pct?.toFixed(1) || '0.0'}%
+                              </Text>
+                            </>
+                          ) : (
+                            <>
+                              <Text color="gray.500">-</Text>
+                              <Text color="gray.500" fontSize="xs">No P&L calc</Text>
+                            </>
+                          )}
                         </VStack>
                         <VStack align="start" spacing={0}>
                           <Badge colorScheme={lot.is_long_term ? 'green' : 'orange'} size="sm">
                             {lot.is_long_term ? 'Long' : 'Short'}
                           </Badge>
-                          <Text color="gray.500" fontSize="xs">{lot.days_held}d</Text>
+                          <Text color="gray.500" fontSize="xs">
+                            {lot.days_held ? `${lot.days_held}d` : 'Recent'}
+                          </Text>
                         </VStack>
                       </Grid>
                     </Box>
@@ -427,36 +483,7 @@ const Holdings: React.FC = () => {
     }
   };
 
-  // Filter and sort holdings
-  const filteredAndSortedHoldings = useMemo(() => {
-    let filtered = holdings.filter(holding => {
-      const matchesSearch = holding.symbol.toLowerCase().includes(searchTerm.toLowerCase()) ||
-        holding.industry.toLowerCase().includes(searchTerm.toLowerCase());
-      const matchesSector = selectedSector === 'all' || holding.sector === selectedSector;
-
-      return matchesSearch && matchesSector;
-    });
-
-    // Sort holdings
-    filtered.sort((a, b) => {
-      switch (sortBy) {
-        case 'market_value':
-          return b.market_value - a.market_value;
-        case 'unrealized_pnl':
-          return b.unrealized_pnl - a.unrealized_pnl;
-        case 'unrealized_pnl_pct':
-          return b.unrealized_pnl_pct - a.unrealized_pnl_pct;
-        case 'symbol':
-          return a.symbol.localeCompare(b.symbol);
-        default:
-          return 0;
-      }
-    });
-
-    return filtered;
-  }, [holdings, searchTerm, selectedSector, sortBy]);
-
-  // Get unique sectors
+  // Get unique sectors (from all holdings for dropdown)
   const sectors = useMemo(() => {
     const sectorSet = new Set(holdings.map(h => h.sector).filter(Boolean));
     return Array.from(sectorSet).sort();
@@ -542,77 +569,108 @@ const Holdings: React.FC = () => {
             loading={loading}
             error={error}
           >
-            {(accountFilteredHoldings, filterState) => (
-              <VStack spacing={6} align="stretch">
-                {/* Search and Filters */}
-                <HStack spacing={4} wrap="wrap">
-                  <Box flex="1" minW="200px">
-                    <InputGroup>
-                      <InputLeftElement pointerEvents="none">
-                        <FiSearch color="gray.300" />
-                      </InputLeftElement>
-                      <Input
-                        placeholder="Search holdings..."
-                        value={searchTerm}
-                        onChange={(e) => setSearchTerm(e.target.value)}
-                      />
-                    </InputGroup>
-                  </Box>
+            {(accountFilteredHoldings, filterState) => {
+              // Filter and sort holdings based on account-filtered data
+              const filteredAndSortedHoldings = useMemo(() => {
+                let filtered = accountFilteredHoldings.filter(holding => {
+                  const matchesSearch = holding.symbol.toLowerCase().includes(searchTerm.toLowerCase()) ||
+                    holding.industry.toLowerCase().includes(searchTerm.toLowerCase());
+                  const matchesSector = selectedSector === 'all' || holding.sector === selectedSector;
 
-                  <Select value={selectedSector} onChange={(e) => setSelectedSector(e.target.value)} maxW="200px">
-                    <option value="all">All Sectors</option>
-                    {sectors.map(sector => (
-                      <option key={sector} value={sector}>{sector}</option>
-                    ))}
-                  </Select>
+                  return matchesSearch && matchesSector;
+                });
 
-                  <Select value={sortBy} onChange={(e) => setSortBy(e.target.value)} maxW="200px">
-                    <option value="market_value">Market Value</option>
-                    <option value="unrealized_pnl">Total P&L</option>
-                    <option value="unrealized_pnl_pct">P&L %</option>
-                    <option value="symbol">Symbol</option>
-                  </Select>
-                </HStack>
+                // Sort holdings
+                filtered.sort((a, b) => {
+                  switch (sortBy) {
+                    case 'market_value':
+                      return b.market_value - a.market_value;
+                    case 'unrealized_pnl':
+                      return b.unrealized_pnl - a.unrealized_pnl;
+                    case 'unrealized_pnl_pct':
+                      return b.unrealized_pnl_pct - a.unrealized_pnl_pct;
+                    case 'symbol':
+                      return a.symbol.localeCompare(b.symbol);
+                    default:
+                      return 0;
+                  }
+                });
 
-                {/* Holdings Grid */}
-                <Grid templateColumns={isMobile ? "1fr" : "repeat(auto-fill, minmax(400px, 1fr))"} gap={6}>
-                  {filteredAndSortedHoldings.map((holding) => (
-                    <GridItem key={holding.id}>
-                      <HoldingCard
-                        holding={holding}
-                        isSelected={selectedHolding === holding.symbol}
-                        onClick={() => setSelectedHolding(
-                          selectedHolding === holding.symbol ? null : holding.symbol
+                return filtered;
+              }, [accountFilteredHoldings, searchTerm, selectedSector, sortBy]);
+
+              return (
+                <VStack spacing={6} align="stretch">
+                  {/* Search and Filters */}
+                  <HStack spacing={4} wrap="wrap">
+                    <Box flex="1" minW="200px">
+                      <InputGroup>
+                        <InputLeftElement pointerEvents="none">
+                          <FiSearch color="gray.300" />
+                        </InputLeftElement>
+                        <Input
+                          placeholder="Search holdings..."
+                          value={searchTerm}
+                          onChange={(e) => setSearchTerm(e.target.value)}
+                        />
+                      </InputGroup>
+                    </Box>
+
+                    <Select value={selectedSector} onChange={(e) => setSelectedSector(e.target.value)} maxW="200px">
+                      <option value="all">All Sectors</option>
+                      {sectors.map(sector => (
+                        <option key={sector} value={sector}>{sector}</option>
+                      ))}
+                    </Select>
+
+                    <Select value={sortBy} onChange={(e) => setSortBy(e.target.value)} maxW="200px">
+                      <option value="market_value">Market Value</option>
+                      <option value="unrealized_pnl">Total P&L</option>
+                      <option value="unrealized_pnl_pct">P&L %</option>
+                      <option value="symbol">Symbol</option>
+                    </Select>
+                  </HStack>
+
+                  {/* Holdings Grid */}
+                  <Grid templateColumns={isMobile ? "1fr" : "repeat(auto-fill, minmax(400px, 1fr))"} gap={6}>
+                    {filteredAndSortedHoldings.map((holding) => (
+                      <GridItem key={holding.id}>
+                        <HoldingCard
+                          holding={holding}
+                          isSelected={selectedHolding === holding.symbol}
+                          onClick={() => setSelectedHolding(
+                            selectedHolding === holding.symbol ? null : holding.symbol
+                          )}
+                          showChart={selectedHolding === holding.symbol}
+                        />
+
+                        {/* TradingView Chart */}
+                        {selectedHolding === holding.symbol && (
+                          <Box mt={4}>
+                            <TradingViewChart
+                              symbol={holding.symbol}
+                              height={chartPosition === 'top' ? 300 : 400}
+                              showHeader={true}
+                              interval="D"
+                              theme={useColorModeValue('light', 'dark')}
+                            />
+                          </Box>
                         )}
-                        showChart={selectedHolding === holding.symbol}
-                      />
+                      </GridItem>
+                    ))}
+                  </Grid>
 
-                      {/* TradingView Chart */}
-                      {selectedHolding === holding.symbol && (
-                        <Box mt={4}>
-                          <TradingViewChart
-                            symbol={holding.symbol}
-                            height={chartPosition === 'top' ? 300 : 400}
-                            showHeader={true}
-                            interval="D"
-                            theme={useColorModeValue('light', 'dark')}
-                          />
-                        </Box>
-                      )}
-                    </GridItem>
-                  ))}
-                </Grid>
-
-                {/* Empty state */}
-                {filteredAndSortedHoldings.length === 0 && (
-                  <Box textAlign="center" py={12}>
-                    <Text fontSize="lg" color="gray.500">
-                      No holdings match your filters
-                    </Text>
-                  </Box>
-                )}
-              </VStack>
-            )}
+                  {/* Empty state */}
+                  {filteredAndSortedHoldings.length === 0 && (
+                    <Box textAlign="center" py={12}>
+                      <Text fontSize="lg" color="gray.500">
+                        No holdings match your filters
+                      </Text>
+                    </Box>
+                  )}
+                </VStack>
+              );
+            }}
           </AccountFilterWrapper>
         </VStack>
       </Box>
