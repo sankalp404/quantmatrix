@@ -167,7 +167,7 @@ const HoldingCard: React.FC<{
           const taxLotTotalShares = lots.reduce((sum, lot) => sum + (lot.shares_remaining || lot.shares || 0), 0);
           const holdingShares = holding.shares;
           const difference = Math.abs(holdingShares - taxLotTotalShares);
-          
+
           if (difference > 0.01) { // Allow for small rounding differences
             setTaxLotDiscrepancy({
               hasDiscrepancy: true,
@@ -265,11 +265,11 @@ const HoldingCard: React.FC<{
 
             <VStack align="end" spacing={1}>
               <Text fontWeight="bold" fontSize="lg">
-                ${holding.market_value.toLocaleString()}
+                {holding.market_value.toLocaleString('en-US', { style: 'currency', currency: 'USD' })}
               </Text>
               <HStack spacing={2}>
                 <Text color={profitColor} fontSize="sm" fontWeight="medium">
-                  ${holding.unrealized_pnl > 0 ? '+' : ''}{holding.unrealized_pnl.toFixed(2)}
+                  {holding.unrealized_pnl >= 0 ? '+' : '-'}{Math.abs(holding.unrealized_pnl).toLocaleString('en-US', { style: 'currency', currency: 'USD' })}
                 </Text>
                 <Badge colorScheme={holding.unrealized_pnl >= 0 ? 'green' : 'red'}>
                   {holding.unrealized_pnl_pct > 0 ? '+' : ''}{holding.unrealized_pnl_pct.toFixed(2)}%
@@ -282,16 +282,16 @@ const HoldingCard: React.FC<{
           <Grid templateColumns="repeat(3, 1fr)" gap={4}>
             <Stat size="sm">
               <StatLabel fontSize="xs">Current Price</StatLabel>
-              <StatNumber fontSize="md">${holding.current_price.toFixed(2)}</StatNumber>
+              <StatNumber fontSize="md">{holding.current_price.toLocaleString('en-US', { style: 'currency', currency: 'USD' })}</StatNumber>
             </Stat>
             <Stat size="sm">
               <StatLabel fontSize="xs">Avg Cost</StatLabel>
-              <StatNumber fontSize="md">${holding.average_cost.toFixed(2)}</StatNumber>
+              <StatNumber fontSize="md">{holding.average_cost.toLocaleString('en-US', { style: 'currency', currency: 'USD' })}</StatNumber>
             </Stat>
             <Stat size="sm">
               <StatLabel fontSize="xs">Day P&L</StatLabel>
               <StatNumber fontSize="md" color={dayProfitColor}>
-                ${holding.day_pnl.toFixed(2)}
+                {holding.day_pnl.toLocaleString('en-US', { style: 'currency', currency: 'USD' })}
               </StatNumber>
             </Stat>
           </Grid>
@@ -311,72 +311,90 @@ const HoldingCard: React.FC<{
               Tax Lots ({taxLots.length})
             </Button>
 
-                      <Collapse in={isTaxLotsOpen} animateOpacity>
-            <VStack spacing={2} mt={3} align="stretch">
-              {/* Tax Lot Discrepancy Alert */}
-              {taxLotDiscrepancy?.hasDiscrepancy && (
-                <Alert status="warning" size="sm" borderRadius="md">
-                  <AlertIcon />
-                  <Box flex="1">
-                    <Text fontSize="sm" fontWeight="bold">Tax Lot Discrepancy</Text>
-                    <Text fontSize="xs">
-                      Holding: {taxLotDiscrepancy.holdingShares} shares | 
-                      Tax Lots: {taxLotDiscrepancy.taxLotShares} shares | 
-                      Difference: {taxLotDiscrepancy.difference.toFixed(2)}
-                    </Text>
-                  </Box>
-                </Alert>
-              )}
-              
-              {taxLotsError ? (
-                <Text fontSize="sm" color="red.500">{taxLotsError}</Text>
-              ) : taxLots.length > 0 ? (
-                  taxLots.map((lot, index) => (
-                    <Box
-                      key={lot.id}
-                      p={3}
-                      bg={taxLotBg}
-                      borderRadius="md"
-                      border="1px"
-                      borderColor={taxLotBorderColor}
-                    >
-                      <Grid templateColumns="repeat(4, 1fr)" gap={2} fontSize="sm">
-                        <VStack align="start" spacing={0}>
-                          <Text fontWeight="medium">{lot.shares_remaining || lot.shares || 0} shares</Text>
-                          <Text color="gray.500">{lot.purchase_date?.slice(0, 10)}</Text>
-                        </VStack>
-                        <VStack align="start" spacing={0}>
-                          <Text>${lot.cost_per_share?.toFixed(2)}</Text>
-                          <Text color="gray.500">Cost/share</Text>
-                        </VStack>
-                        <VStack align="start" spacing={0}>
-                          {lot.unrealized_pnl !== undefined ? (
-                            <>
-                              <Text color={lot.unrealized_pnl >= 0 ? 'green.500' : 'red.500'}>
-                                ${lot.unrealized_pnl > 0 ? '+' : ''}{lot.unrealized_pnl.toFixed(2)}
-                              </Text>
-                              <Text color="gray.500">
-                                {lot.unrealized_pnl_pct && lot.unrealized_pnl_pct > 0 ? '+' : ''}{lot.unrealized_pnl_pct?.toFixed(1) || '0.0'}%
-                              </Text>
-                            </>
-                          ) : (
-                            <>
-                              <Text color="gray.500">-</Text>
-                              <Text color="gray.500" fontSize="xs">No P&L calc</Text>
-                            </>
-                          )}
-                        </VStack>
-                        <VStack align="start" spacing={0}>
-                          <Badge colorScheme={lot.is_long_term ? 'green' : 'orange'} size="sm">
-                            {lot.is_long_term ? 'Long' : 'Short'}
-                          </Badge>
-                          <Text color="gray.500" fontSize="xs">
-                            {lot.days_held ? `${lot.days_held}d` : 'Recent'}
-                          </Text>
-                        </VStack>
-                      </Grid>
+            <Collapse in={isTaxLotsOpen} animateOpacity>
+              <VStack spacing={3} mt={3} align="stretch">
+                {/* Discrepancy */}
+                {taxLotDiscrepancy?.hasDiscrepancy && (
+                  <Alert status="warning" size="sm" borderRadius="md">
+                    <AlertIcon />
+                    <Box flex="1">
+                      <Text fontSize="sm" fontWeight="bold">Tax Lot Discrepancy</Text>
+                      <Text fontSize="xs">
+                        Holding: {taxLotDiscrepancy.holdingShares} shares |
+                        Tax Lots: {taxLotDiscrepancy.taxLotShares} shares |
+                        Difference: {taxLotDiscrepancy.difference.toFixed(2)}
+                      </Text>
                     </Box>
-                  ))
+                  </Alert>
+                )}
+
+                {taxLotsError ? (
+                  <Text fontSize="sm" color="red.500">{taxLotsError}</Text>
+                ) : taxLots.length > 0 ? (
+                  (() => {
+                    // Merge identical lots (same date, same cost) to reduce noise
+                    const mergedMap = new Map<string, TaxLot>();
+                    for (const lot of taxLots) {
+                      const key = `${lot.purchase_date?.slice(0, 10)}|${(lot.cost_per_share || 0).toFixed(4)}|${lot.is_long_term ? 'L' : 'S'}`;
+                      if (!mergedMap.has(key)) {
+                        mergedMap.set(key, { ...lot });
+                      } else {
+                        const acc = mergedMap.get(key)!;
+                        acc.shares = (acc.shares || 0) + (lot.shares || 0);
+                        acc.shares_remaining = (acc.shares_remaining || 0) + (lot.shares_remaining || lot.shares || 0);
+                        if (typeof acc.unrealized_pnl === 'number' && typeof lot.unrealized_pnl === 'number') {
+                          acc.unrealized_pnl = (acc.unrealized_pnl || 0) + (lot.unrealized_pnl || 0);
+                        }
+                      }
+                    }
+                    const merged = Array.from(mergedMap.values());
+                    const sorted = merged.sort((a, b) => new Date(b.purchase_date).getTime() - new Date(a.purchase_date).getTime());
+                    const longLots = sorted.filter(l => l.is_long_term);
+                    const shortLots = sorted.filter(l => !l.is_long_term);
+
+                    const renderGroup = (lots: TaxLot[], title: string) => (
+                      <VStack align="stretch" spacing={2}>
+                        <Text fontSize="sm" fontWeight="semibold" color="gray.600">{title} ({lots.length})</Text>
+                        {lots.map((lot) => (
+                          <HStack
+                            key={lot.id}
+                            p={3}
+                            bg={taxLotBg}
+                            borderRadius="md"
+                            border="1px"
+                            borderColor={taxLotBorderColor}
+                            justify="space-between"
+                          >
+                            <HStack spacing={4}>
+                              <Box w="8px" h="8px" borderRadius="full" bg={lot.is_long_term ? 'green.400' : 'orange.400'} />
+                              <VStack align="start" spacing={0}>
+                                <Text fontWeight="medium">{(lot.shares_remaining || lot.shares || 0).toLocaleString()} sh @ {(lot.cost_per_share || 0).toLocaleString('en-US', { style: 'currency', currency: 'USD' })}</Text>
+                                <Text color="gray.500" fontSize="xs">{lot.purchase_date?.slice(0, 10)}</Text>
+                              </VStack>
+                            </HStack>
+                            <HStack spacing={6}>
+                              <VStack align="end" spacing={0}>
+                                <Text color={typeof lot.unrealized_pnl === 'number' && lot.unrealized_pnl >= 0 ? 'green.500' : 'red.500'} fontWeight="medium">
+                                  {typeof lot.unrealized_pnl === 'number' ? (lot.unrealized_pnl >= 0 ? '+' : '-') + Math.abs(lot.unrealized_pnl).toLocaleString('en-US', { style: 'currency', currency: 'USD' }) : '-'}
+                                </Text>
+                                <Text color="gray.500" fontSize="xs">
+                                  {typeof lot.unrealized_pnl_pct === 'number' ? `${lot.unrealized_pnl_pct > 0 ? '+' : ''}${lot.unrealized_pnl_pct.toFixed(1)}%` : ''}
+                                </Text>
+                              </VStack>
+                              <Text color="gray.500" fontSize="xs">{lot.days_held ? `${lot.days_held}d` : ''}</Text>
+                            </HStack>
+                          </HStack>
+                        ))}
+                      </VStack>
+                    );
+
+                    return (
+                      <VStack align="stretch" spacing={4}>
+                        {shortLots.length > 0 && renderGroup(shortLots, 'Short Term')}
+                        {longLots.length > 0 && renderGroup(longLots, 'Long Term')}
+                      </VStack>
+                    );
+                  })()
                 ) : (
                   <Text fontSize="sm" color="gray.500">No tax lots available</Text>
                 )}
@@ -413,7 +431,7 @@ const Holdings: React.FC = () => {
     fetchHoldingsData();
   }, []);
 
-  const fetchHoldingsData = async (isRetry = false) => {
+  const fetchHoldingsData = async (isRetry = false, accountId?: string) => {
     if (!isRetry) {
       setLoading(true);
     }
@@ -431,11 +449,11 @@ const Holdings: React.FC = () => {
       }
 
       // Get portfolio data for account selector with timeout
-      const portfolioResult = await portfolioApi.getLive();
+      const portfolioResult = await portfolioApi.getLive(accountId);
       setPortfolioData(portfolioResult.data);
 
       // Get real holdings data from backend with enhanced error handling
-      const holdingsResult = await portfolioApi.getStocksOnly();
+      const holdingsResult = await portfolioApi.getStocksOnly(accountId);
 
       if (holdingsResult.status === 'success') {
         setHoldings(holdingsResult.data.holdings || []);
@@ -515,7 +533,7 @@ const Holdings: React.FC = () => {
       <Box p={6}>
         <VStack spacing={6} align="stretch">
           <Box>
-            <Heading size="lg" mb={2}>Stock Holdings</Heading>
+            <Heading size="lg" mb={2}>Stocks</Heading>
             <Text color="gray.500" fontSize="sm">
               Error loading holdings data
             </Text>
@@ -524,7 +542,7 @@ const Holdings: React.FC = () => {
           <Alert status="error" borderRadius="md">
             <AlertIcon />
             <Box flex="1">
-              <Text fontWeight="bold">Failed to load holdings</Text>
+              <Text fontWeight="bold">Failed to load stocks</Text>
               <Text fontSize="sm">{error}</Text>
             </Box>
             <VStack spacing={2}>
@@ -550,7 +568,7 @@ const Holdings: React.FC = () => {
         <VStack spacing={6} align="stretch">
           {/* Header */}
           <Box>
-            <Heading size="lg" mb={2}>Stock Holdings</Heading>
+            <Heading size="lg" mb={2}>Stocks</Heading>
             <Text color="gray.500" fontSize="sm">
               Real-time data from IBKR • Last updated: {new Date().toLocaleTimeString()}
             </Text>
@@ -568,8 +586,48 @@ const Holdings: React.FC = () => {
             }}
             loading={loading}
             error={error}
+            onAccountChange={(account) => {
+              const accParam = account === 'all' ? undefined : account;
+              fetchHoldingsData(false, accParam);
+            }}
           >
             {(accountFilteredHoldings, filterState) => {
+              // Top summary bar from live portfolio snapshot for selected account
+              const selectedAccountId = filterState?.selectedAccount && filterState.selectedAccount !== 'all' ? filterState.selectedAccount : undefined;
+              const accountSummary = useMemo(() => {
+                if (!portfolioData?.accounts) return null;
+                if (selectedAccountId) {
+                  return portfolioData.accounts[selectedAccountId]?.account_summary || null;
+                }
+                const summaries = Object.values<any>(portfolioData.accounts).map((a: any) => a.account_summary || {});
+                return summaries.reduce((acc: any, s: any) => ({
+                  net_liquidation: (acc.net_liquidation || 0) + (s.net_liquidation || 0),
+                  unrealized_pnl: (acc.unrealized_pnl || 0) + (s.unrealized_pnl || 0),
+                  day_change: (acc.day_change || 0) + (s.day_change || 0)
+                }), {});
+              }, [portfolioData, selectedAccountId]);
+
+              const summaryBar = accountSummary ? (
+                <HStack spacing={6} p={3} border="1px" borderColor={borderColor} borderRadius="md">
+                  <VStack align="start" spacing={0}>
+                    <Text fontSize="xs" color="gray.500">Portfolio Value</Text>
+                    <Text fontWeight="bold">{(accountSummary.net_liquidation || 0).toLocaleString('en-US', { style: 'currency', currency: 'USD' })}</Text>
+                  </VStack>
+                  <VStack align="start" spacing={0}>
+                    <Text fontSize="xs" color="gray.500">Unrealized P&L</Text>
+                    <Text color={(accountSummary.unrealized_pnl || 0) >= 0 ? 'green.500' : 'red.500'} fontWeight="bold">
+                      {(accountSummary.unrealized_pnl || 0) >= 0 ? '+' : '-'}{Math.abs(accountSummary.unrealized_pnl || 0).toLocaleString('en-US', { style: 'currency', currency: 'USD' })}
+                    </Text>
+                  </VStack>
+                  <VStack align="start" spacing={0}>
+                    <Text fontSize="xs" color="gray.500">Day P&L</Text>
+                    <Text color={(accountSummary.day_change || 0) >= 0 ? 'green.500' : 'red.500'} fontWeight="bold">
+                      {(accountSummary.day_change || 0) >= 0 ? '+' : '-'}{Math.abs(accountSummary.day_change || 0).toLocaleString('en-US', { style: 'currency', currency: 'USD' })}
+                    </Text>
+                  </VStack>
+                </HStack>
+              ) : null;
+
               // Filter and sort holdings based on account-filtered data
               const filteredAndSortedHoldings = useMemo(() => {
                 let filtered = accountFilteredHoldings.filter(holding => {
@@ -601,6 +659,7 @@ const Holdings: React.FC = () => {
 
               return (
                 <VStack spacing={6} align="stretch">
+                  {summaryBar}
                   {/* Search and Filters */}
                   <HStack spacing={4} wrap="wrap">
                     <Box flex="1" minW="200px">
@@ -609,7 +668,7 @@ const Holdings: React.FC = () => {
                           <FiSearch color="gray.300" />
                         </InputLeftElement>
                         <Input
-                          placeholder="Search holdings..."
+                          placeholder="Search stocks..."
                           value={searchTerm}
                           onChange={(e) => setSearchTerm(e.target.value)}
                         />
@@ -664,7 +723,7 @@ const Holdings: React.FC = () => {
                   {filteredAndSortedHoldings.length === 0 && (
                     <Box textAlign="center" py={12}>
                       <Text fontSize="lg" color="gray.500">
-                        No holdings match your filters
+                        No stocks match your filters
                       </Text>
                     </Box>
                   )}

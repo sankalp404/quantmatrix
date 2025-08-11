@@ -170,9 +170,9 @@ const DividendCalendar: React.FC<{ dividends: any[], selectedMonth: Date }> = ({
 };
 
 // Real dividend data fetcher - gets actual IBKR dividend history with enhanced projections
-const fetchDividendData = async (days: number = 365) => {
+const fetchDividendData = async (days: number = 365, accountId?: string) => {
   try {
-    const result = await portfolioApi.getDividends(undefined, days);
+    const result = await portfolioApi.getDividends(accountId, days);
 
     if (result.status === 'success') {
       return {
@@ -205,13 +205,14 @@ const DividendsCalendar: React.FC = () => {
   const [error, setError] = useState<string | null>(null);
   const [selectedView, setSelectedView] = useState<'upcoming' | 'calendar' | 'analysis'>('upcoming');
   const [timeframe, setTimeframe] = useState<string>('365');
+  const [selectedAccount, setSelectedAccount] = useState<string | undefined>(undefined);
 
   const bgColor = useColorModeValue('white', 'gray.800');
   const borderColor = useColorModeValue('gray.200', 'gray.600');
 
   useEffect(() => {
     loadDividendData();
-  }, [timeframe]);
+  }, [timeframe, selectedAccount]);
 
   const loadDividendData = async () => {
     setLoading(true);
@@ -219,7 +220,7 @@ const DividendsCalendar: React.FC = () => {
 
     try {
       const days = parseInt(timeframe) || 365;
-      const data = await fetchDividendData(days);
+      const data = await fetchDividendData(days, selectedAccount);
 
       if (data.error) {
         setError(data.error);
@@ -300,6 +301,8 @@ const DividendsCalendar: React.FC = () => {
           </Text>
         </Box>
 
+        {/* Account Selector (reusing AccountFilterWrapper is heavier here; simple dropdown for SSR filter) */}
+        {/* In a future pass we can unify with AccountFilterWrapper for consistency */}
         {/* Summary Cards */}
         <SimpleGrid columns={{ base: 2, md: 4 }} spacing={4}>
           <Card bg={bgColor} borderColor={borderColor}>

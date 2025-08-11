@@ -1,131 +1,166 @@
+#!/usr/bin/env python3
 """
-Options Trading Models
-=====================
-
-Handles options-specific data that extends the universal Instrument model.
-All options instruments are stored in the main instruments table.
+Generic Options Model for Multi-Brokerage Support
+Core options data models supporting all brokerages: IBKR, TastyTrade, Schwab, etc.
 """
 
 from sqlalchemy import (
-    Column, Integer, String, DateTime, Boolean, ForeignKey,
-    DECIMAL, Numeric, Float, Text, JSON, Index, Enum as SQLEnum
+    Column,
+    Integer,
+    String,
+    Float,
+    DateTime,
+    ForeignKey,
+    Date,
+    Numeric,
+    UniqueConstraint,
+    Index,
 )
 from sqlalchemy.orm import relationship
 from sqlalchemy.sql import func
-from datetime import datetime
 import enum
 
-from . import Base
+from backend.models import Base
 
-# =============================================================================
-# ENUMS  
-# =============================================================================
 
-class TradingStrategyType(enum.Enum):
-    ATR_MATRIX = "atr_matrix"
-    WHEEL = "wheel"
-    COVERED_CALL = "covered_call"
-    CASH_SECURED_PUT = "cash_secured_put"
-    IRON_CONDOR = "iron_condor"
-    BUTTERFLY = "butterfly"
-    STRADDLE = "straddle"
-    STRANGLE = "strangle"
-    CUSTOM = "custom"
+class OptionType(enum.Enum):
+    """Option contract types."""
 
-# =============================================================================
-# OPTIONS MODELS (Using Universal Instruments)
-# =============================================================================
+    CALL = "CALL"
+    PUT = "PUT"
 
-class TastytradeAccount(Base):
-    """Tastytrade account information for options trading."""
-    __tablename__ = "tastytrade_accounts"
-    
+
+class Option(Base):
+    """
+    Option contract/position tracking from any brokerage data source.
+
+    Maps to options exercise/assignment data from all brokerages.
+    Completely generic - supports IBKR, TastyTrade, Schwab, etc.
+
+    Generic Options Fields (adaptable to any brokerage):
+    - symbol, underlyingSymbol, strike, expiry, putCall, multiplier
+    - exercisedQuantity, assignedQuantity, quantity, position
+    - markPrice, underlyingPrice, unrealizedPnl, realizedPnl
+    - exerciseDate, exercisePrice, assignmentDate, commissions
+    - currency, fxRateToBase, accountId, conid
+    """
+
+    __tablename__ = "options"
+
     id = Column(Integer, primary_key=True)
-    account_number = Column(String(50), unique=True, nullable=False)
-    nickname = Column(String(100))
-    account_type = Column(String(50))
-    is_margin = Column(Boolean, default=False)
-    day_trader_status = Column(Boolean, default=False)
-    account_status = Column(String(50))
-    is_active = Column(Boolean, default=True)
-    created_at = Column(DateTime, default=datetime.utcnow)
-    updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+    user_id = Column(Integer, ForeignKey("users.id"), nullable=False)
 
-class OptionPosition(Base):
-    """Options position tracking - uses universal Instrument model."""
-    __tablename__ = "option_positions"
-    
-    id = Column(Integer, primary_key=True)
-    account_id = Column(Integer, ForeignKey("tastytrade_accounts.id"), nullable=False)
-    instrument_id = Column(Integer, ForeignKey("instruments.id"), nullable=False)
-    
-    # Position details
-    quantity = Column(Integer, nullable=False)
-    average_open_price = Column(Numeric(10, 4))
-    average_close_price = Column(Numeric(10, 4))
-    current_price = Column(Numeric(12, 4))
-    market_value = Column(Numeric(12, 2))
-    
-    # P&L tracking
-    unrealized_pnl = Column(Numeric(12, 2))
-    realized_pnl = Column(Numeric(12, 2))
-    day_pnl = Column(Numeric(12, 2))
-    
-    # Status and timestamps
-    is_open = Column(Boolean, default=True)
-    opened_at = Column(DateTime, default=datetime.utcnow)
-    closed_at = Column(DateTime)
-    created_at = Column(DateTime, default=datetime.utcnow)
-    updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
-    
+    # Account Information
+    account_id = Column(
+        Integer, ForeignKey("broker_accounts.id"), nullable=False, index=True
+    )
+    account_alias = Column(String(100), nullable=True)
+
+    # Options Contract Details (Generic brokerage fields)
+    symbol = Column(String(50), nullable=False, index=True)  # Full option symbol
+    underlying_symbol = Column(String(50), nullable=True)  # Underlying stock symbol
+    contract_id = Column(String(50), nullable=True, index=True)  # Brokerage contract ID
+    strike_price = Column(Float, nullable=False)  # Strike price
+    expiry_date = Column(Date, nullable=False)  # Expiration date
+    option_type = Column(String(10), nullable=False)  # PUT/CALL
+    multiplier = Column(Float, nullable=False, default=100)  # Contract multiplier
+
+    # Position Information
+    exercised_quantity = Column(Integer, nullable=True)  # Exercised quantity
+    assigned_quantity = Column(Integer, nullable=True)  # Assigned quantity
+    open_quantity = Column(Integer, nullable=False, default=0)  # Current open position
+
+    # Pricing Information
+    current_price = Column(Numeric(12, 4), nullable=True)  # Current option price
+    underlying_price = Column(Numeric(12, 4), nullable=True)  # Current underlying price
+
+    # Exercise/Assignment Details
+    exercise_date = Column(Date, nullable=True)  # Exercise date
+    exercise_price = Column(Float, nullable=True)  # Exercise price
+    assignment_date = Column(Date, nullable=True)  # Assignment date
+
+    # Financial Details
+    currency = Column(String(10), nullable=False, default="USD")  # Currency
+    fx_rate_to_base = Column(Float, nullable=True)  # FX rate to base currency
+
+    # P&L Information
+    unrealized_pnl = Column(Numeric(12, 2), nullable=True)  # Unrealized P&L
+    realized_pnl = Column(Numeric(12, 2), nullable=True)  # Realized P&L
+    total_cost = Column(Numeric(12, 2), nullable=True)  # Total cost basis
+    commission = Column(Numeric(12, 2), nullable=True)  # Commissions paid
+
+    # Data Source & Metadata
+    data_source = Column(String(20), nullable=False, default="BROKERAGE_API")
+
+    # Timestamps
+    created_at = Column(DateTime, default=func.now(), nullable=False)
+    updated_at = Column(DateTime, default=func.now(), onupdate=func.now())
+    last_updated = Column(DateTime, default=func.now())
+
     # Relationships
-    account = relationship("TastytradeAccount")
-    instrument = relationship("Instrument")
+    user = relationship("User", back_populates="options")
+    broker_account = relationship("BrokerAccount", back_populates="options")
 
-class OptionGreeks(Base):
-    """Option Greeks tracking."""
-    __tablename__ = "option_greeks"
-    
-    id = Column(Integer, primary_key=True)
-    instrument_id = Column(Integer, ForeignKey("instruments.id"), nullable=False)
-    date = Column(DateTime, nullable=False)
-    
-    # Greeks
-    delta = Column(Float)
-    gamma = Column(Float)
-    theta = Column(Float)
-    vega = Column(Float)
-    rho = Column(Float)
-    
-    # IV and other metrics
-    implied_volatility = Column(Float)
-    theoretical_price = Column(Numeric(10, 4))
-    
-    created_at = Column(DateTime, default=datetime.utcnow)
+    # Dedupe safety: one row per account + contract tuple
+    __table_args__ = (
+        UniqueConstraint(
+            "account_id",
+            "underlying_symbol",
+            "strike_price",
+            "expiry_date",
+            "option_type",
+            name="uq_options_contract_per_account",
+        ),
+        Index(
+            "idx_options_contract",
+            "underlying_symbol",
+            "strike_price",
+            "expiry_date",
+            "option_type",
+        ),
+    )
 
-class TradingStrategy(Base):
-    """Options trading strategies.""" 
-    __tablename__ = "trading_strategies"
-    
-    id = Column(Integer, primary_key=True)
-    account_id = Column(Integer, ForeignKey("tastytrade_accounts.id"), nullable=False)
-    name = Column(String(100), nullable=False)
-    strategy_type = Column(SQLEnum(TradingStrategyType), nullable=False)
-    
-    # Strategy configuration
-    parameters = Column(JSON)
-    target_profit_pct = Column(Float)
-    max_loss_pct = Column(Float)
-    
-    # Performance tracking
-    total_trades = Column(Integer, default=0)
-    winning_trades = Column(Integer, default=0)
-    total_pnl = Column(Numeric(15, 2), default=0)
-    
-    # Status
-    is_active = Column(Boolean, default=True)
-    created_at = Column(DateTime, default=datetime.utcnow)
-    updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
-    
-    # Relationships
-    account = relationship("TastytradeAccount") 
+    def __repr__(self):
+        return f"<Option({self.underlying_symbol} {self.option_type} ${self.strike_price} {self.expiry_date})>"
+
+    @property
+    def days_to_expiry(self) -> int:
+        """Calculate days until expiration."""
+        if self.expiry_date:
+            from datetime import date
+
+            return (self.expiry_date - date.today()).days
+        return 0
+
+    @property
+    def is_expired(self) -> bool:
+        """Check if option has expired."""
+        return self.days_to_expiry <= 0
+
+    @property
+    def intrinsic_value(self) -> float:
+        """Calculate intrinsic value."""
+        if not self.underlying_price or not self.strike_price:
+            return 0.0
+
+        if self.option_type == "CALL":
+            return max(0, float(self.underlying_price) - self.strike_price)
+        else:  # PUT
+            return max(0, self.strike_price - float(self.underlying_price))
+
+    @property
+    def time_value(self) -> float:
+        """Calculate time value (extrinsic value)."""
+        if not self.current_price:
+            return 0.0
+        return max(0, float(self.current_price) - self.intrinsic_value)
+
+    @property
+    def notional_value(self) -> float:
+        """Calculate notional value of the position."""
+        if self.current_price and self.open_quantity:
+            return float(self.current_price) * self.open_quantity * self.multiplier
+        return 0.0
+
+
+# Note: class renamed from OptionPosition → Option and table from option_positions → options

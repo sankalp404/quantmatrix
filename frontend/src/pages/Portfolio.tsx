@@ -97,11 +97,11 @@ const Portfolio: React.FC = () => {
     fetchPortfolioData();
   }, []);
 
-  const fetchPortfolioData = async () => {
+  const fetchPortfolioData = async (accountId?: string) => {
     setLoading(true);
     setError(null);
     try {
-      const data = await portfolioApi.getLive();
+      const data = await portfolioApi.getLive(accountId);
       setPortfolioData(data.data);
 
       // Transform portfolio data into holdings array
@@ -374,6 +374,10 @@ const Portfolio: React.FC = () => {
             showSummary: true,
             variant: 'detailed',
             size: 'md'
+          }}
+          onAccountChange={(account) => {
+            const accParam = account === 'all' ? undefined : account;
+            fetchPortfolioData(accParam);
           }}
         >
           {(filteredHoldings, filterState) => (

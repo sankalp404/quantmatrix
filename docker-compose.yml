@@ -1,5 +1,3 @@
-version: '3.8'
-
 services:
   # PostgreSQL Database
   postgres:
@@ -12,7 +10,6 @@ services:
       POSTGRES_HOST_AUTH_METHOD: trust
     volumes:
       - postgres_data:/var/lib/postgresql/data
-      - ./init.sql:/docker-entrypoint-initdb.d/init.sql
     ports:
       - "5432:5432"
     networks:
@@ -40,7 +37,7 @@ services:
       timeout: 3s
       retries: 5
 
-  # FastAPI Backend
+  # Backend API Server
   backend:
     build:
       context: .
@@ -49,25 +46,24 @@ services:
     env_file:
       - .env
     environment:
+      - PYTHONPATH=/app
       - DATABASE_URL=postgresql://quantmatrix:password@postgres:5432/quantmatrix
       - REDIS_URL=redis://:redispassword@redis:6379/0
-      - CELERY_BROKER_URL=redis://:redispassword@redis:6379/0
-      - CELERY_RESULT_BACKEND=redis://:redispassword@redis:6379/0
-      - DEBUG=true
-      - IBKR_HOST=host.docker.internal # Override for Docker to connect to host machine
-    volumes:
-      - ./backend:/app/backend
-      - ./requirements.txt:/app/requirements.txt
+      - IBKR_HOST=host.docker.internal
     ports:
       - "8000:8000"
+    volumes:
+      - .:/app
+      - /app/backend/__pycache__
     depends_on:
       postgres:
         condition: service_healthy
       redis:
-        condition: service_healthy
+        condition: service_started
+    command: sh -c "cd /app/backend && python -m uvicorn api.main:app --host 0.0.0.0 --port 8000 --log-level info"
     networks:
       - quantmatrix_network
-    command: uvicorn backend.api.main:app --host 0.0.0.0 --port 8000 --reload
+    restart: unless-stopped
 
   # Celery Worker
   celery_worker:

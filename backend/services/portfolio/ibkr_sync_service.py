@@ -1,0 +1,1363 @@
+"""
+IBKR Portfolio Sync Service
+==========================
+
+IBKR-specific sync service that syncs real IBKR data from both real-time API and FlexQuery 
+to populate all database models with broker-agnostic data structures.
+
+This service is IBKR-specific and handles:
+- IBKR FlexQuery XML parsing
+- IBKR real-time API data
+- IBKR-specific data transformations
+
+The data is transformed into broker-agnostic models that work with any broker.
+"""
+
+import asyncio
+import logging
+from typing import Dict
+from datetime import datetime
+from sqlalchemy.orm import Session
+from sqlalchemy import and_
+from decimal import Decimal
+import json
+
+from backend.database import SessionLocal
+from backend.models import (
+    # Portfolio models
+    PortfolioSnapshot,
+    # Trade & Tax models
+    TaxLot,
+    Trade,
+    Transaction,
+    # Market data models
+    PriceData,
+    # User model
+    BrokerAccount,
+)
+
+# Import specific enums and models from their modules
+from backend.models.position import Position, PositionType, PositionStatus
+from backend.models.instrument import Instrument, InstrumentType
+from backend.models.tax_lot import TaxLotSource
+from backend.models.options import Option
+
+# Import the services we need
+from backend.services.clients.ibkr_flexquery_client import IBKRFlexQueryClient
+
+logger = logging.getLogger(__name__)
+
+
+def serialize_for_json(data):
+    """Convert datetime objects to ISO strings for JSON serialization."""
+    if isinstance(data, dict):
+        return {k: serialize_for_json(v) for k, v in data.items()}
+    elif isinstance(data, list):
+        return [serialize_for_json(item) for item in data]
+    elif isinstance(data, datetime):
+        return data.isoformat()
+    else:
+        return data
+
+
+class IBKRSyncService:
+    """IBKR-specific service to sync all IBKR data to broker-agnostic database models."""
+
+    def __init__(self):
+        self.flexquery_client = IBKRFlexQueryClient()
+        # NOTE: IBKRClient may need singleton pattern - will handle connection carefully
+        # Account mapping removed - now retrieved dynamically from database/config
+
+    async def sync_comprehensive_portfolio(
+        self, account_number: str = "U19491234"
+    ) -> Dict:
+        """
+        MAIN METHOD: Comprehensive sync of all portfolio data.
+
+        This populates ALL database models with real IBKR data:
+        1. Instruments (securities master data)
+        2. position (current positions aggregated by symbol)
+        3. TaxLots (individual tax lots with REAL cost basis from trades)
+        4. Trades (historical trade records from FlexQuery)
+        5. PriceData (current market prices)
+        6. Positions (detailed position data)
+        7. PortfolioSnapshot (daily portfolio snapshot)
+        """
+        db = SessionLocal()
+        results = {}
+
+        try:
+            logger.info(
+                f"🚀 Starting comprehensive portfolio sync for {account_number}"
+            )
+
+            # Get broker account from database (using broker-agnostic model)
+            broker_account = (
+                db.query(BrokerAccount)
+                .filter(BrokerAccount.account_number == account_number)
+                .first()
+            )
+            if not broker_account:
+                return {
+                    "error": f"Broker Account {account_number} not found in database"
+                }
+
+            # Step 1: Sync Instruments (securities master data)
+            instruments_result = await self._sync_instruments(db, account_number)
+            results["instruments"] = instruments_result
+
+            # Step 2: Sync TaxLots with REAL cost basis from FlexQuery trades
+            tax_lots_result = await self._sync_tax_lots_from_flexquery(
+                db, broker_account, account_number
+            )
+            results["tax_lots"] = tax_lots_result
+
+            # Step 3: Sync Option Positions from FlexQuery OpenPositions
+            options_result = await self._sync_option_positions_from_flexquery(
+                db, broker_account, account_number
+            )
+            results["option_positions"] = options_result
+
+            # Step 4: Sync historical Trades from FlexQuery
+            trades_result = await self._sync_trades_from_flexquery(
+                db, broker_account, account_number
+            )
+            results["trades"] = trades_result
+            # Step 5: Sync current Positions (aggregated from tax lots, uses BrokerAccount)
+            positions_result = await self._sync_position_from_tax_lots(
+                db, broker_account
+            )
+            results["positions"] = positions_result
+
+            # Step 6: Update Portfolio snapshots
+            snapshot_result = await self._create_portfolio_snapshot(db, broker_account)
+            results["snapshot"] = snapshot_result
+
+            # Step 7: Sync detailed Positions (uses Broker Account)
+            detailed_positions_result = await self._sync_positions_from_position(
+                db, broker_account
+            )
+            results["detailed_positions"] = detailed_positions_result
+
+            # Step 8: Sync cash transactions including dividends
+            cash_transactions_result = await self._sync_cash_transactions(
+                db, broker_account, account_number
+            )
+            results["cash_transactions"] = cash_transactions_result
+
+            # Step 9: Sync account balances
+            account_balances_result = await self._sync_account_balances(
+                db, broker_account, account_number
+            )
+            results["account_balances"] = account_balances_result
+
+            # Step 10: Sync margin interest
+            margin_interest_result = await self._sync_margin_interest(
+                db, broker_account, account_number
+            )
+            results["margin_interest"] = margin_interest_result
+
+            # Step 11: Sync transfers
+            transfers_result = await self._sync_transfers(
+                db, broker_account, account_number
+            )
+            results["transfers"] = transfers_result
+
+            # Commit all changes
+            db.commit()
+
+            # Calculate summary
+            total_cost = sum(
+                float(lot.cost_basis or 0)
+                for lot in db.query(TaxLot)
+                .filter(TaxLot.account_id == broker_account.id)
+                .all()
+            )
+            total_value = sum(
+                float(lot.market_value or 0)
+                for lot in db.query(TaxLot)
+                .filter(TaxLot.account_id == broker_account.id)
+                .all()
+            )  # Fixed: Use market_value not current_value
+            total_pnl = total_value - total_cost
+            return_pct = (total_pnl / total_cost * 100) if total_cost > 0 else 0
+
+            results["summary"] = {
+                "total_cost_basis": f"${total_cost:,.2f}",
+                "total_market_value": f"${total_value:,.2f}",
+                "unrealized_pnl": f"${total_pnl:,.2f}",
+                "return_pct": f"{return_pct:.2f}%",
+                "sync_timestamp": datetime.now().isoformat(),
+            }
+
+            logger.info("✅ Comprehensive portfolio sync completed successfully")
+            return results
+
+        except Exception as e:
+            db.rollback()
+            logger.error(f"❌ Error in comprehensive sync: {e}")
+            return {"error": str(e)}
+        finally:
+            db.close()
+
+    async def _sync_instruments(self, db: Session, account_number: str) -> Dict:
+        """Sync comprehensive instruments from all FlexQuery sections."""
+        try:
+            logger.info(f"📊 Syncing enhanced instruments for {account_number}")
+
+            # Get comprehensive instrument data from FlexQuery
+            ref_code = await self.flexquery_client._request_report()
+            if not ref_code:
+                return {"error": "Failed to request FlexQuery report"}
+
+            # Wait for report generation
+            await asyncio.sleep(5)
+
+            raw_xml = await self.flexquery_client._get_report(ref_code)
+            if not raw_xml:
+                return {"error": "Failed to get FlexQuery report"}
+
+            # Parse enhanced instruments from all sections
+            instruments_data = self.flexquery_client._parse_enhanced_instruments(
+                raw_xml, account_number
+            )
+
+            if not instruments_data:
+                logger.warning(f"No instrument data found for {account_number}")
+                return {"synced": 0, "updated": 0}
+
+            synced_count = 0
+            updated_count = 0
+
+            for inst_data in instruments_data:
+                try:
+                    symbol = inst_data.get("symbol")
+                    if not symbol or len(symbol) > 50:  # Symbol length limit
+                        continue
+
+                    # Check if instrument already exists
+                    existing = (
+                        db.query(Instrument).filter(Instrument.symbol == symbol).first()
+                    )
+
+                    if existing:
+                        # Update existing instrument with enhanced data
+                        if (
+                            inst_data.get("name")
+                            and inst_data["name"] != symbol
+                            and existing.name == existing.symbol
+                        ):
+                            existing.name = inst_data["name"]
+
+                        if (
+                            inst_data.get("exchange")
+                            and inst_data["exchange"] != "UNKNOWN"
+                        ):
+                            existing.exchange = inst_data["exchange"]
+
+                        if inst_data.get("underlying_symbol"):
+                            existing.underlying_symbol = inst_data["underlying_symbol"]
+
+                        if inst_data.get("option_type"):
+                            existing.option_type = inst_data["option_type"]
+
+                        if inst_data.get("strike_price"):
+                            existing.strike_price = inst_data["strike_price"]
+
+                        if inst_data.get("expiry_date"):
+                            existing.expiration_date = inst_data["expiry_date"]
+
+                        if inst_data.get("multiplier"):
+                            existing.multiplier = inst_data["multiplier"]
+
+                        existing.last_updated = datetime.now()
+                        updated_count += 1
+
+                    else:
+                        # Create new enhanced instrument
+                        instrument = Instrument(
+                            symbol=symbol,
+                            name=inst_data.get("name", symbol),
+                            instrument_type=getattr(
+                                InstrumentType,
+                                inst_data.get("instrument_type", "STOCK"),
+                            ),
+                            exchange=inst_data.get("exchange", "NASDAQ"),
+                            currency=inst_data.get("currency", "USD"),
+                            underlying_symbol=inst_data.get("underlying_symbol"),
+                            option_type=inst_data.get("option_type"),
+                            strike_price=inst_data.get("strike_price"),
+                            expiration_date=inst_data.get("expiry_date"),
+                            multiplier=inst_data.get("multiplier", 1),
+                            is_tradeable=inst_data.get("is_tradeable", True),
+                            is_active=inst_data.get("is_active", True),
+                            data_source=inst_data.get(
+                                "data_source", "ibkr_flexquery_enhanced"
+                            ),
+                            last_updated=datetime.now(),
+                        )
+
+                        db.add(instrument)
+                        synced_count += 1
+
+                except Exception as e:
+                    logger.error(
+                        f"Error processing instrument {inst_data.get('symbol', 'UNKNOWN')}: {e}"
+                    )
+                    continue
+
+            db.flush()
+
+            logger.info(
+                f"✅ Enhanced instruments: {synced_count} new, {updated_count} updated"
+            )
+            return {
+                "synced": synced_count,
+                "updated": updated_count,
+                "total_processed": len(instruments_data),
+            }
+
+        except Exception as e:
+            logger.error(f"❌ Error syncing enhanced instruments: {e}")
+            import traceback
+
+            traceback.print_exc()
+            return {"error": str(e)}
+
+    async def _sync_tax_lots_from_flexquery(
+        self, db: Session, broker_account: BrokerAccount, account_number: str
+    ) -> Dict:
+        """Sync tax lots with REAL cost basis from FlexQuery trades section."""
+        try:
+            # Get the real tax lots data we discovered
+            tax_lots_data = await self.flexquery_client.get_official_tax_lots(
+                account_number
+            )
+
+            # Clear existing tax lots ONLY if new data exists to avoid accidental wipes
+            if tax_lots_data:
+                db.query(TaxLot).filter(TaxLot.account_id == broker_account.id).delete()
+
+            synced_count = 0
+            total_cost = 0
+            total_value = 0
+
+            for lot_data in tax_lots_data:
+                try:
+                    symbol = lot_data.get("symbol")
+                    if not symbol or len(symbol) > 20:
+                        continue
+
+                    # Create tax lot with real data
+                    tax_lot = TaxLot(
+                        user_id=broker_account.user_id,  # Use broker account's user_id
+                        account_id=broker_account.id,  # Use broker account ID
+                        lot_id=f"IBKR_{symbol}_{synced_count}",  # Generate unique lot ID
+                        symbol=symbol,
+                        quantity=float(
+                            lot_data.get("quantity", 0)
+                        ),  # Fixed: Use 'quantity' not 'original_quantity'
+                        cost_per_share=float(
+                            lot_data.get("cost_per_share", 0)
+                        ),  # Add required field
+                        cost_basis=float(lot_data.get("cost_basis", 0)),
+                        acquisition_date=self.flexquery_client._parse_flexquery_date(
+                            lot_data.get("acquisition_date")
+                        ),  # Use parsed date, not raw string
+                        current_price=float(lot_data.get("current_price", 0)),
+                        market_value=float(
+                            lot_data.get("current_value", 0)
+                        ),  # Fixed: Use 'market_value' not 'current_value'
+                        unrealized_pnl=float(lot_data.get("unrealized_pnl", 0)),
+                        unrealized_pnl_pct=float(lot_data.get("unrealized_pnl_pct", 0)),
+                        currency=lot_data.get("currency", "USD"),
+                        asset_category=lot_data.get(
+                            "contract_type", "STK"
+                        ),  # Fixed: Use 'asset_category' not 'contract_type'
+                        source=TaxLotSource.OFFICIAL_STATEMENT,  # Fixed: Use broker-agnostic enum (FlexQuery is official statement)
+                        trade_id=lot_data.get("trade_id"),  # Add optional trade_id
+                        exchange=lot_data.get("exchange"),  # Add optional exchange
+                    )
+
+                    db.add(tax_lot)
+                    synced_count += 1
+                    total_cost += float(lot_data.get("cost_basis", 0))
+                    total_value += float(lot_data.get("current_value", 0))
+
+                except Exception as e:
+                    logger.error(f"Error creating tax lot {synced_count}: {e}")
+                    continue
+
+            db.flush()
+            total_pnl = total_value - total_cost
+
+            return {
+                "synced": synced_count,
+                "total_cost_basis": f"${total_cost:,.2f}",
+                "total_market_value": f"${total_value:,.2f}",
+                "unrealized_pnl": f"${total_pnl:,.2f}",
+            }
+
+        except Exception as e:
+            logger.error(f"Error syncing tax lots: {e}")
+            return {"error": str(e)}
+
+    async def _sync_trades_from_flexquery(
+        self, db: Session, broker_account: BrokerAccount, account_number: str
+    ) -> Dict:
+        """Sync historical trades from FlexQuery Trades section."""
+        try:
+            # Get raw FlexQuery XML and parse trades section
+            ref_code = await self.flexquery_client._request_report()
+            if not ref_code:
+                return {"error": "Failed to request FlexQuery report"}
+
+            # Wait for report generation
+            await asyncio.sleep(5)
+
+            raw_xml = await self.flexquery_client._get_report(ref_code)
+            if not raw_xml:
+                return {"error": "Failed to get FlexQuery report"}
+
+            # Parse trades from XML
+            trades_data = self.flexquery_client._parse_trades_from_xml(
+                raw_xml, account_number
+            )
+
+            # Clear existing trades to avoid duplicates
+            db.query(Trade).filter(Trade.account_id == broker_account.id).delete()
+
+            synced_count = 0
+            for trade_data in trades_data:
+                try:
+                    # Skip if execution_id already exists (prevent duplicates)
+                    exec_id = trade_data.get("execution_id")
+                    if exec_id:
+                        existing = (
+                            db.query(Trade)
+                            .filter(
+                                Trade.account_id == broker_account.id,
+                                Trade.execution_id == exec_id,
+                            )
+                            .first()
+                        )
+                        if existing:
+                            continue
+
+                    trade = Trade(
+                        account_id=broker_account.id,  # Trade model uses broker account ID
+                        symbol=trade_data.get("symbol"),
+                        side=trade_data.get("side", "BUY"),
+                        quantity=Decimal(str(trade_data.get("quantity", 0))),
+                        price=Decimal(str(trade_data.get("price", 0))),
+                        total_value=Decimal(str(trade_data.get("total_value", 0))),
+                        commission=Decimal(str(trade_data.get("commission", 0))),
+                        execution_time=trade_data.get("execution_time")
+                        or datetime.now(),
+                        execution_id=trade_data.get("execution_id"),
+                        status="FILLED",
+                        is_paper_trade=False,  # Real trades from IBKR
+                        trade_metadata=serialize_for_json(
+                            trade_data
+                        ),  # Fix JSON serialization
+                    )
+
+                    db.add(trade)
+                    synced_count += 1
+
+                except Exception as e:
+                    logger.error(f"Error creating trade {synced_count}: {e}")
+                    continue
+
+            db.flush()
+            return {"synced": synced_count}
+
+        except Exception as e:
+            logger.error(f"Error syncing trades: {e}")
+            return {"error": str(e)}
+
+    async def _sync_position_from_tax_lots(
+        self, db: Session, broker_account: BrokerAccount
+    ) -> Dict:
+        """Sync position by aggregating tax lots by symbol."""
+        try:
+            # Get all tax lots for this account using broker account ID
+            tax_lots = (
+                db.query(TaxLot).filter(TaxLot.account_id == broker_account.id).all()
+            )
+
+            # Aggregate by symbol
+            position_data = {}
+            for lot in tax_lots:
+                symbol = lot.symbol
+                if symbol not in position_data:
+                    position_data[symbol] = {
+                        "quantity": 0,
+                        "total_cost": 0,
+                        "total_value": 0,
+                        "current_price": float(lot.current_price or 0),
+                        "currency": lot.currency,
+                        "contract_type": lot.asset_category,  # Fixed: Use asset_category not contract_type
+                    }
+
+                position_data[symbol]["quantity"] += float(
+                    lot.quantity or 0
+                )  # Fixed: Use quantity not original_quantity
+                position_data[symbol]["total_cost"] += float(lot.cost_basis or 0)
+                position_data[symbol]["total_value"] += float(
+                    lot.market_value or 0
+                )  # Fixed: Use market_value not current_value
+
+            # Clear existing position
+            db.query(Position).filter(Position.account_id == broker_account.id).delete()
+
+            # Create position
+            synced_count = 0
+            for symbol, data in position_data.items():
+                if data["quantity"] != 0:  # Only active positions
+                    avg_cost = (
+                        data["total_cost"] / data["quantity"]
+                        if data["quantity"] != 0
+                        else 0
+                    )
+                    unrealized_pnl = data["total_value"] - data["total_cost"]
+                    unrealized_pnl_pct = (
+                        (unrealized_pnl / data["total_cost"] * 100)
+                        if data["total_cost"] != 0
+                        else 0
+                    )
+
+                    position = Position(
+                        user_id=broker_account.user_id,
+                        account_id=broker_account.id,
+                        symbol=symbol,
+                        instrument_type="STOCK",
+                        position_type=(
+                            PositionType.LONG
+                            if data["quantity"] > 0
+                            else PositionType.SHORT
+                        ),
+                        quantity=Decimal(str(data["quantity"])),
+                        status=PositionStatus.OPEN,
+                        average_cost=Decimal(str(avg_cost)),
+                        total_cost_basis=Decimal(str(data["total_cost"])),
+                        current_price=Decimal(str(data["current_price"])),
+                        market_value=Decimal(str(data["total_value"])),
+                        unrealized_pnl=Decimal(str(unrealized_pnl)),
+                        unrealized_pnl_pct=Decimal(str(unrealized_pnl_pct)),
+                        position_updated_at=datetime.now(),
+                    )
+
+                    db.add(position)
+                    synced_count += 1
+
+            db.flush()
+            return {"synced": synced_count}
+
+        except Exception as e:
+            logger.error(f"Error syncing position: {e}")
+            return {"error": str(e)}
+
+    async def _sync_current_prices(self, db: Session, account_number: str) -> Dict:
+        """Sync current market prices for all symbols."""
+        try:
+            # Get unique symbols from tax lots using account_number
+            tax_lots = (
+                db.query(TaxLot)
+                .filter(TaxLot.account_id == account_number)
+                .distinct(TaxLot.symbol)
+                .all()
+            )
+            symbols = [lot.symbol for lot in tax_lots]
+
+            synced_count = 0
+            for symbol in symbols:
+                # Get current price from tax lot data (already has latest prices)
+                latest_lot = db.query(TaxLot).filter(TaxLot.symbol == symbol).first()
+                if latest_lot and latest_lot.current_price:
+                    # Create or update price data
+                    existing_price = (
+                        db.query(PriceData)
+                        .filter(
+                            and_(
+                                PriceData.symbol == symbol,
+                                PriceData.date == datetime.now().date(),
+                            )
+                        )
+                        .first()
+                    )
+
+                    if not existing_price:
+                        price_data = PriceData(
+                            symbol=symbol,
+                            date=datetime.now().date(),
+                            close_price=latest_lot.current_price,
+                            data_source="ibkr_flexquery",
+                            interval="1d",
+                        )
+                        db.add(price_data)
+                        synced_count += 1
+
+            db.flush()
+            return {"synced": synced_count}
+
+        except Exception as e:
+            logger.error(f"Error syncing prices: {e}")
+            return {"error": str(e)}
+
+    async def _sync_positions_from_position(
+        self, db: Session, broker_account: BrokerAccount
+    ) -> Dict:
+        """Sync detailed positions from position."""
+        try:
+            position = (
+                db.query(Position)
+                .filter(Position.account_id == broker_account.id)
+                .all()
+            )
+
+            # Clear existing positions for this account (use broker_account.id for Position FK)
+            db.query(Position).filter(Position.account_id == broker_account.id).delete()
+
+            synced_count = 0
+            for holding in position:
+                if holding.quantity != 0:  # Only active positions
+                    position = Position(
+                        user_id=broker_account.user_id,
+                        account_id=broker_account.id,  # Use broker_account.id for Position FK constraint
+                        symbol=holding.symbol,
+                        instrument_type="STOCK",
+                        position_type=(
+                            PositionType.LONG
+                            if holding.quantity > 0
+                            else PositionType.SHORT
+                        ),
+                        quantity=Decimal(str(holding.quantity)),
+                        status=PositionStatus.OPEN,
+                        average_cost=Decimal(str(holding.average_cost)),
+                        total_cost_basis=Decimal(
+                            str(holding.average_cost * holding.quantity)
+                        ),
+                        current_price=Decimal(str(holding.current_price)),
+                        market_value=Decimal(str(holding.market_value)),
+                        unrealized_pnl=Decimal(str(holding.unrealized_pnl)),
+                        unrealized_pnl_pct=Decimal(str(holding.unrealized_pnl_pct)),
+                        sector=holding.sector,
+                        position_updated_at=datetime.now(),
+                    )
+
+                    db.add(position)
+                    synced_count += 1
+
+            db.flush()
+            return {"synced": synced_count}
+
+        except Exception as e:
+            logger.error(f"Error syncing positions: {e}")
+            return {"error": str(e)}
+
+    async def _create_portfolio_snapshot(
+        self, db: Session, broker_account: BrokerAccount
+    ) -> Dict:
+        """Create daily portfolio snapshot for tracking."""
+        try:
+            today = datetime.now().date()
+
+            # Check if snapshot already exists
+            existing = (
+                db.query(PortfolioSnapshot)
+                .filter(
+                    PortfolioSnapshot.account_id == broker_account.id,
+                    PortfolioSnapshot.snapshot_date
+                    >= datetime.combine(today, datetime.min.time()),
+                )
+                .first()
+            )
+
+            if existing:
+                return {"created": False, "reason": "Snapshot already exists for today"}
+
+            # Calculate totals from position
+            position = (
+                db.query(Position)
+                .filter(Position.account_id == broker_account.id)
+                .all()
+            )
+            total_value = sum(h.market_value for h in position)
+            unrealized_pnl = sum(h.unrealized_pnl for h in position)
+
+            # Ensure JSON-serializable payload (e.g., Decimals → float)
+            def _to_float(value):
+                try:
+                    if isinstance(value, Decimal):
+                        return float(value)
+                except Exception:
+                    pass
+                return value
+
+            snapshot = PortfolioSnapshot(
+                account_id=broker_account.id,  # PortfolioSnapshot uses integer account ID
+                snapshot_date=datetime.now(),
+                total_value=total_value,
+                total_cash=0,  # Will be enhanced later
+                total_equity_value=total_value,
+                unrealized_pnl=unrealized_pnl,
+                positions_snapshot=json.dumps(
+                    [
+                        {
+                            "symbol": h.symbol,
+                            "quantity": _to_float(h.quantity),
+                            "value": _to_float(h.market_value),
+                            "pnl": _to_float(h.unrealized_pnl),
+                        }
+                        for h in position
+                    ]
+                ),
+            )
+
+            db.add(snapshot)
+            db.flush()
+
+            return {"created": True, "total_value": f"${total_value:,.2f}"}
+
+        except Exception as e:
+            logger.error(f"Error creating snapshot: {e}")
+            return {"error": str(e)}
+
+    async def _sync_option_positions_from_flexquery(
+        self, db: Session, broker_account: BrokerAccount, account_number: str
+    ) -> Dict:
+        """Sync option positions from IBKR FlexQuery OpenPositions section."""
+        try:
+            logger.info(f"📊 Syncing option positions for {account_number}")
+
+            # Get option positions from FlexQuery first
+            option_positions_data = await self.flexquery_client.get_option_positions(
+                account_number
+            )
+
+            # Fallback to real-time API if FlexQuery returns no open options
+            if not option_positions_data:
+                try:
+                    from backend.services.clients.ibkr_client import IBKRClient
+
+                    ib_client = IBKRClient()
+                    rt_positions = await ib_client.get_positions(account_number)
+                    option_positions_data = [
+                        {
+                            "account_id": account_number,
+                            "symbol": p["symbol"],
+                            "underlying_symbol": "",
+                            "strike_price": None,
+                            "expiry_date": None,
+                            "option_type": "",
+                            "multiplier": 100,
+                            "open_quantity": abs(int(p["position"])),
+                            "current_price": 0,
+                            "market_value": p["market_value"],
+                            "unrealized_pnl": p["unrealized_pnl"],
+                            "currency": p["currency"],
+                            "data_source": "ibkr_realtime",
+                        }
+                        for p in rt_positions
+                        if p["contract_type"] == "OPT"
+                    ]
+                except Exception as e:
+                    logger.warning(f"Fallback real-time option fetch failed: {e}")
+                    option_positions_data = []
+
+            # Get historical option exercises from OptionEAE section
+            option_exercises_data = (
+                await self.flexquery_client.get_historical_option_exercises(
+                    account_number
+                )
+            )
+
+            # Clear existing option positions for this account
+            db.query(Option).filter_by(account_id=broker_account.id).delete()
+
+            synced_count = 0
+            skipped_count = 0
+            exercises_count = 0
+
+            # Sync current option positions (if any)
+            for option_data in option_positions_data:
+                try:
+                    # Create Option record
+                    option_position = Option(
+                        user_id=broker_account.user_id,
+                        account_id=broker_account.id,  # Use BrokerAccount.id
+                        symbol=option_data["symbol"],
+                        underlying_symbol=option_data["underlying_symbol"],
+                        strike_price=option_data["strike_price"],
+                        expiry_date=option_data["expiry_date"],
+                        option_type=option_data["option_type"],
+                        multiplier=option_data["multiplier"],
+                        open_quantity=option_data["open_quantity"],
+                        current_price=option_data["current_price"],
+                        market_value=option_data["market_value"],
+                        unrealized_pnl=option_data["unrealized_pnl"],
+                        currency=option_data["currency"],
+                        data_source=option_data["data_source"],
+                    )
+
+                    db.add(option_position)
+                    synced_count += 1
+
+                except Exception as e:
+                    logger.error(
+                        f"Error creating option position for {option_data.get('symbol', 'UNKNOWN')}: {e}"
+                    )
+                    skipped_count += 1
+                    continue
+
+            # Sync historical option exercises (OptionEAE)
+            for exercise_data in option_exercises_data:
+                try:
+                    # Create Option record for historical exercise/assignment
+                    option_exercise = Option(
+                        user_id=broker_account.user_id,
+                        account_id=broker_account.id,
+                        symbol=exercise_data["symbol"],
+                        underlying_symbol=exercise_data["underlying_symbol"],
+                        strike_price=exercise_data["strike_price"],
+                        expiry_date=exercise_data["expiry_date"],
+                        option_type=exercise_data["option_type"],
+                        multiplier=exercise_data["multiplier"],
+                        exercised_quantity=exercise_data.get("exercised_quantity", 0),
+                        assigned_quantity=exercise_data.get("assigned_quantity", 0),
+                        open_quantity=0,  # Historical exercises are closed
+                        exercise_date=exercise_data.get("exercise_date"),
+                        exercise_price=exercise_data.get("exercise_price"),
+                        assignment_date=exercise_data.get("assignment_date"),
+                        realized_pnl=exercise_data.get("realized_pnl"),
+                        total_cost=exercise_data.get("proceeds", 0)
+                        - exercise_data.get("commission", 0),
+                        commission=exercise_data.get("commission"),
+                        currency=exercise_data["currency"],
+                        data_source=exercise_data["data_source"],
+                    )
+
+                    db.add(option_exercise)
+                    exercises_count += 1
+
+                except Exception as e:
+                    logger.error(
+                        f"Error creating option exercise for {exercise_data.get('symbol', 'UNKNOWN')}: {e}"
+                    )
+                    skipped_count += 1
+                    continue
+
+            db.flush()
+
+            total_synced = synced_count + exercises_count
+            logger.info(
+                f"✅ Synced {synced_count} current options + {exercises_count} historical exercises = {total_synced} total, skipped {skipped_count}"
+            )
+
+            return {
+                "synced": total_synced,
+                "current_positions": synced_count,
+                "historical_exercises": exercises_count,
+                "skipped": skipped_count,
+            }
+
+        except Exception as e:
+            logger.error(f"❌ Error syncing option positions: {e}")
+            import traceback
+
+            traceback.print_exc()
+            return {"error": str(e)}
+
+    async def _sync_cash_transactions(
+        self, db: Session, broker_account: BrokerAccount, account_number: str
+    ) -> Dict:
+        """Sync cash transactions including dividends from FlexQuery."""
+        try:
+            logger.info(f"📊 Syncing cash transactions for {account_number}")
+
+            # Get cash transaction data from FlexQuery
+            transactions_data = await self.flexquery_client.get_cash_transactions(
+                account_number
+            )
+
+            if not transactions_data:
+                logger.info(f"No cash transactions found for {account_number}")
+                return {"synced": 0, "dividends": 0}
+
+            synced_count = 0
+            dividend_count = 0
+
+            from backend.models.transaction import TransactionSyncStatus
+
+            for tx_data in transactions_data:
+                try:
+                    tx_type = tx_data.get("transaction_type", "")
+
+                    # Handle dividends separately
+                    if tx_type in ["Dividends", "Payment In Lieu Of Dividend"]:
+                        # Create dividend record
+                        from backend.models.transaction import Dividend
+
+                        existing_dividend = (
+                            db.query(Dividend)
+                            .filter(
+                                Dividend.account_id == broker_account.id,
+                                Dividend.external_id == tx_data.get("external_id", ""),
+                            )
+                            .first()
+                        )
+
+                        if not existing_dividend:
+                            # Use pay_date as ex_date if ex_date is not available from FlexQuery
+                            ex_date = tx_data.get("transaction_date") or tx_data.get(
+                                "settlement_date"
+                            )
+                            pay_date = tx_data.get("settlement_date") or tx_data.get(
+                                "transaction_date"
+                            )
+
+                            dividend = Dividend(
+                                account_id=broker_account.id,
+                                external_id=tx_data.get("external_id", ""),
+                                symbol=tx_data.get("symbol", ""),
+                                ex_date=ex_date,  # Use transaction date as ex_date
+                                pay_date=pay_date,
+                                dividend_per_share=abs(tx_data.get("amount", 0))
+                                / max(tx_data.get("quantity", 1), 1),
+                                shares_held=tx_data.get("quantity", 0),
+                                total_dividend=abs(tx_data.get("amount", 0)),
+                                tax_withheld=tx_data.get("taxes", 0) or 0,
+                                net_dividend=abs(tx_data.get("net_amount", 0)),
+                                currency=tx_data.get("currency", "USD"),
+                                frequency="UNKNOWN",
+                                dividend_type=(
+                                    "ORDINARY" if "Dividend" in tx_type else "SPECIAL"
+                                ),
+                                source="ibkr_flexquery",
+                            )
+                            db.add(dividend)
+                            dividend_count += 1
+
+                    # Map IBKR FlexQuery transaction types to our enum values
+                    ibkr_to_enum_mapping = {
+                        "Dividends": "DIVIDEND",
+                        "Payment In Lieu Of Dividend": "PAYMENT_IN_LIEU",
+                        "Withholding Tax": "WITHHOLDING_TAX",
+                        "Commission Adjustments": "COMMISSION",
+                        "Broker Interest Paid": "BROKER_INTEREST_PAID",
+                        "Broker Interest Received": "BROKER_INTEREST_RECEIVED",
+                        "Deposits & Withdrawals": "DEPOSIT",
+                        "Deposits/Withdrawals": "DEPOSIT",
+                        "Electronic Fund Transfers": "TRANSFER",
+                        "Other Fees": "OTHER_FEE",
+                        "Tax Refund": "TAX_REFUND",
+                        "Corporate Actions": "OTHER",
+                        "Refund": "TAX_REFUND",
+                    }
+
+                    # Map the transaction type
+                    mapped_transaction_type = ibkr_to_enum_mapping.get(tx_type, "OTHER")
+
+                    from backend.models.transaction import TransactionType
+
+                    transaction = Transaction(
+                        account_id=broker_account.id,
+                        external_id=tx_data.get("external_id", ""),
+                        symbol=tx_data.get("symbol", ""),
+                        description=tx_data.get("description", ""),
+                        transaction_type=(
+                            TransactionType[mapped_transaction_type]
+                            if mapped_transaction_type in TransactionType.__members__
+                            else TransactionType.OTHER
+                        ),
+                        amount=tx_data.get("amount", 0.0),
+                        # Use settlement_date as fallback for transaction_date
+                        transaction_date=tx_data.get("transaction_date")
+                        or tx_data.get("settlement_date"),
+                        settlement_date=tx_data.get("settlement_date"),
+                        currency=tx_data.get("currency", "USD"),
+                        # Set default value for required net_amount field
+                        net_amount=tx_data.get(
+                            "amount", 0.0
+                        ),  # Use amount as default for net_amount
+                        source="ibkr_flexquery",  # Truncated from 'ibkr_flexquery_cash'
+                    )
+
+                    db.add(transaction)
+                    synced_count += 1
+
+                except Exception as e:
+                    logger.error(
+                        f"Error processing cash transaction {tx_data.get('external_id', 'UNKNOWN')}: {e}"
+                    )
+                    continue
+
+                    # ------------------------------------------------------------------
+            # Post-process dividends to enrich frequency & shares_held metrics
+            # ------------------------------------------------------------------
+            from collections import defaultdict
+            from statistics import median
+            from backend.models.transaction import Dividend as _Div
+
+            divs_by_symbol: defaultdict[str, list[_Div]] = defaultdict(list)
+            for d in db.query(_Div).filter(_Div.account_id == broker_account.id).all():
+                divs_by_symbol[d.symbol].append(d)
+
+            for sym, divs in divs_by_symbol.items():
+                if len(divs) < 2:
+                    continue
+                divs.sort(key=lambda d: d.ex_date)
+                day_diffs = [
+                    (divs[i].ex_date - divs[i - 1].ex_date).days
+                    for i in range(1, len(divs))
+                ]
+                if not day_diffs:
+                    continue
+                avg_gap = median(day_diffs)
+                freq = "annual"
+                if avg_gap <= 45:
+                    freq = "monthly"
+                elif avg_gap <= 135:
+                    freq = "quarterly"
+                for d in divs:
+                    d.frequency = freq
+                    # fill shares_held if zero
+                    # If shares_held missing or 1 (leading to per_share == total)
+                    if (not d.shares_held or d.shares_held <= 1) or (
+                        d.dividend_per_share == d.total_dividend
+                    ):
+                        # Approximate using current position quantity
+                        p = (
+                            db.query(Position)
+                            .filter(
+                                Position.account_id == broker_account.id,
+                                Position.symbol == d.symbol,
+                            )
+                            .first()
+                        )
+                        if p and p.quantity:
+                            d.shares_held = float(p.quantity)
+                            d.dividend_per_share = (
+                                abs(d.total_dividend) / d.shares_held
+                                if d.shares_held
+                                else d.dividend_per_share
+                            )
+                            d.net_dividend = d.total_dividend - (d.tax_withheld or 0)
+            # Record sync status (write or update a simple status row)
+            try:
+                from backend.models.transaction import TransactionSyncStatus
+
+                status = TransactionSyncStatus(
+                    account_id=broker_account.id,
+                    last_sync_date=datetime.now(),
+                    last_successful_sync=datetime.now(),
+                    sync_status="completed",
+                    total_transactions=synced_count,
+                    total_dividends=dividend_count,
+                )
+                db.add(status)
+            except Exception:
+                pass
+
+            db.flush()
+
+            logger.info(
+                f"✅ Cash transactions: {synced_count} transactions, {dividend_count} dividends enriched"
+            )
+            return {
+                "synced": synced_count,
+                "dividends": dividend_count,
+                "total_processed": len(transactions_data),
+            }
+
+        except Exception as e:
+            logger.error(f"❌ Error syncing cash transactions: {e}")
+            import traceback
+
+            traceback.print_exc()
+            return {"error": str(e)}
+
+    async def _sync_account_balances(
+        self, db: Session, broker_account: BrokerAccount, account_number: str
+    ) -> Dict:
+        """Sync account balances from FlexQuery."""
+        try:
+            logger.info(f"📊 Syncing account balances for {account_number}")
+
+            # Get account balance data from FlexQuery
+            balances_data = await self.flexquery_client.get_account_balances(
+                account_number
+            )
+
+            if not balances_data:
+                logger.info(f"No account balance data found for {account_number}")
+                return {"synced": 0}
+
+            synced_count = 0
+
+            for balance_data in balances_data:
+                try:
+                    from backend.models.account_balance import AccountBalance
+
+                    # Check if balance already exists for this date
+                    existing_balance = (
+                        db.query(AccountBalance)
+                        .filter(
+                            AccountBalance.broker_account_id == broker_account.id,
+                            AccountBalance.balance_date
+                            == balance_data.get("balance_date"),
+                        )
+                        .first()
+                    )
+
+                    if not existing_balance:
+                        account_balance = AccountBalance(
+                            user_id=broker_account.user_id,
+                            broker_account_id=broker_account.id,
+                            balance_date=balance_data.get("balance_date"),
+                            balance_type=balance_data.get(
+                                "balance_type", "DAILY_SNAPSHOT"
+                            ),
+                            base_currency=balance_data.get("base_currency", "USD"),
+                            total_cash_value=balance_data.get("total_cash_value", 0),
+                            settled_cash=balance_data.get("settled_cash"),
+                            available_funds=balance_data.get("available_funds"),
+                            cash_balance=balance_data.get("cash_balance"),
+                            net_liquidation=balance_data.get("net_liquidation"),
+                            gross_position_value=balance_data.get(
+                                "gross_position_value"
+                            ),
+                            equity=balance_data.get("equity"),
+                            previous_day_equity=balance_data.get("previous_day_equity"),
+                            buying_power=balance_data.get("buying_power"),
+                            initial_margin_req=balance_data.get("initial_margin_req"),
+                            maintenance_margin_req=balance_data.get(
+                                "maintenance_margin_req"
+                            ),
+                            reg_t_equity=balance_data.get("reg_t_equity"),
+                            sma=balance_data.get("sma"),
+                            unrealized_pnl=balance_data.get("unrealized_pnl"),
+                            realized_pnl=balance_data.get("realized_pnl"),
+                            daily_pnl=balance_data.get("daily_pnl"),
+                            cushion=balance_data.get("cushion"),
+                            leverage=balance_data.get("leverage"),
+                            lookahead_next_change=balance_data.get(
+                                "lookahead_next_change"
+                            ),
+                            lookahead_available_funds=balance_data.get(
+                                "lookahead_available_funds"
+                            ),
+                            lookahead_excess_liquidity=balance_data.get(
+                                "lookahead_excess_liquidity"
+                            ),
+                            lookahead_init_margin=balance_data.get(
+                                "lookahead_init_margin"
+                            ),
+                            lookahead_maint_margin=balance_data.get(
+                                "lookahead_maint_margin"
+                            ),
+                            accrued_cash=balance_data.get("accrued_cash"),
+                            accrued_dividend=balance_data.get("accrued_dividend"),
+                            accrued_interest=balance_data.get("accrued_interest"),
+                            exchange_rate=balance_data.get("exchange_rate", 1),
+                            data_source=balance_data.get(
+                                "data_source", "OFFICIAL_STATEMENT"
+                            ),
+                            account_alias=balance_data.get("account_alias", ""),
+                            customer_type=balance_data.get("customer_type", ""),
+                            account_code=balance_data.get("account_code", ""),
+                        )
+                        db.add(account_balance)
+                        synced_count += 1
+
+                except Exception as e:
+                    logger.error(f"Error processing account balance: {e}")
+                    continue
+
+            db.flush()
+
+            logger.info(f"✅ Account balances: {synced_count} records")
+            return {"synced": synced_count, "total_processed": len(balances_data)}
+
+        except Exception as e:
+            logger.error(f"❌ Error syncing account balances: {e}")
+            import traceback
+
+            traceback.print_exc()
+            return {"error": str(e)}
+
+    async def _sync_margin_interest(
+        self, db: Session, broker_account: BrokerAccount, account_number: str
+    ) -> Dict:
+        """Sync margin interest from FlexQuery."""
+        try:
+            logger.info(f"📊 Syncing margin interest for {account_number}")
+
+            # Get margin interest data from FlexQuery
+            interest_data = await self.flexquery_client.get_margin_interest(
+                account_number
+            )
+
+            if not interest_data:
+                logger.info(f"No margin interest data found for {account_number}")
+                return {"synced": 0}
+
+            synced_count = 0
+
+            for interest_record in interest_data:
+                try:
+                    from backend.models.margin_interest import MarginInterest
+
+                    # Check if interest record already exists
+                    existing_interest = (
+                        db.query(MarginInterest)
+                        .filter(
+                            MarginInterest.broker_account_id == broker_account.id,
+                            MarginInterest.from_date
+                            == interest_record.get("from_date"),
+                            MarginInterest.to_date == interest_record.get("to_date"),
+                        )
+                        .first()
+                    )
+
+                    if not existing_interest:
+                        margin_interest = MarginInterest(
+                            user_id=broker_account.user_id,
+                            broker_account_id=broker_account.id,
+                            account_alias=interest_record.get("account_alias", ""),
+                            from_date=interest_record.get("from_date"),
+                            to_date=interest_record.get("to_date"),
+                            starting_balance=interest_record.get(
+                                "starting_balance", 0.0
+                            ),
+                            interest_accrued=interest_record.get(
+                                "interest_accrued", 0.0
+                            ),
+                            accrual_reversal=interest_record.get(
+                                "accrual_reversal", 0.0
+                            ),
+                            ending_balance=interest_record.get("ending_balance", 0.0),
+                            interest_rate=interest_record.get("interest_rate"),
+                            daily_rate=interest_record.get("daily_rate"),
+                            # Truncate currency to fit VARCHAR(10) limit
+                            currency=str(interest_record.get("currency", "USD"))[:10],
+                            fx_rate_to_base=interest_record.get("fx_rate_to_base", 1.0),
+                            interest_type=interest_record.get(
+                                "interest_type", "MARGIN"
+                            ),
+                            description=interest_record.get("description", ""),
+                            # Truncate data_source to fit VARCHAR(20) limit
+                            data_source="ibkr_flexquery",  # Truncated from 'ibkr_flexquery_interest'
+                        )
+                        db.add(margin_interest)
+                        synced_count += 1
+
+                except Exception as e:
+                    logger.error(f"Error processing margin interest record: {e}")
+                    continue
+
+            db.flush()
+
+            logger.info(f"✅ Margin interest: {synced_count} records")
+            return {"synced": synced_count, "total_processed": len(interest_data)}
+
+        except Exception as e:
+            logger.error(f"❌ Error syncing margin interest: {e}")
+            import traceback
+
+            traceback.print_exc()
+            return {"error": str(e)}
+
+    async def _sync_transfers(
+        self, db: Session, broker_account: BrokerAccount, account_number: str
+    ) -> Dict:
+        """Sync transfers from FlexQuery."""
+        try:
+            logger.info(f"📊 Syncing transfers for {account_number}")
+
+            # Get transfer data from FlexQuery
+            transfers_data = await self.flexquery_client.get_transfers(account_number)
+
+            if not transfers_data:
+                logger.info(f"No transfer data found for {account_number}")
+                return {"synced": 0}
+
+            synced_count = 0
+
+            for transfer_data in transfers_data:
+                try:
+                    from backend.models.transfer import Transfer
+
+                    # Check if transfer already exists
+                    existing_transfer = (
+                        db.query(Transfer)
+                        .filter(
+                            Transfer.broker_account_id == broker_account.id,
+                            Transfer.transaction_id
+                            == transfer_data.get("transaction_id", ""),
+                        )
+                        .first()
+                    )
+
+                    if not existing_transfer:
+                        transfer = Transfer(
+                            user_id=broker_account.user_id,
+                            broker_account_id=broker_account.id,
+                            transaction_id=transfer_data.get("transaction_id", ""),
+                            client_reference=transfer_data.get("client_reference", ""),
+                            transfer_date=transfer_data.get("transfer_date"),
+                            settle_date=transfer_data.get("settle_date"),
+                            # Map ACATS to POSITION since they're essentially the same
+                            transfer_type=(
+                                "POSITION"
+                                if transfer_data.get("transfer_type") == "ACATS"
+                                else transfer_data.get("transfer_type", "OTHER")
+                            ),
+                            direction=transfer_data.get("direction", "IN"),
+                            symbol=transfer_data.get("symbol", ""),
+                            description=transfer_data.get("description", ""),
+                            contract_id=transfer_data.get("contract_id", ""),
+                            security_id=transfer_data.get("security_id", ""),
+                            security_id_type=transfer_data.get("security_id_type", ""),
+                            quantity=transfer_data.get("quantity", 0.0),
+                            trade_price=transfer_data.get("trade_price"),
+                            transfer_price=transfer_data.get("transfer_price", 0.0),
+                            amount=transfer_data.get("amount", 0.0),
+                            cash_amount=transfer_data.get("cash_amount"),
+                            net_cash=transfer_data.get("net_cash"),
+                            commission=transfer_data.get("commission"),
+                            currency=transfer_data.get("currency", "USD"),
+                            fx_rate_to_base=transfer_data.get("fx_rate_to_base", 1.0),
+                            delivery_type=transfer_data.get("delivery_type", ""),
+                            transfer_type_code=transfer_data.get("transfer_type_code"),
+                            account_alias=transfer_data.get("account_alias", ""),
+                            model=transfer_data.get("model", ""),
+                            notes=transfer_data.get("notes", ""),
+                            external_reference=transfer_data.get(
+                                "external_reference", ""
+                            ),
+                            data_source="ibkr_flexquery",  # Truncated from 'ibkr_flexquery_transfers'
+                        )
+                        db.add(transfer)
+                        synced_count += 1
+
+                except Exception as e:
+                    logger.error(f"Error processing transfer record: {e}")
+                    continue
+
+            db.flush()
+
+            logger.info(f"✅ Transfers: {synced_count} records")
+            return {"synced": synced_count, "total_processed": len(transfers_data)}
+
+        except Exception as e:
+            logger.error(f"❌ Error syncing transfers: {e}")
+            import traceback
+
+            traceback.print_exc()
+            return {"error": str(e)}
+
+
+# Global instance
+portfolio_sync_service = IBKRSyncService()

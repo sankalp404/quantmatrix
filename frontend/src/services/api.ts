@@ -113,8 +113,9 @@ const makeOptimizedRequest = async <T>(requestFn: () => Promise<AxiosResponse<T>
 
 // Portfolio API endpoints - enhanced with optimization
 export const portfolioApi = {
-  getLive: async () => {
-    return makeOptimizedRequest(() => api.get('/portfolio/live'));
+  getLive: async (accountId?: string) => {
+    const url = accountId ? `/portfolio/live?account_id=${encodeURIComponent(accountId)}` : '/portfolio/live';
+    return makeOptimizedRequest(() => api.get(url));
   },
 
   getDashboard: async (brokerage?: string) => {
@@ -134,13 +135,14 @@ export const portfolioApi = {
     return makeOptimizedRequest(() => api.get(`/portfolio/holdings/${holdingId}/tax-lots`));
   },
 
-  getStocksOnly: async () => {
-    return makeOptimizedRequest(() => api.get('/portfolio/holdings/stocks-only'));
+  getStocksOnly: async (accountId?: string) => {
+    const url = accountId ? `/portfolio/holdings/stocks-only?account_id=${encodeURIComponent(accountId)}` : '/portfolio/holdings/stocks-only';
+    return makeOptimizedRequest(() => api.get(url));
   },
 
   // Enhanced statements with error handling
   getStatements: async (accountId?: string, days: number = 30) => {
-    const url = accountId ? `/portfolio/statements/${accountId}?days=${days}` : `/portfolio/statements?days=${days}`;
+    const url = accountId ? `/portfolio/statements?account_id=${encodeURIComponent(accountId)}&days=${days}` : `/portfolio/statements?days=${days}`;
     try {
       return await makeOptimizedRequest(() => api.get(url));
     } catch (error) {
@@ -158,7 +160,7 @@ export const portfolioApi = {
 
   // Enhanced dividends with fallback
   getDividends: async (accountId?: string, days: number = 365) => {
-    const url = accountId ? `/portfolio/dividends/${accountId}?days=${days}` : `/portfolio/dividends?days=${days}`;
+    const url = accountId ? `/portfolio/dividends?days=${days}&account_id=${encodeURIComponent(accountId)}` : `/portfolio/dividends?days=${days}`;
     try {
       return await makeOptimizedRequest(() => api.get(url));
     } catch (error) {

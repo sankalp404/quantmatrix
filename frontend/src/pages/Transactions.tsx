@@ -181,46 +181,27 @@ const Transactions: React.FC = () => {
   const borderColor = useColorModeValue('gray.200', 'gray.600');
   const toast = useToast();
 
+  const [selectedAccountSSR, setSelectedAccountSSR] = useState<string | undefined>(undefined);
+
   useEffect(() => {
-    fetchData();
+    fetchData(selectedAccountSSR);
   }, [dateRange]);
 
-  const fetchData = async () => {
+  const fetchData = async (accountId?: string) => {
     setLoading(true);
     setError(null);
     try {
       // Fetch portfolio data for account selector
-      const portfolioResult = await portfolioApi.getLive();
+      const portfolioResult = await portfolioApi.getLive(accountId);
       setPortfolioData(portfolioResult.data);
 
-      // Fetch transaction data using improved backend API
-      const response = await portfolioApi.getBatchData([`/portfolio/statements?days=${dateRange}`]);
-
-      if (response && response[0] && response[0].success) {
-        const result = response[0].data;
-
-        if (result.status === 'success' && result.data) {
-          setTransactions(result.data.transactions || []);
-          setSummary(result.data.summary || null);
-
-          // Log performance metrics if available
-          if (result.data.summary?.processing_time_ms) {
-            // logger.info(`Transactions loaded in ${result.data.summary.processing_time_ms}ms from ${result.data.summary.data_source}`);
-          }
-        } else {
-          throw new Error(result.error || 'Failed to fetch transaction data');
-        }
+      // Fetch transaction data with server-side filtering
+      const result = await portfolioApi.getStatements(accountId, dateRange);
+      if (result.status === 'success' && result.data) {
+        setTransactions(result.data.transactions || []);
+        setSummary(result.data.summary || null);
       } else {
-        // Fallback to direct API call
-        const directResult = await fetch(`/api/v1/portfolio/statements?days=${dateRange}`);
-        const result = await directResult.json();
-
-        if (result.status === 'success' && result.data) {
-          setTransactions(result.data.transactions || []);
-          setSummary(result.data.summary || null);
-        } else {
-          throw new Error(result.error || 'Failed to fetch transaction data');
-        }
+        throw new Error(result.error || 'Failed to fetch transaction data');
       }
     } catch (err) {
       console.error('Error fetching transaction data:', err);
@@ -347,6 +328,11 @@ const Transactions: React.FC = () => {
             showSummary: true,
             variant: 'detailed',
             size: 'md'
+          }}
+          onAccountChange={(account) => {
+            const accParam = account === 'all' ? undefined : account;
+            setSelectedAccountSSR(accParam);
+            fetchData(accParam);
           }}
         >
           {(accountFilteredTransactions, filterState) => {

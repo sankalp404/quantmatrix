@@ -406,6 +406,8 @@ const OptionsPortfolio: React.FC = () => {
   const [filterType, setFilterType] = useState<'all' | 'calls' | 'puts'>('all');
   const [sortBy, setSortBy] = useState<string>('days_to_expiration');
   const [expandedUnderlyings, setExpandedUnderlyings] = useState<Set<string>>(new Set());
+  const [selectedAccountSSR, setSelectedAccountSSR] = useState<string | undefined>(undefined);
+  const [activity, setActivity] = useState<any[]>([]);
 
   const cardBg = useColorModeValue('white', 'gray.800');
   const borderColor = useColorModeValue('gray.200', 'gray.600');
@@ -469,6 +471,20 @@ const OptionsPortfolio: React.FC = () => {
         console.warn('Failed to load options summary:', optionsSummaryResult.error);
         setSummary(null); // Use null as fallback to match type
       }
+
+      // Fetch recent transactions for activity panel (filter to options)
+      try {
+        const tx = await portfolioApi.getStatements(selectedAccount, 365);
+        const rows = tx?.data?.transactions || [];
+        const optionRows = rows.filter((r: any) => {
+          const ct = (r.contract_type || r.asset_category || '').toString().toUpperCase();
+          return ct.includes('OPT') || ct.includes('OPTION');
+        });
+        setActivity(optionRows);
+      } catch (e) {
+        console.warn('Activity fetch failed');
+        setActivity([]);
+      }
     } catch (error: any) {
       console.error('Error fetching options data:', error);
       const errorMessage = typeof error === 'string' ? error : error?.message || 'Failed to load options data';
@@ -491,7 +507,7 @@ const OptionsPortfolio: React.FC = () => {
 
   // Wrapper function for click handlers that don't need account filtering
   const handleRefresh = () => {
-    fetchOptionsData(); // Call without account filter to get all data
+    fetchOptionsData(selectedAccountSSR);
   };
 
   // Note: Filtering and sorting is now handled inside AccountFilterWrapper
@@ -691,6 +707,11 @@ const OptionsPortfolio: React.FC = () => {
             variant: 'detailed',
             size: 'md'
           }}
+          onAccountChange={(accountId) => {
+            const param = accountId === 'all' ? undefined : accountId;
+            setSelectedAccountSSR(param);
+            fetchOptionsData(param);
+          }}
         >
           {(accountFilteredPositions, filterState) => {
             // Use filtered positions directly instead of triggering new API calls
@@ -841,42 +862,16 @@ const OptionsPortfolio: React.FC = () => {
                 </Card>
 
                 {/* Tabs */}
-                <Tabs variant="enclosed" colorScheme="blue">
+                <Tabs variant="enclosed" colorScheme="blue" defaultIndex={0}>
                   <TabList>
-                    <Tab>All Positions ({filteredPositions.length})</Tab>
                     <Tab>By Symbol ({Object.keys(filteredUnderlyings).length})</Tab>
+                    <Tab>All Positions ({filteredPositions.length})</Tab>
                     <Tab>Analytics</Tab>
+                    <Tab>Activity</Tab>
                   </TabList>
 
                   <TabPanels>
-                    {/* All Positions */}
-                    <TabPanel px={0}>
-                      <VStack spacing={4} align="stretch">
-                        {/* Positions Table - move the table back inside the tab */}
-                        <Card bg={cardBg} borderColor={borderColor}>
-                          <CardHeader>
-                            <HStack justify="space-between">
-                              <Heading size="md">All Options Positions</Heading>
-                              <Badge variant="outline" p={2} fontSize="sm">
-                                {filteredPositions.length} positions
-                              </Badge>
-                            </HStack>
-                          </CardHeader>
-                          <CardBody>
-                            <SortableTable
-                              key={`options-${sortBy}-${filteredPositions.length}`}
-                              data={filteredPositions}
-                              columns={optionsColumns}
-                              defaultSortBy={sortBy}
-                              defaultSortOrder="asc"
-                              emptyMessage="No options positions found"
-                            />
-                          </CardBody>
-                        </Card>
-                      </VStack>
-                    </TabPanel>
-
-                    {/* By Symbol */}
+                    {/* By Symbol (default first) */}
                     <TabPanel px={0}>
                       <VStack spacing={4} align="stretch">
                         <HStack justify="space-between">
@@ -908,16 +903,16 @@ const OptionsPortfolio: React.FC = () => {
                                   const avgDaysA = [...dataA.calls, ...dataA.puts].reduce((sum, pos) => sum + pos.days_to_expiration, 0) / (dataA.calls.length + dataA.puts.length) || 0;
                                   const avgDaysB = [...dataB.calls, ...dataB.puts].reduce((sum, pos) => sum + pos.days_to_expiration, 0) / (dataB.calls.length + dataB.puts.length) || 0;
                                   return avgDaysA - avgDaysB;
-                                
+
                                 case 'unrealized_pnl':
                                   return dataB.total_pnl - dataA.total_pnl;
-                                
+
                                 case 'market_value':
                                   return Math.abs(dataB.total_value) - Math.abs(dataA.total_value);
-                                
+
                                 case 'underlying_symbol':
                                   return symbolA.localeCompare(symbolB);
-                                
+
                                 default:
                                   return Math.abs(dataB.total_value) - Math.abs(dataA.total_value);
                               }
@@ -935,6 +930,31 @@ const OptionsPortfolio: React.FC = () => {
                       </VStack>
                     </TabPanel>
 
+                    {/* All Positions */}
+                    <TabPanel px={0}>
+                      <VStack spacing={4} align="stretch">
+                        <Card bg={cardBg} borderColor={borderColor}>
+                          <CardHeader>
+                            <HStack justify="space-between">
+                              <Heading size="md">All Options Positions</Heading>
+                              <Badge variant="outline" p={2} fontSize="sm">
+                                {filteredPositions.length} positions
+                              </Badge>
+                            </HStack>
+                          </CardHeader>
+                          <CardBody>
+                            <SortableTable
+                              key={`options-${sortBy}-${filteredPositions.length}`}
+                              data={filteredPositions}
+                              columns={optionsColumns}
+                              defaultSortBy={sortBy}
+                              defaultSortOrder="asc"
+                              emptyMessage="No options positions found"
+                            />
+                          </CardBody>
+                        </Card>
+                      </VStack>
+                    </TabPanel>
                     {/* Analytics */}
                     <TabPanel px={0}>
                       <SimpleGrid columns={{ base: 1, lg: 2 }} spacing={6}>
@@ -993,6 +1013,53 @@ const OptionsPortfolio: React.FC = () => {
                           </CardBody>
                         </Card>
                       </SimpleGrid>
+                    </TabPanel>
+
+                    {/* Activity */}
+                    <TabPanel px={0}>
+                      <Card bg={cardBg} borderColor={borderColor}>
+                        <CardHeader>
+                          <HStack justify="space-between">
+                            <Heading size="md">Options Activity</Heading>
+                            <Badge variant="outline" p={2} fontSize="sm">{activity.length} trades</Badge>
+                          </HStack>
+                        </CardHeader>
+                        <CardBody>
+                          <TableContainer>
+                            <Table size="sm" variant="simple">
+                              <Thead>
+                                <Tr>
+                                  <Th>Date</Th>
+                                  <Th>Type</Th>
+                                  <Th>Symbol</Th>
+                                  <Th isNumeric>Qty</Th>
+                                  <Th isNumeric>Price</Th>
+                                  <Th>Account</Th>
+                                </Tr>
+                              </Thead>
+                              <Tbody>
+                                {activity.map((t) => (
+                                  <Tr key={`${t.id}-${t.execution_id || t.order_id || t.date}`}>
+                                    <Td>
+                                      <VStack align="start" spacing={0}>
+                                        <Text fontSize="sm">{t.date}</Text>
+                                        <Text fontSize="xs" color="gray.500">{t.time}</Text>
+                                      </VStack>
+                                    </Td>
+                                    <Td>
+                                      <Badge colorScheme={t.type === 'BUY' ? 'green' : 'red'}>{t.type}</Badge>
+                                    </Td>
+                                    <Td>{t.symbol}</Td>
+                                    <Td isNumeric>{t.quantity}</Td>
+                                    <Td isNumeric>${Number(t.price || 0).toFixed(2)}</Td>
+                                    <Td>{t.account}</Td>
+                                  </Tr>
+                                ))}
+                              </Tbody>
+                            </Table>
+                          </TableContainer>
+                        </CardBody>
+                      </Card>
                     </TabPanel>
                   </TabPanels>
                 </Tabs>
