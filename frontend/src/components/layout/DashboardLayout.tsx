@@ -1,4 +1,4 @@
-import React from 'react';
+import React, { useEffect, useState } from 'react';
 import {
   Box,
   Flex,
@@ -7,10 +7,16 @@ import {
   IconButton,
   Text,
   useColorModeValue,
+  useColorMode,
   Avatar,
   Badge,
   Divider,
   Select,
+  Menu,
+  MenuButton,
+  MenuList,
+  MenuItem,
+  Button,
 } from '@chakra-ui/react';
 import { Outlet, useLocation, useNavigate } from 'react-router-dom';
 import {
@@ -26,18 +32,24 @@ import {
   FiList,
   FiDollarSign,
   FiActivity, // Added FiActivity for the new navigation item
+  FiSun,
+  FiMoon,
 } from 'react-icons/fi';
 import { BsGraphUp } from 'react-icons/bs';
 import { FaBrain } from 'react-icons/fa';
 import { FaChartPie } from 'react-icons/fa';
+import { portfolioApi } from '../../services/api';
+import { useAccountContext } from '../../context/AccountContext';
+import { useAuth } from '../../context/AuthContext';
 
 // Navigation items inspired by Snowball Analytics
 const navigationItems = [
   { label: 'Dashboard', icon: FiHome, path: '/' },
   { label: 'Portfolio', icon: FiPieChart, path: '/portfolio' },
   { label: 'Categories', icon: FaChartPie, path: '/portfolio-categories' },
-  { label: 'Holdings', icon: BsGraphUp, path: '/holdings' },
+  { label: 'Stocks', icon: BsGraphUp, path: '/stocks' },
   { label: 'Options', icon: FiTarget, path: '/options-portfolio' }, // Options Portfolio with target icon
+  { label: 'Workspace', icon: FiActivity, path: '/workspace' },
   { label: 'Dividends', icon: FiCalendar, path: '/dividends' },
   { label: 'Transactions', icon: FiList, path: '/transactions' },
   { label: 'Margin', icon: FiDollarSign, path: '/margin' },
@@ -113,6 +125,39 @@ const DashboardLayout: React.FC = () => {
   const navigate = useNavigate();
   const sidebarBg = useColorModeValue('white', 'gray.800');
   const borderColor = useColorModeValue('gray.200', 'gray.700');
+  const { colorMode, toggleColorMode } = useColorMode();
+  const { accounts, loading: accountsLoading, selected, setSelected } = useAccountContext();
+  const { user, logout } = useAuth();
+  const [totals, setTotals] = useState<{ value: number; dayPnL: number; positions: number }>({ value: 0, dayPnL: 0, positions: 0 });
+  const [headerStats, setHeaderStats] = useState<{ label: string; sublabel: string }>({ label: 'Combined Portfolio', sublabel: '' });
+
+  useEffect(() => {
+    const load = async () => {
+      try {
+        const res = await portfolioApi.getLive();
+        const data = (res as any)?.data || res;
+        const accounts = Object.values<any>(data?.accounts || {});
+        const value = accounts.reduce((sum, a: any) => sum + (a.account_summary?.net_liquidation || 0), 0);
+        const dayPnL = accounts.reduce((sum, a: any) => sum + (a.account_summary?.day_change || 0), 0);
+        const positions = accounts.reduce((sum, a: any) => sum + ((a.all_positions || []).length || 0), 0);
+        setTotals({ value, dayPnL, positions });
+        setHeaderStats({
+          label: 'Combined Portfolio',
+          sublabel: `${formatCurrency(value)} • ${formatSignedCurrency(dayPnL)}`,
+        });
+      } catch (e) {
+        // leave defaults
+      }
+    };
+    load();
+  }, []);
+
+  const formatCurrency = (amount: number) =>
+    new Intl.NumberFormat('en-US', { style: 'currency', currency: 'USD', maximumFractionDigits: 0 }).format(amount || 0);
+  const formatSignedCurrency = (amount: number) => {
+    const f = new Intl.NumberFormat('en-US', { style: 'currency', currency: 'USD', maximumFractionDigits: 0 }).format(Math.abs(amount || 0));
+    return `${(amount || 0) >= 0 ? '+' : '-'}${f}`;
+  };
 
   return (
     <Flex h="100vh" bg={useColorModeValue('gray.50', 'gray.900')}>
@@ -154,10 +199,10 @@ const DashboardLayout: React.FC = () => {
               <Avatar size="sm" name="Portfolio" bg="brand.500" />
               <Box flex={1}>
                 <Text fontSize="sm" fontWeight="semibold">
-                  Combined Portfolio
+                  {headerStats.label}
                 </Text>
                 <Text fontSize="xs" color="gray.500">
-                  $1.69M • +52.4%
+                  {headerStats.sublabel}
                 </Text>
               </Box>
             </HStack>
@@ -188,14 +233,14 @@ const DashboardLayout: React.FC = () => {
               </Text>
               <HStack justify="space-between">
                 <Text fontSize="xs" color="gray.500">Day P&L</Text>
-                <Text fontSize="xs" fontWeight="semibold" color="green.400">
-                  +$2,847
+                <Text fontSize="xs" fontWeight="semibold" color={totals.dayPnL >= 0 ? 'green.400' : 'red.400'}>
+                  {formatSignedCurrency(totals.dayPnL)}
                 </Text>
               </HStack>
               <HStack justify="space-between">
                 <Text fontSize="xs" color="gray.500">Positions</Text>
                 <Text fontSize="xs" fontWeight="semibold">
-                  73
+                  {totals.positions}
                 </Text>
               </HStack>
               <HStack justify="space-between">
@@ -228,22 +273,36 @@ const DashboardLayout: React.FC = () => {
               aria-label="Menu"
               icon={<FiMenu />}
             />
-            {/* ADDED: Account Selection Dropdown */}
+            {/* Global Account Selection */}
             <Select
               size="sm"
-              w="200px"
-              defaultValue="all"
+              w="260px"
+              value={selected}
+              onChange={(e) => setSelected(e.target.value)}
               bg={useColorModeValue('white', 'gray.700')}
               borderColor={borderColor}
+              isDisabled={accountsLoading}
             >
               <option value="all">All Accounts</option>
-              <option value="U19490886">Taxable Account</option>
-              <option value="U15891532">Tax-Deferred Account</option>
+              <option value="taxable">Taxable</option>
+              <option value="ira">Tax-Deferred (IRA)</option>
+              {accounts.map((a) => (
+                <option key={a.account_number} value={a.account_number}>
+                  {a.account_name || a.account_number}
+                </option>
+              ))}
             </Select>
             {/* REMOVED: Redundant page name display */}
           </HStack>
 
           <HStack spacing={4}>
+            <IconButton
+              size="md"
+              variant="ghost"
+              aria-label="Toggle color mode"
+              icon={colorMode === 'light' ? <FiMoon /> : <FiSun />}
+              onClick={toggleColorMode}
+            />
             <IconButton
               size="md"
               variant="ghost"
@@ -261,7 +320,20 @@ const DashboardLayout: React.FC = () => {
                 h={2}
               />
             </IconButton>
-            <Avatar size="sm" name="User" bg="brand.500" />
+            <Menu>
+              <MenuButton as={Button} size="sm" variant="ghost" rightIcon={<FiMenu />}>
+                <HStack spacing={2}>
+                  <Avatar size="sm" name={user?.username || 'User'} bg="brand.500" />
+                  <Text fontSize="sm">{user?.username || 'Account'}</Text>
+                </HStack>
+              </MenuButton>
+              <MenuList>
+                <MenuItem onClick={() => navigate('/settings')}>Account Settings</MenuItem>
+                <MenuItem onClick={() => navigate('/portfolio')}>Portfolio</MenuItem>
+                <MenuItem onClick={() => navigate('/workspace')}>Workspace</MenuItem>
+                <MenuItem onClick={() => { logout(); navigate('/login'); }}>Logout</MenuItem>
+              </MenuList>
+            </Menu>
           </HStack>
         </Flex>
 

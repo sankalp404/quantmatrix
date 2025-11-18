@@ -1,4 +1,5 @@
 import { useState, useEffect, useMemo } from 'react';
+import { useAccountContext } from '../context/AccountContext';
 
 export interface AccountData {
   account_id: string;
@@ -68,7 +69,9 @@ export const useAccountFilter = <T extends FilterableItem>(
     showSummary = true
   } = config;
 
-  const [selectedAccount, setSelectedAccount] = useState<string>(defaultSelection);
+  const { selected: globalSelected } = useAccountContext();
+
+  const [selectedAccount, setSelectedAccount] = useState<string>(defaultSelection || globalSelected || 'all');
   const [isLoading, setIsLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
@@ -80,6 +83,25 @@ export const useAccountFilter = <T extends FilterableItem>(
       return data;
     }
 
+    // Category filters using provided accounts metadata
+    const selectedLower = selectedAccount.toLowerCase();
+    if (selectedLower === 'taxable' || selectedLower === 'ira') {
+      const allowedIds = new Set(
+        accounts
+          .filter((acc) => {
+            const t = (acc.account_type || '').toLowerCase();
+            if (selectedLower === 'ira') return t.includes('ira') || t.includes('retire');
+            // taxable
+            return !t.includes('ira') && !t.includes('retire');
+          })
+          .map((acc) => acc.account_id)
+      );
+      return data.filter((item) => {
+        const id = (item.account || item.account_id || item.account_number) as string | undefined;
+        return id ? allowedIds.has(id) : false;
+      });
+    }
+
     return data.filter(item => {
       if (filterByBrokerage) {
         // Filter by brokerage name (IBKR, TASTYTRADE, etc.)
@@ -88,7 +110,7 @@ export const useAccountFilter = <T extends FilterableItem>(
           item.broker?.toLowerCase() === selectedAccount.toLowerCase()
         );
       } else {
-        // Filter by specific account ID (U19490886, etc.)
+        // Filter by specific account ID (e.g., IBKR_ACCOUNT)
         return (
           item.account === selectedAccount ||
           item.account_id === selectedAccount ||
@@ -96,7 +118,7 @@ export const useAccountFilter = <T extends FilterableItem>(
         );
       }
     });
-  }, [data, selectedAccount, filterByBrokerage]);
+  }, [data, selectedAccount, filterByBrokerage, accounts]);
 
   // Calculate aggregate metrics
   const { totalValue, totalPnL, totalPositions } = useMemo(() => {
@@ -118,13 +140,13 @@ export const useAccountFilter = <T extends FilterableItem>(
 
   // Reset selection if accounts change and current selection is invalid
   useEffect(() => {
-    if (accounts.length > 0 && selectedAccount !== 'all') {
+    if (accounts.length > 0 && selectedAccount !== 'all' && selectedAccount !== 'taxable' && selectedAccount !== 'ira') {
       const accountExists = accounts.some(acc => acc.account_id === selectedAccount);
       if (!accountExists) {
-        setSelectedAccount(defaultSelection);
+        setSelectedAccount(defaultSelection || globalSelected || 'all');
       }
     }
-  }, [accounts, selectedAccount, defaultSelection]);
+  }, [accounts, selectedAccount, defaultSelection, globalSelected]);
 
   return {
     selectedAccount,

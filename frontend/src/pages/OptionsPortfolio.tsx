@@ -91,9 +91,12 @@ import {
   FiArrowDown,
 } from 'react-icons/fi';
 import { portfolioApi } from '../services/api';
+import useFlexQuery from '../hooks/useFlexQuery';
 import SortableTable, { Column } from '../components/SortableTable';
 import AccountFilterWrapper from '../components/AccountFilterWrapper';
 import { transformPortfolioToAccounts } from '../hooks/useAccountFilter';
+import EmptyState from '../components/ui/EmptyState';
+import { useAccountContext } from '../context/AccountContext';
 
 interface OptionPosition {
   id: string;
@@ -396,6 +399,7 @@ const UnderlyingCard: React.FC<{
 };
 
 const OptionsPortfolio: React.FC = () => {
+  const { selected, setSelected } = useAccountContext();
   const [portfolioData, setPortfolioData] = useState<any>(null);
   const [positions, setPositions] = useState<OptionPosition[]>([]);
   const [summary, setSummary] = useState<OptionsSummary | null>(null);
@@ -406,14 +410,19 @@ const OptionsPortfolio: React.FC = () => {
   const [filterType, setFilterType] = useState<'all' | 'calls' | 'puts'>('all');
   const [sortBy, setSortBy] = useState<string>('days_to_expiration');
   const [expandedUnderlyings, setExpandedUnderlyings] = useState<Set<string>>(new Set());
+  const [selectedAccountSSR, setSelectedAccountSSR] = useState<string | undefined>(undefined);
+  const [activity, setActivity] = useState<any[]>([]);
 
   const cardBg = useColorModeValue('white', 'gray.800');
   const borderColor = useColorModeValue('gray.200', 'gray.600');
   const toast = useToast();
+  const { status: flexStatus, loading: flexLoading, error: flexError, refresh: refreshFlex, syncTaxLots } = useFlexQuery();
 
   useEffect(() => {
-    fetchOptionsData();
-  }, []);
+    const param = selected === 'all' || selected === 'taxable' || selected === 'ira' ? undefined : selected;
+    fetchOptionsData(param);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [selected]);
 
   const fetchOptionsData = async (selectedAccount?: string) => {
     setLoading(true);
@@ -423,24 +432,10 @@ const OptionsPortfolio: React.FC = () => {
       const portfolioResult = await portfolioApi.getLive();
       setPortfolioData(portfolioResult.data);
 
-      // Build URLs with optional account filtering
-      const portfolioUrl = selectedAccount
-        ? `/api/v1/options/unified/portfolio?account_id=${selectedAccount}`
-        : '/api/v1/options/unified/portfolio';
-
-      const summaryUrl = selectedAccount
-        ? `/api/v1/options/unified/summary?account_id=${selectedAccount}`
-        : '/api/v1/options/unified/summary';
-
-      // Fetch options data using enhanced API with account filtering
-      const [optionsPortfolioResponse, optionsSummaryResponse] = await Promise.all([
-        fetch(portfolioUrl),
-        fetch(summaryUrl),
-      ]);
-
+      // Fetch options data using unified API with account filtering (axios baseURL aware)
       const [optionsPortfolioResult, optionsSummaryResult] = await Promise.all([
-        optionsPortfolioResponse.json(),
-        optionsSummaryResponse.json(),
+        (await fetch(selectedAccount ? `/api/v1/portfolio/options/unified/portfolio?account_id=${selectedAccount}` : '/api/v1/portfolio/options/unified/portfolio')).json(),
+        (await fetch(selectedAccount ? `/api/v1/portfolio/options/unified/summary?account_id=${selectedAccount}` : '/api/v1/portfolio/options/unified/summary')).json(),
       ]);
 
       if (optionsPortfolioResult.status === 'success') {
@@ -469,6 +464,20 @@ const OptionsPortfolio: React.FC = () => {
         console.warn('Failed to load options summary:', optionsSummaryResult.error);
         setSummary(null); // Use null as fallback to match type
       }
+
+      // Fetch recent transactions for activity panel (filter to options)
+      try {
+        const tx = await portfolioApi.getStatements(selectedAccount, 365);
+        const rows = tx?.data?.transactions || [];
+        const optionRows = rows.filter((r: any) => {
+          const ct = (r.contract_type || r.asset_category || '').toString().toUpperCase();
+          return ct.includes('OPT') || ct.includes('OPTION');
+        });
+        setActivity(optionRows);
+      } catch (e) {
+        console.warn('Activity fetch failed');
+        setActivity([]);
+      }
     } catch (error: any) {
       console.error('Error fetching options data:', error);
       const errorMessage = typeof error === 'string' ? error : error?.message || 'Failed to load options data';
@@ -491,32 +500,10 @@ const OptionsPortfolio: React.FC = () => {
 
   // Wrapper function for click handlers that don't need account filtering
   const handleRefresh = () => {
-    fetchOptionsData(); // Call without account filter to get all data
+    fetchOptionsData(selectedAccountSSR);
   };
 
-  // Filter and sort positions
-  const filteredPositions = useMemo(() => {
-    return positions.filter(position => {
-      const matchesSearch = position.underlying_symbol.toLowerCase().includes(searchTerm.toLowerCase()) ||
-        position.symbol.toLowerCase().includes(searchTerm.toLowerCase());
-      const matchesType = filterType === 'all' ||
-        (filterType === 'calls' && position.option_type === 'call') ||
-        (filterType === 'puts' && position.option_type === 'put');
-      return matchesSearch && matchesType;
-    });
-  }, [positions, searchTerm, filterType]);
-
-  const sortedPositions = useMemo(() => {
-    return [...filteredPositions].sort((a, b) => {
-      switch (sortBy) {
-        case 'days_to_expiration': return a.days_to_expiration - b.days_to_expiration;
-        case 'unrealized_pnl': return b.unrealized_pnl - a.unrealized_pnl;
-        case 'market_value': return b.market_value - a.market_value;
-        case 'underlying_symbol': return a.underlying_symbol.localeCompare(b.underlying_symbol);
-        default: return 0;
-      }
-    });
-  }, [filteredPositions, sortBy]);
+  // Note: Filtering and sorting is now handled inside AccountFilterWrapper
 
   // Enhanced data for charts
   const typeDistribution = useMemo(() => {
@@ -679,6 +666,16 @@ const OptionsPortfolio: React.FC = () => {
   return (
     <Container maxW="container.xl" py={8}>
       <VStack spacing={6} align="stretch">
+        {/* Empty state for no positions */}
+        {positions.length === 0 && (
+          <EmptyState
+            icon={FiTarget}
+            title="No options positions found"
+            description="We couldn’t find any open options in your FlexQuery report. Ensure your Activity Flex Query includes the Open Positions section with derivatives and quantity fields enabled. Once updated, run the sync again."
+            action={{ label: 'Refresh', onClick: handleRefresh }}
+            secondaryAction={{ label: 'Open API Docs', onClick: () => window.open('/docs', '_blank') }}
+          />
+        )}
         {/* Header */}
         <Box>
           <HStack justify="space-between" mb={4}>
@@ -687,10 +684,45 @@ const OptionsPortfolio: React.FC = () => {
               <Text color="gray.600">
                 {positions.length} total positions • {Object.keys(underlyings).length} underlyings
               </Text>
+              {/* FlexQuery status badge */}
+              {flexStatus && (
+                <HStack>
+                  <Badge colorScheme={flexStatus.configured ? 'green' : 'yellow'}>
+                    FlexQuery: {flexStatus.configured ? 'Configured' : 'Setup Required'}
+                  </Badge>
+                  {!flexStatus.configured && (
+                    <Tooltip label="Open backend /docs to configure FlexQuery token & query id">
+                      <InfoIcon color="gray.500" />
+                    </Tooltip>
+                  )}
+                </HStack>
+              )}
             </VStack>
             <HStack spacing={3}>
               <Button leftIcon={<RepeatIcon />} size="sm" variant="outline" onClick={handleRefresh}>
                 Refresh
+              </Button>
+              <Button
+                size="sm"
+                variant="solid"
+                colorScheme="blue"
+                isLoading={flexLoading}
+                onClick={async () => {
+                  try {
+                    const account = selectedAccountSSR || accounts?.[0]?.account_id;
+                    if (!account) {
+                      toast({ title: 'No account selected', status: 'warning' });
+                      return;
+                    }
+                    const res: any = await syncTaxLots(account);
+                    toast({ title: res?.message || 'Tax lots synced', status: res?.success ? 'success' : 'info' });
+                    refreshFlex();
+                  } catch (e: any) {
+                    toast({ title: e?.message || 'Sync failed', status: 'error' });
+                  }
+                }}
+              >
+                Sync Official Tax Lots
               </Button>
               <Button leftIcon={<DownloadIcon />} size="sm" variant="outline">
                 Export
@@ -711,16 +743,24 @@ const OptionsPortfolio: React.FC = () => {
             showAllOption: true,
             showSummary: true,
             variant: 'detailed',
-            size: 'md'
+            size: 'md',
+            // default to first account
+            defaultSelection: selected || (accounts.length > 0 ? accounts[0].account_id : 'all')
+          }}
+          onAccountChange={(accountId) => {
+            setSelected(accountId as any);
+            const param = accountId === 'all' || accountId === 'taxable' || accountId === 'ira' ? undefined : accountId;
+            setSelectedAccountSSR(param);
+            fetchOptionsData(param);
           }}
         >
           {(accountFilteredPositions, filterState) => {
             // Use filtered positions directly instead of triggering new API calls
             // The filtering is already handled by AccountFilterWrapper
 
-            // Use the filtered positions instead of the original positions
-            const filteredAndSortedPositions = useMemo(() => {
-              let filtered = accountFilteredPositions.filter(position => {
+            // Filter positions without pre-sorting (let SortableTable handle sorting)
+            const filteredPositions = useMemo(() => {
+              return accountFilteredPositions.filter(position => {
                 const matchesSearch = position.underlying_symbol.toLowerCase().includes(searchTerm.toLowerCase()) ||
                   position.symbol.toLowerCase().includes(searchTerm.toLowerCase());
                 const matchesType = filterType === 'all' ||
@@ -728,22 +768,12 @@ const OptionsPortfolio: React.FC = () => {
                   (filterType === 'puts' && position.option_type === 'put');
                 return matchesSearch && matchesType;
               });
-
-              return filtered.sort((a, b) => {
-                switch (sortBy) {
-                  case 'days_to_expiration': return a.days_to_expiration - b.days_to_expiration;
-                  case 'unrealized_pnl': return b.unrealized_pnl - a.unrealized_pnl;
-                  case 'market_value': return b.market_value - a.market_value;
-                  case 'underlying_symbol': return a.underlying_symbol.localeCompare(b.underlying_symbol);
-                  default: return 0;
-                }
-              });
-            }, [accountFilteredPositions, searchTerm, filterType, sortBy]);
+            }, [accountFilteredPositions, searchTerm, filterType]);
 
             // Recalculate underlyings based on filtered positions
             const filteredUnderlyings = useMemo(() => {
               const underlyingsMap: Record<string, UnderlyingGroup> = {};
-              filteredAndSortedPositions.forEach(position => {
+              filteredPositions.forEach(position => {
                 if (!underlyingsMap[position.underlying_symbol]) {
                   underlyingsMap[position.underlying_symbol] = { calls: [], puts: [], total_value: 0, total_pnl: 0 };
                 }
@@ -758,11 +788,11 @@ const OptionsPortfolio: React.FC = () => {
                 underlyingsMap[position.underlying_symbol].total_pnl += position.unrealized_pnl;
               });
               return underlyingsMap;
-            }, [filteredAndSortedPositions]);
+            }, [filteredPositions]);
 
             // Calculate dynamic summary from filtered positions
             const filteredSummary = useMemo(() => {
-              if (filteredAndSortedPositions.length === 0) {
+              if (filteredPositions.length === 0) {
                 return {
                   total_positions: 0,
                   total_market_value: 0,
@@ -774,14 +804,14 @@ const OptionsPortfolio: React.FC = () => {
                 };
               }
 
-              const totalValue = filteredAndSortedPositions.reduce((sum, pos) => sum + pos.market_value, 0);
-              const totalPnL = filteredAndSortedPositions.reduce((sum, pos) => sum + pos.unrealized_pnl, 0);
-              const totalDayPnL = filteredAndSortedPositions.reduce((sum, pos) => sum + pos.day_pnl, 0);
-              const callsCount = filteredAndSortedPositions.filter(pos => pos.option_type === 'call').length;
-              const putsCount = filteredAndSortedPositions.filter(pos => pos.option_type === 'put').length;
+              const totalValue = filteredPositions.reduce((sum, pos) => sum + pos.market_value, 0);
+              const totalPnL = filteredPositions.reduce((sum, pos) => sum + pos.unrealized_pnl, 0);
+              const totalDayPnL = filteredPositions.reduce((sum, pos) => sum + pos.day_pnl, 0);
+              const callsCount = filteredPositions.filter(pos => pos.option_type === 'call').length;
+              const putsCount = filteredPositions.filter(pos => pos.option_type === 'put').length;
 
               return {
-                total_positions: filteredAndSortedPositions.length,
+                total_positions: filteredPositions.length,
                 total_market_value: totalValue,
                 total_unrealized_pnl: totalPnL,
                 total_unrealized_pnl_pct: totalValue > 0 ? (totalPnL / totalValue) * 100 : 0,
@@ -789,7 +819,7 @@ const OptionsPortfolio: React.FC = () => {
                 calls_count: callsCount,
                 puts_count: putsCount
               };
-            }, [filteredAndSortedPositions]);
+            }, [filteredPositions]);
 
             return (
               <VStack spacing={4} align="stretch">
@@ -852,7 +882,11 @@ const OptionsPortfolio: React.FC = () => {
 
                       <Select
                         value={sortBy}
-                        onChange={(e) => setSortBy(e.target.value)}
+                        onChange={(e) => {
+                          const newSort = e.target.value;
+                          setSortBy(newSort);
+                          console.log('Sort changed to:', newSort);
+                        }}
                         maxW="200px"
                       >
                         <option value="days_to_expiration">Sort by DTE</option>
@@ -862,48 +896,23 @@ const OptionsPortfolio: React.FC = () => {
                       </Select>
 
                       <Badge variant="outline" p={2} fontSize="sm">
-                        {filteredAndSortedPositions.length} positions
+                        {filteredPositions.length} positions
                       </Badge>
                     </Flex>
                   </CardBody>
                 </Card>
 
                 {/* Tabs */}
-                <Tabs variant="enclosed" colorScheme="blue">
+                <Tabs variant="enclosed" colorScheme="blue" defaultIndex={0}>
                   <TabList>
-                    <Tab>All Positions ({filteredAndSortedPositions.length})</Tab>
                     <Tab>By Symbol ({Object.keys(filteredUnderlyings).length})</Tab>
+                    <Tab>All Positions ({filteredPositions.length})</Tab>
                     <Tab>Analytics</Tab>
+                    <Tab>Activity</Tab>
                   </TabList>
 
                   <TabPanels>
-                    {/* All Positions */}
-                    <TabPanel px={0}>
-                      <VStack spacing={4} align="stretch">
-                        {/* Positions Table - move the table back inside the tab */}
-                        <Card bg={cardBg} borderColor={borderColor}>
-                          <CardHeader>
-                            <HStack justify="space-between">
-                              <Heading size="md">All Options Positions</Heading>
-                              <Badge variant="outline" p={2} fontSize="sm">
-                                {filteredAndSortedPositions.length} positions
-                              </Badge>
-                            </HStack>
-                          </CardHeader>
-                          <CardBody>
-                            <SortableTable
-                              data={filteredAndSortedPositions}
-                              columns={optionsColumns}
-                              defaultSortBy="days_to_expiration"
-                              defaultSortOrder="asc"
-                              emptyMessage="No options positions found"
-                            />
-                          </CardBody>
-                        </Card>
-                      </VStack>
-                    </TabPanel>
-
-                    {/* By Symbol */}
+                    {/* By Symbol (default first) */}
                     <TabPanel px={0}>
                       <VStack spacing={4} align="stretch">
                         <HStack justify="space-between">
@@ -927,7 +936,28 @@ const OptionsPortfolio: React.FC = () => {
 
                         <SimpleGrid columns={{ base: 1, lg: 2 }} spacing={6}>
                           {(Object.entries(filteredUnderlyings) as [string, UnderlyingGroup][])
-                            .sort(([, a], [, b]) => Math.abs(b.total_value) - Math.abs(a.total_value))
+                            .sort(([symbolA, dataA], [symbolB, dataB]) => {
+                              // Apply sorting based on sortBy state
+                              switch (sortBy) {
+                                case 'days_to_expiration':
+                                  // Average days to expiration for the underlying
+                                  const avgDaysA = [...dataA.calls, ...dataA.puts].reduce((sum, pos) => sum + pos.days_to_expiration, 0) / (dataA.calls.length + dataA.puts.length) || 0;
+                                  const avgDaysB = [...dataB.calls, ...dataB.puts].reduce((sum, pos) => sum + pos.days_to_expiration, 0) / (dataB.calls.length + dataB.puts.length) || 0;
+                                  return avgDaysA - avgDaysB;
+
+                                case 'unrealized_pnl':
+                                  return dataB.total_pnl - dataA.total_pnl;
+
+                                case 'market_value':
+                                  return Math.abs(dataB.total_value) - Math.abs(dataA.total_value);
+
+                                case 'underlying_symbol':
+                                  return symbolA.localeCompare(symbolB);
+
+                                default:
+                                  return Math.abs(dataB.total_value) - Math.abs(dataA.total_value);
+                              }
+                            })
                             .map(([symbol, data]) => (
                               <UnderlyingCard
                                 key={symbol}
@@ -941,6 +971,31 @@ const OptionsPortfolio: React.FC = () => {
                       </VStack>
                     </TabPanel>
 
+                    {/* All Positions */}
+                    <TabPanel px={0}>
+                      <VStack spacing={4} align="stretch">
+                        <Card bg={cardBg} borderColor={borderColor}>
+                          <CardHeader>
+                            <HStack justify="space-between">
+                              <Heading size="md">All Options Positions</Heading>
+                              <Badge variant="outline" p={2} fontSize="sm">
+                                {filteredPositions.length} positions
+                              </Badge>
+                            </HStack>
+                          </CardHeader>
+                          <CardBody>
+                            <SortableTable
+                              key={`options-${sortBy}-${filteredPositions.length}`}
+                              data={filteredPositions}
+                              columns={optionsColumns}
+                              defaultSortBy={sortBy}
+                              defaultSortOrder="asc"
+                              emptyMessage="No options positions found"
+                            />
+                          </CardBody>
+                        </Card>
+                      </VStack>
+                    </TabPanel>
                     {/* Analytics */}
                     <TabPanel px={0}>
                       <SimpleGrid columns={{ base: 1, lg: 2 }} spacing={6}>
@@ -999,6 +1054,53 @@ const OptionsPortfolio: React.FC = () => {
                           </CardBody>
                         </Card>
                       </SimpleGrid>
+                    </TabPanel>
+
+                    {/* Activity */}
+                    <TabPanel px={0}>
+                      <Card bg={cardBg} borderColor={borderColor}>
+                        <CardHeader>
+                          <HStack justify="space-between">
+                            <Heading size="md">Options Activity</Heading>
+                            <Badge variant="outline" p={2} fontSize="sm">{activity.length} trades</Badge>
+                          </HStack>
+                        </CardHeader>
+                        <CardBody>
+                          <TableContainer>
+                            <Table size="sm" variant="simple">
+                              <Thead>
+                                <Tr>
+                                  <Th>Date</Th>
+                                  <Th>Type</Th>
+                                  <Th>Symbol</Th>
+                                  <Th isNumeric>Qty</Th>
+                                  <Th isNumeric>Price</Th>
+                                  <Th>Account</Th>
+                                </Tr>
+                              </Thead>
+                              <Tbody>
+                                {activity.map((t) => (
+                                  <Tr key={`${t.id}-${t.execution_id || t.order_id || t.date}`}>
+                                    <Td>
+                                      <VStack align="start" spacing={0}>
+                                        <Text fontSize="sm">{t.date}</Text>
+                                        <Text fontSize="xs" color="gray.500">{t.time}</Text>
+                                      </VStack>
+                                    </Td>
+                                    <Td>
+                                      <Badge colorScheme={t.type === 'BUY' ? 'green' : 'red'}>{t.type}</Badge>
+                                    </Td>
+                                    <Td>{t.symbol}</Td>
+                                    <Td isNumeric>{t.quantity}</Td>
+                                    <Td isNumeric>${Number(t.price || 0).toFixed(2)}</Td>
+                                    <Td>{t.account}</Td>
+                                  </Tr>
+                                ))}
+                              </Tbody>
+                            </Table>
+                          </TableContainer>
+                        </CardBody>
+                      </Card>
                     </TabPanel>
                   </TabPanels>
                 </Tabs>

@@ -3,6 +3,8 @@ import { BrowserRouter as Router, Routes, Route } from 'react-router-dom';
 import { ChakraProvider, extendTheme } from '@chakra-ui/react';
 import { QueryClient, QueryClientProvider } from 'react-query';
 import { Toaster } from 'react-hot-toast';
+import { AccountProvider } from './context/AccountContext';
+import { AuthProvider } from './context/AuthContext';
 
 // Layout components
 import DashboardLayout from './components/layout/DashboardLayout';
@@ -11,7 +13,7 @@ import DashboardLayout from './components/layout/DashboardLayout';
 import Dashboard from './pages/Dashboard';
 import Portfolio from './pages/Portfolio';
 import PortfolioCategories from './pages/PortfolioCategories';
-import Holdings from './pages/Holdings';
+import Stocks from './pages/Stocks';
 import OptionsPortfolio from './pages/OptionsPortfolio';
 import TaxLots from './pages/TaxLots';
 import DividendsCalendar from './pages/DividendsCalendar';
@@ -22,6 +24,10 @@ import Strategies from './pages/Strategies';
 import StrategiesManager from './pages/StrategiesManager';
 import Notifications from './pages/Notifications';
 import Settings from './pages/Settings';
+import PortfolioWorkspace from './pages/PortfolioWorkspace';
+import Login from './pages/Login';
+import Register from './pages/Register';
+import RequireAuth from './components/auth/RequireAuth';
 
 // Theme configuration inspired by Snowball Analytics
 const theme = extendTheme({
@@ -102,36 +108,45 @@ function App() {
   return (
     <QueryClientProvider client={queryClient}>
       <ChakraProvider theme={theme}>
-        <Router>
-          <Routes>
-            <Route path="/" element={<DashboardLayout />}>
-              <Route index element={<Dashboard />} />
-              <Route path="portfolio" element={<Portfolio />} />
-              <Route path="portfolio-categories" element={<PortfolioCategories />} />
-              <Route path="holdings" element={<Holdings />} />
-              <Route path="options-portfolio" element={<OptionsPortfolio />} />
-              <Route path="tax-lots" element={<TaxLots />} />
-              <Route path="dividends" element={<DividendsCalendar />} />
-              <Route path="transactions" element={<Transactions />} />
-              <Route path="margin" element={<MarginAnalysis />} />
-              <Route path="analytics" element={<Analytics />} />
-              <Route path="strategies" element={<Strategies />} />
-              <Route path="strategies-manager" element={<StrategiesManager />} />
-              <Route path="notifications" element={<Notifications />} />
-              <Route path="settings" element={<Settings />} />
-            </Route>
-          </Routes>
-          <Toaster
-            position="top-right"
-            toastOptions={{
-              style: {
-                background: '#2D3748',
-                color: '#fff',
-                border: '1px solid #4A5568',
-              },
-            }}
-          />
-        </Router>
+        <AuthProvider>
+          <AccountProvider>
+            <Router>
+              <Routes>
+                <Route path="/" element={<RequireAuth><DashboardLayout /></RequireAuth>}>
+                  <Route index element={<Dashboard />} />
+                  <Route path="portfolio" element={<Portfolio />} />
+                  <Route path="portfolio-categories" element={<PortfolioCategories />} />
+                  <Route path="stocks" element={<Stocks />} />
+                  <Route path="options-portfolio" element={<OptionsPortfolio />} />
+                  <Route path="tax-lots" element={<TaxLots />} />
+                  <Route path="dividends" element={<DividendsCalendar />} />
+                  <Route path="transactions" element={<Transactions />} />
+                  <Route path="margin" element={<MarginAnalysis />} />
+                  <Route path="analytics" element={<Analytics />} />
+                  <Route path="strategies" element={<Strategies />} />
+                  <Route path="strategies-manager" element={<StrategiesManager />} />
+                  <Route path="notifications" element={<Notifications />} />
+                  <Route path="settings" element={<Settings />} />
+                  <Route path="workspace" element={<PortfolioWorkspace />} />
+                </Route>
+              </Routes>
+              <Routes>
+                <Route path="/login" element={<Login />} />
+                <Route path="/register" element={<Register />} />
+              </Routes>
+              <Toaster
+                position="top-right"
+                toastOptions={{
+                  style: {
+                    background: '#2D3748',
+                    color: '#fff',
+                    border: '1px solid #4A5568',
+                  },
+                }}
+              />
+            </Router>
+          </AccountProvider>
+        </AuthProvider>
       </ChakraProvider>
     </QueryClientProvider>
   );

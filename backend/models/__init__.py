@@ -1,46 +1,85 @@
-from sqlalchemy import create_engine, MetaData
+"""
+QuantMatrix Database Models
+==========================
+
+Centralized model imports for the QuantMatrix application.
+All database models are imported here for easy access.
+"""
+
+# Core Base
 from sqlalchemy.ext.declarative import declarative_base
-from sqlalchemy.orm import sessionmaker
-from backend.config import settings
 
-# Database setup
-engine = create_engine(settings.DATABASE_URL, echo=settings.DEBUG)
-SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
-
-# Base class for all models
 Base = declarative_base()
-metadata = MetaData()
 
-# Dependency injection for database sessions
-def get_db():
-    db = SessionLocal()
-    try:
-        yield db
-    finally:
-        db.close()
+# Essential Core Models (verified to exist)
+from .user import User, UserRole
+from .broker_account import BrokerAccount, BrokerType, AccountType, AccountStatus, SyncStatus
 
-def create_tables():
-    """Create all database tables."""
-    Base.metadata.create_all(bind=engine)
+# Instruments & Market Data
+from .instrument import Instrument, InstrumentType
+from .market_data import PriceData, MarketSnapshot, MarketSnapshotHistory
+from .index_constituent import IndexConstituent
 
-# Import all models to ensure they are registered
-# Legacy models (to be migrated)
+# Trading & Positions
+from .position import Position, PositionType, PositionStatus
 from .trade import Trade, TradeSignal
-from .alert import Alert, AlertCondition, AlertTemplate, AlertHistory
-from .user import User
 
-# New comprehensive portfolio management models
-from .portfolio import (
-    Account, Holding, Category, HoldingCategory, PortfolioSnapshot,
-    AccountType, TransactionType
-)
-from .tax_lots import TaxLot, TaxLotSale, TaxStrategy, TaxReport
-from .signals import (
-    Strategy, StrategyRun, Signal, Notification, MarketDataCache,
-    SignalType, SignalStatus, StrategyType, NotificationType
-)
-from .options import (
-    TastytradeAccount, OptionPosition, OptionInstrument, OptionGreeks,
-    TradingStrategy, CapitalAllocation, StrategyPerformance, RiskMetrics
-)
-from .transactions import Transaction, Dividend, TransactionSyncStatus 
+# Portfolio Management
+from .portfolio import PortfolioSnapshot, Category, PositionCategory
+
+# Tax Lots & Cost Basis
+from .tax_lot import TaxLot, TaxLotMethod, TaxLotSource
+
+# Account Balances & Margin
+from .account_balance import AccountBalance, AccountBalanceType
+
+# Margin Interest Tracking
+from .margin_interest import MarginInterest
+
+# Transfers & Position Movements
+from .transfer import Transfer, TransferType
+
+# Transactions & Dividends
+from .transaction import Transaction, TransactionType, Dividend
+
+# Options Trading
+from .options import Option, OptionType
+
+# Essential models list
+__all__ = [
+    "Base",
+    "User",
+    "UserRole",
+    "BrokerAccount",
+    "BrokerType",
+    "AccountType",
+    "AccountStatus",
+    "SyncStatus",
+    "Instrument",
+    "InstrumentType",
+    "PriceData",
+    "MarketSnapshot",
+    "MarketSnapshotHistory",
+    "IndexConstituent",
+    "Position",
+    "PositionType",
+    "PositionStatus",
+    "TaxLot",
+    "TaxLotMethod",
+    "TaxLotSource",
+    "AccountBalance",
+    "AccountBalanceType",
+    "MarginInterest",
+    "Transfer",
+    "TransferType",
+    "Transaction",
+    "TransactionType",
+    "Dividend",
+    "Option",
+    "OptionType",
+    "PortfolioSnapshot",
+    "Category",
+    "PositionCategory",
+    "Trade",
+    "TradeSignal",
+]

@@ -1,0 +1,938 @@
+from __future__ import annotations
+
+import asyncio
+import json
+import logging
+from datetime import datetime
+from enum import Enum
+from typing import Any, Dict, List, Optional
+
+import finnhub
+import fmpsdk
+import pandas as pd
+import redis
+import yfinance as yf
+from sqlalchemy.orm import Session
+
+from backend.config import settings
+from backend.database import SessionLocal
+from backend.models import MarketSnapshot
+from backend.services.market.indicator_engine import (
+    calculate_performance_windows,
+    classify_ma_bucket_from_ma,
+    compute_atr_matrix_metrics,
+    compute_core_indicators,
+    compute_gap_counts,
+    compute_td_sequential_counts,
+    compute_trendline_counts,
+    compute_weinstein_stage_from_daily,
+)
+
+logger = logging.getLogger(__name__)
+
+
+class APIProvider(Enum):
+    FINNHUB = "finnhub"
+    TWELVE_DATA = "twelve_data"
+    FMP = "fmp"
+    YFINANCE = "yfinance"
+
+
+class MarketDataService:
+    """Market data facade with a clean, policy-driven provider strategy.
+
+    Responsibilities:
+    - Provider routing (paid vs free) for quotes and historical OHLCV
+    - Caching of quotes/series in Redis
+    - Building technical snapshots from local DB first (fast path),
+      falling back to provider fetch when needed (slow path)
+    - Enriching snapshots with chart metrics and fundamentals
+    - Persisting snapshots to MarketSnapshot
+
+    Policy:
+    - paid: prefer FMP for historical/quotes; yfinance fallback
+    - free: FMP (if key) + yfinance + Twelve Data (if key) + finnhub
+    """
+
+    def __init__(self) -> None:
+        self.redis_client = redis.from_url(settings.REDIS_URL)
+        self.cache_ttl_seconds = int(getattr(settings, "MARKET_DATA_CACHE_TTL", 300))
+
+        # Optional API clients
+        self.finnhub_client = (
+            finnhub.Client(api_key=settings.FINNHUB_API_KEY)
+            if settings.FINNHUB_API_KEY
+            else None
+        )
+
+        self.twelve_data_client = None
+        try:
+            from twelvedata import TDClient  # lazy import
+            if settings.TWELVE_DATA_API_KEY:
+                self.twelve_data_client = TDClient(apikey=settings.TWELVE_DATA_API_KEY)
+        except Exception:
+            self.twelve_data_client = None
+
+        if settings.FMP_API_KEY:
+            logger.info("FMP API configured")
+
+        # Index endpoints for constituents
+        self.index_endpoints = {
+            "SP500": {"fmp": "sp500_constituent"},
+            "NASDAQ100": {"fmp": "nasdaq_constituent"},
+            "DOW30": {"fmp": "dowjones_constituent"},
+        }
+
+    # ---------------------- Provider selection ----------------------
+    def _provider_priority(self, data_type: str) -> List[APIProvider]:
+        """Return provider order based on MARKET_PROVIDER_POLICY and availability.
+
+        data_type: "historical_data" | "real_time_quote" | "company_info"
+        paid policy: [FMP, yfinance]
+        free policy: [FMP?] + yfinance + [Twelve Data?] + finnhub
+        """
+        policy = str(getattr(settings, "MARKET_PROVIDER_POLICY", "paid")).lower()
+        has_fmp = bool(settings.FMP_API_KEY)
+        has_td = bool(settings.TWELVE_DATA_API_KEY)
+        if data_type == "historical_data":
+            if policy == "paid":
+                # Prefer FMP; in paid mode use Twelve Data before yfinance to avoid CF issues
+                if has_fmp and has_td:
+                    return [APIProvider.FMP, APIProvider.TWELVE_DATA, APIProvider.YFINANCE]
+                if has_fmp:
+                    return [APIProvider.FMP, APIProvider.YFINANCE]
+                if has_td:
+                    return [APIProvider.TWELVE_DATA, APIProvider.YFINANCE]
+                return [APIProvider.YFINANCE]
+            order: List[APIProvider] = []
+            if has_fmp:
+                order.append(APIProvider.FMP)
+            order.append(APIProvider.YFINANCE)
+            if has_td:
+                order.append(APIProvider.TWELVE_DATA)
+            order.append(APIProvider.FINNHUB)
+            return order
+        if data_type == "real_time_quote":
+            return [APIProvider.FMP, APIProvider.YFINANCE]
+        if data_type == "company_info":
+            return [APIProvider.FMP, APIProvider.YFINANCE]
+        return [APIProvider.YFINANCE]
+
+    def _is_provider_available(self, provider: APIProvider) -> bool:
+        if provider == APIProvider.FMP:
+            return bool(settings.FMP_API_KEY)
+        if provider == APIProvider.TWELVE_DATA:
+            return self.twelve_data_client is not None
+        if provider == APIProvider.FINNHUB:
+            return self.finnhub_client is not None
+        if provider == APIProvider.YFINANCE:
+            return True
+        return False
+
+    # ---------------------- Quotes and history ----------------------
+    async def get_current_price(self, symbol: str) -> Optional[float]:
+        """Get current price for a symbol with provider policy and 60s Redis cache."""
+        cache_key = f"price:{symbol}"
+        cached = self.redis_client.get(cache_key)
+        if cached:
+            try:
+                return float(cached)
+            except Exception:
+                pass
+        for provider in self._provider_priority("real_time_quote"):
+            if not self._is_provider_available(provider):
+                continue
+            try:
+                price = None
+                if provider == APIProvider.FMP:
+                    q = fmpsdk.quote(apikey=settings.FMP_API_KEY, symbol=symbol)
+                    price = q and len(q) > 0 and q[0].get("price")
+                elif provider == APIProvider.YFINANCE:
+                    hist = yf.Ticker(symbol).history(period="1d", interval="1m")
+                    price = float(hist["Close"].iloc[-1]) if not hist.empty else None
+                if price is not None:
+                    self.redis_client.setex(cache_key, 60, str(price))
+                    return float(price)
+            except Exception:
+                continue
+        return None
+
+    def get_fundamentals_info(self, symbol: str) -> Dict[str, Any]:
+        """Return fundamentals for a symbol using FMP first, then yfinance.
+
+        Returns keys: name, sector, industry, sub_industry, market_cap when available.
+        """
+        info: Dict[str, Any] = {}
+        try:
+            if settings.FMP_API_KEY:
+                prof = fmpsdk.company_profile(apikey=settings.FMP_API_KEY, symbol=symbol)
+                if prof and len(prof) > 0 and isinstance(prof[0], dict):
+                    d = prof[0]
+                    info = {
+                        "name": d.get("companyName") or d.get("company_name") or d.get("symbol"),
+                        "sector": d.get("sector"),
+                        "industry": d.get("industry"),
+                        "sub_industry": d.get("subIndustry") or d.get("sub_industry"),
+                        "market_cap": d.get("mktCap"),
+                    }
+        except Exception:
+            pass
+        if not info:
+            try:
+                y = yf.Ticker(symbol).info
+                info = {
+                    "name": y.get("shortName") or y.get("longName") or y.get("symbol"),
+                    "sector": y.get("sector"),
+                    "industry": y.get("industry"),
+                    "sub_industry": y.get("subIndustry") or y.get("industry") or None,
+                    "market_cap": y.get("marketCap"),
+                }
+            except Exception:
+                info = {}
+        return info
+
+    async def get_historical_data(
+        self,
+        symbol: str,
+        period: str = "1y",
+        interval: str = "1d",
+        max_bars: Optional[int] = 270,
+    ) -> Optional[pd.DataFrame]:
+        """Get OHLCV (newest->first index) with provider policy and Redis cache.
+
+        - Trims to max_bars for interval==1d to bound downstream compute
+        - Cache TTL: 300s for intraday; 3600s for daily+
+        """
+        cache_key = f"historical:{symbol}:{period}:{interval}"
+        cached = self.redis_client.get(cache_key)
+        if cached:
+            try:
+                return pd.read_json(cached, orient="index")
+            except Exception:
+                pass
+
+        for provider in self._provider_priority("historical_data"):
+            if not self._is_provider_available(provider):
+                continue
+            try:
+                if provider == APIProvider.FMP:
+                    df = await self._get_historical_fmp(symbol, period, interval)
+                elif provider == APIProvider.TWELVE_DATA:
+                    df = await self._get_historical_twelve_data(symbol, period, interval)
+                elif provider == APIProvider.YFINANCE:
+                    df = await self._get_historical_yfinance(symbol, period, interval)
+                elif provider == APIProvider.FINNHUB:
+                    df = None  # not implemented
+                else:
+                    df = None
+                if df is not None and not df.empty:
+                    if max_bars and interval == "1d":
+                        df = df.head(max_bars)
+                    ttl = 300 if interval in ("1m", "5m") else 3600
+                    self.redis_client.setex(cache_key, ttl, df.to_json(orient="index"))
+                    return df
+            except Exception:
+                continue
+        return None
+
+    async def _get_historical_yfinance(
+        self, symbol: str, period: str, interval: str
+    ) -> Optional[pd.DataFrame]:
+        try:
+            data = yf.Ticker(symbol).history(period=period, interval=interval)
+            if data is None or data.empty:
+                return None
+            required = ["Open", "High", "Low", "Close"]
+            if not any(c in data.columns for c in required):
+                return None
+            if "Volume" not in data.columns:
+                data["Volume"] = 0
+            return data[[c for c in ["Open", "High", "Low", "Close", "Volume"] if c in data.columns]].sort_index(ascending=False)
+        except Exception:
+            return None
+
+    async def _get_historical_twelve_data(
+        self, symbol: str, period: str, interval: str
+    ) -> Optional[pd.DataFrame]:
+        if not self.twelve_data_client:
+            return None
+        try:
+            td_map = {
+                "1m": "1min",
+                "5m": "5min",
+                "15m": "15min",
+                "30m": "30min",
+                "1h": "1h",
+                "1d": "1day",
+                "1wk": "1week",
+                "1mo": "1month",
+            }
+            ts = self.twelve_data_client.time_series(
+                symbol=symbol, interval=td_map.get(interval, "1day"), outputsize="5000"
+            )
+            df = ts.as_pandas()
+            if df is None or df.empty:
+                return None
+            out = pd.DataFrame(index=df.index)
+            for src, dst in [("open", "Open"), ("high", "High"), ("low", "Low"), ("close", "Close"), ("volume", "Volume")]:
+                if src in df.columns:
+                    out[dst] = df[src]
+                elif src.capitalize() in df.columns:
+                    out[dst] = df[src.capitalize()]
+            if "Close" not in out.columns:
+                return None
+            if "Volume" not in out.columns:
+                out["Volume"] = 0
+            return out.sort_index(ascending=False)
+        except Exception:
+            return None
+
+    async def _get_historical_fmp(
+        self, symbol: str, period: str, interval: str
+    ) -> Optional[pd.DataFrame]:
+        try:
+            if interval != "1d":
+                return None
+            data = fmpsdk.historical_price_full(apikey=settings.FMP_API_KEY, symbol=symbol)
+            if not data or "historical" not in data:
+                return None
+            df = pd.DataFrame(data["historical"])
+            if df.empty or "date" not in df.columns:
+                return None
+            df["date"] = pd.to_datetime(df["date"])
+            df.set_index("date", inplace=True)
+            cols = ["open", "high", "low", "close", "volume"]
+            df = df[[c for c in cols if c in df.columns]]
+            df.columns = ["Open", "High", "Low", "Close", "Volume"][: len(df.columns)]
+            return df.sort_index(ascending=False)
+        except Exception:
+            return None
+
+    # ---------------------- Index Constituents ----------------------
+
+    async def get_index_constituents(self, index_name: str) -> List[str]:
+        """Return constituents for supported indices (SP500, NASDAQ100, DOW30).
+
+        Strategy: Redis cache → FMP → Wikipedia fallback. Normalized to UPPER and '.'→'-'.
+        """
+        cache_key = f"index_constituents:{index_name}"
+        # Redis cache
+        cached = self.redis_client.get(cache_key)
+        if cached:
+            try:
+                obj = json.loads(cached)
+                if isinstance(obj, dict) and obj.get("symbols"):
+                    return list(obj.get("symbols"))
+            except Exception:
+                pass
+        idx = index_name.upper()
+        ep = self.index_endpoints.get(idx, {}).get("fmp")
+        symbols: List[str] = []
+        # FMP
+        if settings.FMP_API_KEY and ep:
+            try:
+                data = fmpsdk.__getattr__(ep)(apikey=settings.FMP_API_KEY) if hasattr(fmpsdk, ep) else []
+            except Exception:
+                data = []
+            if isinstance(data, list):
+                symbols = [str(d.get("symbol", "")).strip().upper().replace('.', '-') for d in data if d.get("symbol")]
+        # Wikipedia fallback
+        if not symbols:
+            import pandas as _pd
+            try:
+                if idx == "SP500":
+                    tables = _pd.read_html("https://en.wikipedia.org/wiki/List_of_S%26P_500_companies")
+                    if tables:
+                        df = tables[0]
+                        if "Symbol" in df.columns:
+                            symbols = [str(s).upper().replace('.', '-') for s in df["Symbol"].dropna().tolist()]
+                elif idx == "NASDAQ100":
+                    tables = _pd.read_html("https://en.wikipedia.org/wiki/Nasdaq-100")
+                    for t in tables:
+                        for col in ["Ticker", "Symbol", "Company", "Stock Symbol"]:
+                            if col in t.columns:
+                                symbols = [str(s).upper().replace('.', '-') for s in t[col].dropna().tolist()]
+                                break
+                        if symbols:
+                            break
+                elif idx == "DOW30":
+                    tables = _pd.read_html("https://en.wikipedia.org/wiki/Dow_Jones_Industrial_Average")
+                    for t in tables:
+                        if "Symbol" in t.columns and len(t) <= 40:
+                            symbols = [str(s).upper().replace('.', '-') for s in t["Symbol"].dropna().tolist()]
+                            break
+            except Exception:
+                symbols = []
+        # Normalize and cache
+        out = sorted(list({s for s in symbols if s and len(s) <= 5}))
+        try:
+            self.redis_client.setex(cache_key, 24 * 3600, json.dumps({"symbols": out}))
+        except Exception:
+            pass
+        return out
+
+    async def get_all_tradeable_symbols(self, indices: Optional[List[str]] = None) -> Dict[str, List[str]]:
+        idxs = ["SP500", "NASDAQ100", "DOW30"] if not indices else [i.upper() for i in indices]
+        result: Dict[str, List[str]] = {}
+        for idx in idxs:
+            try:
+                result[idx] = await self.get_index_constituents(idx)
+            except Exception:
+                result[idx] = []
+        return result
+
+
+    # ---------------------- Snapshots ----------------------
+    async def get_snapshot(self, symbol: str) -> Dict[str, Any]:
+        """Return the latest technical snapshot for a symbol.
+
+        Flow:
+        1) Try existing stored snapshot in MarketSnapshot (respect expiry)
+        2) If not present/stale: build from local DB prices (fast path)
+        3) If still missing: compute from provider OHLCV (slow path)
+        4) Persist refreshed snapshot and return
+        """
+        session = SessionLocal()
+        try:
+            # 1) Try stored snapshot first
+            snap = self.get_snapshot_from_store(session, symbol)
+            # 2) Build and persist if missing/stale
+            if not snap:
+                snap = self.compute_snapshot_from_db(session, symbol)
+            if not snap:
+                snap = await self.compute_snapshot_from_providers(symbol)
+            if snap:
+                self.persist_snapshot(session, symbol, snap)
+            return snap or {}
+        finally:
+            session.close()
+
+    def get_snapshot_from_store(self, db: Session, symbol: str) -> Dict[str, Any]:
+        """Fetch freshest snapshot from MarketSnapshot if not expired.
+
+        Returns raw_analysis if available; otherwise rebuilds a dict from mapped columns.
+        """
+        now = datetime.utcnow()
+        row = (
+            db.query(MarketSnapshot)
+            .filter(
+                MarketSnapshot.symbol == symbol,
+                MarketSnapshot.analysis_type == "technical_snapshot",
+            )
+            .order_by(MarketSnapshot.analysis_timestamp.desc())
+            .first()
+        )
+        if not row:
+            return {}
+        exp = row.expiry_timestamp
+        try:
+            if exp is not None and getattr(exp, 'tzinfo', None) is not None:
+                exp = exp.replace(tzinfo=None)
+        except Exception:
+            pass
+        if exp and exp < now:
+            return {}
+        try:
+            if isinstance(row.raw_analysis, dict) and row.raw_analysis:
+                return dict(row.raw_analysis)
+        except Exception:
+            pass
+        # Fallback: minimal reconstruction from mapped columns
+        out: Dict[str, Any] = {
+            "current_price": getattr(row, "current_price", None),
+            "rsi": getattr(row, "rsi", None),
+            "atr_value": getattr(row, "atr_value", None),
+            "sma_20": getattr(row, "sma_20", None),
+            "sma_50": getattr(row, "sma_50", None),
+            "sma_100": getattr(row, "sma_100", None),
+            "sma_200": getattr(row, "sma_200", None),
+            "ema_10": getattr(row, "ema_10", None),
+            "ema_8": getattr(row, "ema_8", None),
+            "ema_21": getattr(row, "ema_21", None),
+            "ema_200": getattr(row, "ema_200", None),
+            "macd": getattr(row, "macd", None),
+            "macd_signal": getattr(row, "macd_signal", None),
+            "perf_1d": getattr(row, "perf_1d", None),
+            "perf_3d": getattr(row, "perf_3d", None),
+            "perf_5d": getattr(row, "perf_5d", None),
+            "perf_20d": getattr(row, "perf_20d", None),
+            "perf_60d": getattr(row, "perf_60d", None),
+            "perf_120d": getattr(row, "perf_120d", None),
+            "perf_252d": getattr(row, "perf_252d", None),
+            "perf_mtd": getattr(row, "perf_mtd", None),
+            "perf_qtd": getattr(row, "perf_qtd", None),
+            "perf_ytd": getattr(row, "perf_ytd", None),
+            "ma_bucket": getattr(row, "ma_bucket", None),
+            "pct_dist_ema8": getattr(row, "pct_dist_ema8", None),
+            "pct_dist_ema21": getattr(row, "pct_dist_ema21", None),
+            "pct_dist_ema200": getattr(row, "pct_dist_ema200", None),
+            "atr_dist_ema8": getattr(row, "atr_dist_ema8", None),
+            "atr_dist_ema21": getattr(row, "atr_dist_ema21", None),
+            "atr_dist_ema200": getattr(row, "atr_dist_ema200", None),
+            "td_buy_setup": getattr(row, "td_buy_setup", None),
+            "td_sell_setup": getattr(row, "td_sell_setup", None),
+            "gaps_unfilled_up": getattr(row, "gaps_unfilled_up", None),
+            "gaps_unfilled_down": getattr(row, "gaps_unfilled_down", None),
+            "trend_up_count": getattr(row, "trend_up_count", None),
+            "trend_down_count": getattr(row, "trend_down_count", None),
+            "stage_label": getattr(row, "stage_label", None),
+            "stage_slope_pct": getattr(row, "stage_slope_pct", None),
+            "stage_dist_pct": getattr(row, "stage_dist_pct", None),
+            "sector": getattr(row, "sector", None),
+            "industry": getattr(row, "industry", None),
+            "market_cap": getattr(row, "market_cap", None),
+        }
+        return out
+
+    def compute_snapshot_from_db(self, db: Session, symbol: str) -> Dict[str, Any]:
+        """Compute a snapshot purely from local PriceData (and enrich it) for speed and consistency.
+
+        - Reads the last ~270 daily bars (newest->first) from price_data
+        - Computes indicators locally (no provider calls)
+        - Also enriches with chart metrics and fundamentals before returning
+        """
+        from backend.models import PriceData
+
+        rows = (
+            db.query(
+                PriceData.open_price,
+                PriceData.high_price,
+                PriceData.low_price,
+                PriceData.close_price,
+                PriceData.volume,
+            )
+            .filter(PriceData.symbol == symbol, PriceData.interval == "1d")
+            .order_by(PriceData.date.desc())
+            .limit(270)
+            .all()
+        )
+        if not rows:
+            return {}
+        df = pd.DataFrame(
+            {
+                "Open": [float(r[0]) for r in rows],
+                "High": [float(r[1]) for r in rows],
+                "Low": [float(r[2]) for r in rows],
+                "Close": [float(r[3]) for r in rows],
+                "Volume": [int(r[4] or 0) for r in rows],
+            }
+        )
+        if df.empty or "Close" not in df.columns:
+            return {}
+        price = float(df["Close"].iloc[0])
+        data_for_ta = df.iloc[::-1].copy()
+        indicators = compute_core_indicators(data_for_ta)
+        indicators["current_price"] = price
+        indicators.update(compute_atr_matrix_metrics(data_for_ta, indicators))
+        indicators.update(calculate_performance_windows(df))
+
+        sma_50 = indicators.get("sma_50")
+        sma_200 = indicators.get("sma_200")
+        ema_8 = indicators.get("ema_8")
+        ema_21 = indicators.get("ema_21")
+        ema_200 = indicators.get("ema_200")
+        atr = indicators.get("atr")
+
+        def pct_dist(val: Optional[float]) -> Optional[float]:
+            return (price / val - 1.0) * 100.0 if (val and price) else None
+
+        def atr_dist(val: Optional[float]) -> Optional[float]:
+            return ((price - val) / atr) if (val and price and atr and atr != 0) else None
+
+        ma_for_bucket = {
+            "price": price,
+            "sma_5": indicators.get("sma_5"),
+            "sma_8": indicators.get("sma_8"),
+            "sma_21": indicators.get("sma_21"),
+            "sma_50": indicators.get("sma_50"),
+            "sma_100": indicators.get("sma_100"),
+            "sma_200": indicators.get("sma_200"),
+        }
+        bucket = classify_ma_bucket_from_ma(ma_for_bucket).get("bucket")
+
+        snapshot: Dict[str, Any] = {
+            "current_price": price,
+            "rsi": indicators.get("rsi"),
+            "atr_value": atr,
+            "atr_percent": ((atr / price) * 100.0) if (atr and price) else None,
+            "atr_distance": ((price - sma_50) / atr) if (price and sma_50 and atr) else None,
+            "sma_20": indicators.get("sma_20"),
+            "sma_50": sma_50,
+            "sma_100": indicators.get("sma_100"),
+            "sma_200": sma_200,
+            "ema_10": indicators.get("ema_10"),
+            "ema_8": ema_8,
+            "ema_21": ema_21,
+            "ema_200": ema_200,
+            "macd": indicators.get("macd"),
+            "macd_signal": indicators.get("macd_signal"),
+            "perf_1d": indicators.get("perf_1d"),
+            "perf_3d": indicators.get("perf_3d"),
+            "perf_5d": indicators.get("perf_5d"),
+            "perf_20d": indicators.get("perf_20d"),
+            "perf_60d": indicators.get("perf_60d"),
+            "perf_120d": indicators.get("perf_120d"),
+            "perf_252d": indicators.get("perf_252d"),
+            "perf_mtd": indicators.get("perf_mtd"),
+            "perf_qtd": indicators.get("perf_qtd"),
+            "perf_ytd": indicators.get("perf_ytd"),
+            "ma_bucket": bucket,
+            "pct_dist_ema8": pct_dist(ema_8),
+            "pct_dist_ema21": pct_dist(ema_21),
+            "pct_dist_ema200": pct_dist(ema_200 or sma_200),
+            "atr_dist_ema8": atr_dist(ema_8),
+            "atr_dist_ema21": atr_dist(ema_21),
+            "atr_dist_ema200": atr_dist(ema_200 or sma_200),
+            # Chart metrics placeholders (filled in enrich)
+            "td_buy_setup": None,
+            "td_sell_setup": None,
+            "gaps_unfilled_up": None,
+            "gaps_unfilled_down": None,
+            "trend_up_count": None,
+            "trend_down_count": None,
+            # Stage placeholders (optional separate long-horizon compute)
+            "stage_label": None,
+            "stage_slope_pct": None,
+            "stage_dist_pct": None,
+        }
+        # Inline enrichment for consolidated snapshot (chart metrics) using already loaded df
+        try:
+            df_newest = df.head(120).copy()
+            if not df_newest.empty:
+                td = compute_td_sequential_counts(df_newest["Close"].tolist())
+                snapshot.update(td)
+                snapshot.update(compute_gap_counts(df_newest))
+                snapshot.update(compute_trendline_counts(df_newest.iloc[::-1].copy()))
+        except Exception:
+            pass
+        # Fundamentals enrichment (reuse from latest snapshot if present; otherwise fetch once)
+        try:
+            prev_row = (
+                db.query(MarketSnapshot)
+                .filter(
+                    MarketSnapshot.symbol == symbol,
+                    MarketSnapshot.analysis_type == "technical_snapshot",
+                )
+                .order_by(MarketSnapshot.analysis_timestamp.desc())
+                .first()
+            )
+            if prev_row and (prev_row.sector or prev_row.industry or prev_row.market_cap):
+                if prev_row.sector is not None:
+                    snapshot["sector"] = prev_row.sector
+                if prev_row.industry is not None:
+                    snapshot["industry"] = prev_row.industry
+                if prev_row.market_cap is not None:
+                    snapshot["market_cap"] = prev_row.market_cap
+        except Exception:
+            pass
+        # If fundamentals still missing, fetch them once via providers (FMP-first, then yfinance)
+        needs_funda = (
+            snapshot.get("sector") is None
+            and snapshot.get("industry") is None
+            and snapshot.get("market_cap") is None
+        )
+        if needs_funda:
+            try:
+                info = self.get_fundamentals_info(symbol)
+                for k in ("sector", "industry", "market_cap"):
+                    if info.get(k) is not None:
+                        snapshot[k] = info.get(k)
+            except Exception:
+                pass
+        # no broad except here; previous except already guarded
+        return snapshot
+
+    async def compute_snapshot_from_providers(self, symbol: str) -> Dict[str, Any]:
+        """Compute a snapshot from provider OHLCV when DB path is missing (and enrich it).
+
+        - Uses get_historical_data (policy-driven) to fetch ~1y daily bars
+        - Computes indicators locally; no external indicator APIs are used
+        - Intended as a slow-path fallback to bootstrap symbols not yet in DB
+        """
+        data = await self.get_historical_data(symbol, period="1y", interval="1d")
+        if data is None or data.empty:
+            price_only = await self.get_current_price(symbol)
+            return {"current_price": float(price_only)} if price_only else {}
+
+        data_for_ta = data.iloc[::-1].copy()
+        indicators = compute_core_indicators(data_for_ta)
+        price = float(data["Close"].iloc[0])
+        indicators["current_price"] = price
+        indicators.update(compute_atr_matrix_metrics(data_for_ta, indicators))
+        indicators.update(calculate_performance_windows(data))
+
+        sma_50 = indicators.get("sma_50")
+        sma_200 = indicators.get("sma_200")
+        ema_8 = indicators.get("ema_8")
+        ema_21 = indicators.get("ema_21")
+        ema_200 = indicators.get("ema_200")
+        atr = indicators.get("atr")
+
+        def pct_dist(v: Optional[float]) -> Optional[float]:
+            return (price / v - 1.0) * 100.0 if (v and price) else None
+
+        def atr_dist(v: Optional[float]) -> Optional[float]:
+            return ((price - v) / atr) if (v and price and atr and atr != 0) else None
+
+        ma_for_bucket = {
+            "price": price,
+            "sma_5": indicators.get("sma_5"),
+            "sma_8": indicators.get("sma_8"),
+            "sma_21": indicators.get("sma_21"),
+            "sma_50": indicators.get("sma_50"),
+            "sma_100": indicators.get("sma_100"),
+            "sma_200": indicators.get("sma_200"),
+        }
+        bucket = classify_ma_bucket_from_ma(ma_for_bucket).get("bucket")
+
+        snapshot = {
+            "current_price": price,
+            "rsi": indicators.get("rsi"),
+            "atr_value": atr,
+            "atr_percent": ((atr / price) * 100.0) if (atr and price) else None,
+            "atr_distance": ((price - sma_50) / atr) if (price and sma_50 and atr) else None,
+            "sma_20": indicators.get("sma_20"),
+            "sma_50": sma_50,
+            "sma_100": indicators.get("sma_100"),
+            "sma_200": sma_200,
+            "ema_10": indicators.get("ema_10"),
+            "ema_8": indicators.get("ema_8"),
+            "ema_21": indicators.get("ema_21"),
+            "ema_200": indicators.get("ema_200"),
+            "macd": indicators.get("macd"),
+            "macd_signal": indicators.get("macd_signal"),
+            "perf_1d": indicators.get("perf_1d"),
+            "perf_3d": indicators.get("perf_3d"),
+            "perf_5d": indicators.get("perf_5d"),
+            "perf_20d": indicators.get("perf_20d"),
+            "perf_60d": indicators.get("perf_60d"),
+            "perf_120d": indicators.get("perf_120d"),
+            "perf_252d": indicators.get("perf_252d"),
+            "perf_mtd": indicators.get("perf_mtd"),
+            "perf_qtd": indicators.get("perf_qtd"),
+            "perf_ytd": indicators.get("perf_ytd"),
+            "ma_bucket": bucket,
+            "pct_dist_ema8": pct_dist(ema_8),
+            "pct_dist_ema21": pct_dist(ema_21),
+            "pct_dist_ema200": pct_dist(ema_200 or sma_200),
+            "atr_dist_ema8": atr_dist(ema_8),
+            "atr_dist_ema21": atr_dist(ema_21),
+            "atr_dist_ema200": atr_dist(ema_200 or sma_200),
+            # chart metrics placeholders
+            "td_buy_setup": None,
+            "td_sell_setup": None,
+            "gaps_unfilled_up": None,
+            "gaps_unfilled_down": None,
+            "trend_up_count": None,
+            "trend_down_count": None,
+        }
+        # Inline chart-metrics directly from provider data (avoid extra DB hit)
+        try:
+            df_newest = data.head(120).copy()
+            if not df_newest.empty:
+                td = compute_td_sequential_counts(df_newest["Close"].tolist())
+                snapshot.update(td)
+                snapshot.update(compute_gap_counts(df_newest))
+                snapshot.update(compute_trendline_counts(df_newest.iloc[::-1].copy()))
+        except Exception:
+            pass
+        # Add fundamentals (FMP-first) so callers don't need an extra pass
+        try:
+            funda = self.get_fundamentals_info(symbol)
+            if funda:
+                for k in ("name", "sector", "industry", "sub_industry", "market_cap"):
+                    if funda.get(k) is not None:
+                        snapshot[k] = funda.get(k)
+        except Exception:
+            pass
+        return snapshot
+
+    def persist_snapshot(
+        self,
+        db: Session,
+        symbol: str,
+        snapshot: Dict[str, Any],
+        analysis_type: str = "technical_snapshot",
+        ttl_hours: int = 24,
+        ) -> MarketSnapshot:
+        """Upsert-like persistence for MarketSnapshot with mapped fields copied."""
+        if not snapshot:
+            raise ValueError("empty snapshot")
+        now = datetime.utcnow()
+        expiry = now + pd.Timedelta(hours=ttl_hours)
+        row = (
+            db.query(MarketSnapshot)
+            .filter(
+                MarketSnapshot.symbol == symbol,
+                MarketSnapshot.analysis_type == analysis_type,
+            )
+            .order_by(MarketSnapshot.analysis_timestamp.desc())
+            .first()
+        )
+        if row is None:
+            row = MarketSnapshot(
+                symbol=symbol,
+                analysis_type=analysis_type,
+                expiry_timestamp=expiry,
+                raw_analysis=snapshot,
+            )
+            for k, v in snapshot.items():
+                if hasattr(row, k):
+                    setattr(row, k, v)
+            db.add(row)
+        else:
+            row.expiry_timestamp = expiry
+            row.raw_analysis = snapshot
+            for k, v in snapshot.items():
+                if hasattr(row, k):
+                    setattr(row, k, v)
+        db.flush()
+        db.commit()
+        return row
+
+    # ---------------------- Persistence Helpers (OHLCV Backfill) ----------------------
+    def persist_price_bars(
+        self,
+        db: Session,
+        symbol: str,
+        df: pd.DataFrame,
+        *,
+        interval: str = "1d",
+        data_source: str = "provider",
+        is_adjusted: bool = True,
+        delta_after: Optional[datetime] = None,
+    ) -> int:
+        """Persist OHLCV bars into `price_data` with ON CONFLICT DO NOTHING.
+
+        - Assumes df index are timestamps (newest->first or ascending; both ok)
+        - Coalesces missing O/H/L/Volume to Close/0 to avoid NULLs
+        - If delta_after is provided, only insert rows with ts > delta_after
+        - Returns number of attempted inserts (not necessarily rows changed)
+        """
+        if df is None or df.empty:
+            return 0
+        try:
+            from sqlalchemy.dialects.postgresql import insert as pg_insert
+            from backend.models import PriceData
+        except Exception as exc:
+            raise RuntimeError("PostgreSQL dialect or models unavailable") from exc
+
+        executed = 0
+        # Iterate in chronological order for clarity
+        try:
+            df_iter = df.sort_index(ascending=True).iterrows()
+        except Exception:
+            df_iter = df.iterrows()
+        for ts, row in df_iter:
+            try:
+                pd_date = (
+                    datetime.fromtimestamp(ts.timestamp())
+                    if hasattr(ts, "timestamp")
+                    else ts
+                )
+            except Exception:
+                pd_date = ts
+            if delta_after and pd_date <= delta_after:
+                continue
+            close_val = float(row.get("Close"))
+            open_val = (
+                float(row.get("Open"))
+                if "Open" in row and row.get("Open") is not None
+                else close_val
+            )
+            high_val = (
+                float(row.get("High"))
+                if "High" in row and row.get("High") is not None
+                else close_val
+            )
+            low_val = (
+                float(row.get("Low"))
+                if "Low" in row and row.get("Low") is not None
+                else close_val
+            )
+            vol_val = int(row.get("Volume") or 0) if "Volume" in row else 0
+            stmt = (
+                pg_insert(PriceData)
+                .values(
+                    symbol=symbol,
+                    date=pd_date,
+                    open_price=open_val,
+                    high_price=high_val,
+                    low_price=low_val,
+                    close_price=close_val,
+                    adjusted_close=close_val,
+                    volume=vol_val,
+                    interval=interval,
+                    data_source=data_source,
+                    is_adjusted=is_adjusted,
+                )
+                .on_conflict_do_nothing(constraint="uq_symbol_date_interval")
+            )
+            db.execute(stmt)
+            executed += 1
+        if executed:
+            db.commit()
+        return executed
+
+    async def backfill_daily_bars(
+        self,
+        db: Session,
+        symbol: str,
+        *,
+        lookback_period: str = "1y",
+        max_bars: int = 270,
+    ) -> Dict[str, Any]:
+        """Delta backfill last ~270 daily bars for a single symbol using provider policy."""
+        # Determine last stored date to do delta-only inserts
+        last_date: Optional[datetime] = None
+        try:
+            from backend.models import PriceData
+            last_date = (
+                db.query(PriceData.date)
+                .filter(PriceData.symbol == symbol.upper(), PriceData.interval == "1d")
+                .order_by(PriceData.date.desc())
+                .limit(1)
+                .scalar()
+            )
+        except Exception:
+            last_date = None
+        df = await self.get_historical_data(
+            symbol=symbol.upper(), period=lookback_period, interval="1d", max_bars=None
+        )
+        if df is None or df.empty:
+            return {"status": "empty", "symbol": symbol.upper(), "inserted": 0}
+        # Trim to bounded size for downstream compute
+        df = df.tail(max_bars) if max_bars else df
+        inserted = self.persist_price_bars(
+            db,
+            symbol.upper(),
+            df,
+            interval="1d",
+            data_source="fmp_td_yf",
+            is_adjusted=True,
+            delta_after=last_date,
+        )
+        return {"status": "ok", "symbol": symbol.upper(), "inserted": inserted}
+
+    # ---------------------- High-level TA helpers for tests/integration ----------------------
+    async def build_indicator_snapshot(self, symbol: str) -> Dict[str, Any]:
+        """Build a technical snapshot from provider OHLCV (newest->first) with indicators."""
+        return await self.compute_snapshot_from_providers(symbol)
+
+    async def get_weinstein_stage(self, symbol: str, benchmark: str = "SPY") -> Dict[str, Any]:
+        """Compute Weinstein stage by fetching daily series for symbol and a benchmark."""
+        sym_df = await self.get_historical_data(symbol, period="1y", interval="1d")
+        bm_df = await self.get_historical_data(benchmark, period="1y", interval="1d")
+        try:
+            return compute_weinstein_stage_from_daily(sym_df, bm_df)
+        except Exception:
+            return {"stage": "UNKNOWN"}
+
+    async def get_technical_analysis(self, symbol: str) -> Dict[str, Any]:
+        """Compatibility wrapper expected by tests – returns the latest snapshot."""
+        return await self.get_snapshot(symbol)
+
+
+# Global instance
+market_data_service = MarketDataService()
+

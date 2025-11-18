@@ -1,55 +1,55 @@
 #!/usr/bin/env python3
 """
-Migration script for Options Trading Tables
-Run this to create the new options trading database tables.
+QuantMatrix - Alembic Migration Options
+======================================
+
+Options for creating/migrating database tables with Alembic.
+Handles options trading, strategies, and enhanced portfolio features.
 """
 
 import os
 import sys
-sys.path.append(os.path.dirname(os.path.abspath(__file__)))
+from pathlib import Path
 
-from sqlalchemy import create_engine
-from backend.config import settings
-from backend.models.options import *
-from backend.models import Base
+# Add backend to path
+backend_path = Path(__file__).parent / "backend"
+sys.path.insert(0, str(backend_path))
 
-def run_migration():
-    """Create all options trading tables."""
-    
-    # Create database engine
-    engine = create_engine(settings.DATABASE_URL)
-    
-    print("Creating options trading tables...")
-    
+from backend.database import engine, SessionLocal, Base
+
+# Import all models to ensure they're registered with Base
+try:
+    from backend.models.user import User
+    from backend.models.portfolio import Portfolio, Holding, Account
+    from backend.models.signals import Signal, AlertRule
+    from backend.models.notifications import Notification
+    from backend.models.market_data import Instrument, PriceData, TechnicalIndicators
+    from backend.models.options import OptionsContract, OptionsPosition
+    from backend.models.tax_lots import TaxLot
+    from backend.models.transactions import Transaction
+    print("✅ Core models imported successfully")
+except ImportError as e:
+    print(f"⚠️ Some models not available: {e}")
+
+def create_options_tables():
+    """Create all database tables for options trading."""
     try:
-        # Create all tables defined in options models
-        Base.metadata.create_all(engine, tables=[
-            TastytradeAccount.__table__,
-            OptionInstrument.__table__,
-            OptionPosition.__table__,
-            OptionGreeks.__table__,
-            OptionPrice.__table__,
-            OptionOrder.__table__,
-            TradingStrategy.__table__,
-            StrategySignal.__table__,
-            StrategyPerformance.__table__,
-            CapitalAllocation.__table__,
-            RiskMetrics.__table__
-        ])
+        print("🗃️ Creating QuantMatrix database tables...")
         
-        print("✅ Options trading tables created successfully!")
-        print("\nNew Tables Created:")
-        print("- tastytrade_accounts")
-        print("- option_instruments") 
-        print("- option_positions")
-        print("- option_greeks")
-        print("- option_prices")
-        print("- option_orders")
-        print("- trading_strategies")
-        print("- strategy_signals")
-        print("- strategy_performance")
-        print("- capital_allocations")
-        print("- risk_metrics")
+        # Create all tables using SQLAlchemy metadata
+        # This automatically creates all tables defined in imported models
+        Base.metadata.create_all(engine)
+        
+        print("✅ All database tables created successfully!")
+        
+        # Verify table creation
+        with SessionLocal() as db:
+            # Test database connection
+            result = db.execute("SELECT 1").scalar()
+            if result == 1:
+                print("✅ Database connection verified")
+            else:
+                print("⚠️ Database connection issue")
         
         return True
         
@@ -57,14 +57,40 @@ def run_migration():
         print(f"❌ Error creating tables: {e}")
         return False
 
+def drop_all_tables():
+    """Drop all database tables (use with caution!)."""
+    try:
+        print("🗑️ Dropping all database tables...")
+        
+        Base.metadata.drop_all(engine)
+        
+        print("✅ All tables dropped successfully!")
+        return True
+        
+    except Exception as e:
+        print(f"❌ Error dropping tables: {e}")
+        return False
+
 if __name__ == "__main__":
-    success = run_migration()
-    if success:
-        print("\n🎉 Migration completed! Your options trading system is ready.")
-        print("\nNext steps:")
-        print("1. Add your Tastytrade credentials to .env file")
-        print("2. Initialize your first ATR Matrix strategy")
-        print("3. Start automated trading!")
-    else:
-        print("\n💥 Migration failed. Please check the error above.")
-        sys.exit(1) 
+    import argparse
+    
+    parser = argparse.ArgumentParser(description="QuantMatrix Database Migration Options")
+    parser.add_argument("--create", action="store_true", help="Create all tables")
+    parser.add_argument("--drop", action="store_true", help="Drop all tables")
+    parser.add_argument("--recreate", action="store_true", help="Drop and recreate all tables")
+    
+    args = parser.parse_args()
+    
+    if args.drop or args.recreate:
+        if drop_all_tables():
+            print("🗑️ Tables dropped successfully")
+    
+    if args.create or args.recreate:
+        if create_options_tables():
+            print("🎉 Database setup complete!")
+    
+    if not any([args.create, args.drop, args.recreate]):
+        print("Usage: python alembic_migration_options.py --create|--drop|--recreate")
+        print("  --create: Create all tables")
+        print("  --drop: Drop all tables")  
+        print("  --recreate: Drop and recreate all tables") 

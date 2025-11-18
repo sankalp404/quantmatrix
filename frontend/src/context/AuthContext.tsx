@@ -1,0 +1,95 @@
+import React, { createContext, useContext, useEffect, useMemo, useState } from 'react';
+import { authApi } from '../services/api';
+
+type User = {
+  id: number;
+  username: string;
+  email: string;
+  full_name?: string | null;
+  is_active: boolean;
+};
+
+type AuthContextValue = {
+  user: User | null;
+  token: string | null;
+  ready: boolean;
+  login: (username: string, password: string) => Promise<void>;
+  register: (username: string, email: string, password: string, full_name?: string) => Promise<void>;
+  logout: () => void;
+  refreshMe: () => Promise<void>;
+};
+
+const AuthContext = createContext<AuthContextValue | undefined>(undefined);
+
+export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children }) => {
+  const [user, setUser] = useState<User | null>(null);
+  // Initialize token synchronously from localStorage to avoid redirect flicker
+  const [token, setToken] = useState<string | null>(() => {
+    try {
+      return localStorage.getItem('qm_token');
+    } catch {
+      return null;
+    }
+  });
+  const [ready, setReady] = useState(false);
+
+  useEffect(() => {
+    const sync = async () => {
+      try {
+        if (token) {
+          const me: any = await authApi.me();
+          setUser(me);
+        }
+      } catch {
+        // invalid token -> clear
+        try { localStorage.removeItem('qm_token'); } catch {}
+        setToken(null);
+        setUser(null);
+      } finally {
+        setReady(true);
+      }
+    };
+    sync();
+  }, []);
+
+  const login = async (username: string, password: string) => {
+    const res: any = await authApi.login({ username, password });
+    const t = res?.access_token;
+    if (t) {
+      localStorage.setItem('qm_token', t);
+      setToken(t);
+      const me: any = await authApi.me();
+      setUser(me);
+    }
+  };
+
+  const register = async (username: string, email: string, password: string, full_name?: string) => {
+    await authApi.register({ username, email, password, full_name });
+    await login(username, password);
+  };
+
+  const logout = () => {
+    localStorage.removeItem('qm_token');
+    setToken(null);
+    setUser(null);
+  };
+
+  const refreshMe = async () => {
+    const me: any = await authApi.me();
+    setUser(me);
+  };
+
+  const value = useMemo<AuthContextValue>(() => ({
+    user, token, ready, login, register, logout, refreshMe,
+  }), [user, token, ready]);
+
+  return <AuthContext.Provider value={value}>{children}</AuthContext.Provider>;
+};
+
+export const useAuth = () => {
+  const ctx = useContext(AuthContext);
+  if (!ctx) throw new Error('useAuth must be used within AuthProvider');
+  return ctx;
+};
+
+

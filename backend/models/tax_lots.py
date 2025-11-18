@@ -1,186 +1,149 @@
-from sqlalchemy import Column, Integer, String, Float, DateTime, ForeignKey, Boolean, Text, Enum as SQLEnum
-from sqlalchemy.orm import relationship
-from datetime import datetime
-import enum
-from typing import Optional, List
+#!/usr/bin/env python3
+"""
+Generic Tax Lot Model for Multi-Brokerage Support
+Supports all brokerages: IBKR, TastyTrade, Schwab, etc.
+"""
 
-from .portfolio import Base
+from sqlalchemy import (
+    Column,
+    Integer,
+    String,
+    Float,
+    DateTime,
+    ForeignKey,
+    Enum as SQLEnum,
+    Date,
+)
+from sqlalchemy.orm import relationship
+from sqlalchemy.sql import func
+import enum
+from datetime import datetime
+
+from backend.models import Base
+
 
 class TaxLotMethod(enum.Enum):
-    """Tax lot accounting methods"""
-    FIFO = "fifo"  # First In, First Out
+    """Tax lot accounting methods supported by brokerages"""
+
+    FIFO = "fifo"  # First In, First Out (most common)
     LIFO = "lifo"  # Last In, First Out
-    HIFO = "hifo"  # Highest Cost First Out
-    SPECIFIC = "specific"  # Specific identification
+    AVERAGE_COST = "average_cost"  # Average cost method
+    SPECIFIC_ID = "specific_id"  # Specific identification
+    # Advanced tax optimization methods
+    MAXIMIZE_LONG_TERM_GAIN = "mltg"  # Tax optimizer: maximize long-term gains
+    MAXIMIZE_LONG_TERM_LOSS = "mltl"  # Tax optimizer: maximize long-term losses
+    MAXIMIZE_SHORT_TERM_GAIN = "mstg"  # Tax optimizer: maximize short-term gains
+    MAXIMIZE_SHORT_TERM_LOSS = "mstl"  # Tax optimizer: maximize short-term losses
+
+
+class TaxLotSource(enum.Enum):
+    """Data sources for tax lot information"""
+
+    OFFICIAL_STATEMENT = (
+        "official_statement"  # Official brokerage statement (preferred)
+    )
+    REALTIME_API = "realtime_api"  # Real-time API data
+    MANUAL_ENTRY = "manual_entry"  # Manual user entry
+    CALCULATED = "calculated"  # Calculated from trades
+
 
 class TaxLot(Base):
-    """Individual tax lot for tracking cost basis and tax implications"""
+    """
+    Tax lot model aligned with multi-brokerage official data structure.
+    Stores both official brokerage tax lots and real-time position data.
+
+    Completely generic - works with any brokerage data source.
+    """
+
     __tablename__ = "tax_lots"
-    
-    id = Column(Integer, primary_key=True, index=True)
-    
-    # Reference to holding
-    holding_id = Column(Integer, ForeignKey("holdings.id", ondelete="CASCADE"))
-    
-    # Tax lot details
-    symbol = Column(String(10), nullable=False, index=True)
-    account_id = Column(String(20), nullable=False)
-    
-    # Purchase information
-    purchase_date = Column(DateTime, nullable=False)
-    shares_purchased = Column(Float, nullable=False)
-    cost_per_share = Column(Float, nullable=False)
-    total_cost = Column(Float, nullable=False)  # Includes fees/commissions
-    commission = Column(Float, default=0.0)
-    
-    # Current status
-    shares_remaining = Column(Float, nullable=False)  # After partial sales
-    shares_sold = Column(Float, default=0.0)
-    
-    # Tax status
-    is_long_term = Column(Boolean, default=False)  # > 1 year holding period
-    is_wash_sale = Column(Boolean, default=False)
-    wash_sale_amount = Column(Float, default=0.0)
-    
-    # Metadata
-    created_at = Column(DateTime, default=datetime.utcnow)
-    updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
-    notes = Column(Text)
-    
+
+    id = Column(Integer, primary_key=True)
+    user_id = Column(Integer, ForeignKey("users.id"), nullable=False)
+    account_id = Column(
+        Integer, ForeignKey("broker_accounts.id"), nullable=False, index=True
+    )  # Broker account foreign key
+
+    symbol = Column(String(20), nullable=False, index=True)  # Stock/Option symbol
+    contract_id = Column(
+        String(50), nullable=True
+    )  # Brokerage contract ID (if available)
+
+    # Tax lot details from brokerage statements
+    quantity = Column(Float, nullable=False)  # Number of shares/contracts
+    cost_per_share = Column(Float, nullable=False)  # Cost basis per share
+    cost_basis = Column(Float, nullable=False)  # Total cost basis
+    acquisition_date = Column(Date, nullable=False, index=True)  # When purchased
+
+    # Trade Details (for lot reconstruction)
+    trade_id = Column(String(50), nullable=True, index=True)  # Trade identifier
+    execution_id = Column(String(50), nullable=True)  # Execution identifier
+    order_id = Column(String(50), nullable=True)  # Order identifier
+    exchange = Column(String(20), nullable=True)  # Exchange name
+    asset_category = Column(String(20), nullable=True)  # Asset type (STK, OPT, etc.)
+
+    # Current valuation
+    current_price = Column(Float, nullable=True)  # Current market price
+    market_value = Column(Float, nullable=True)  # Current market value
+    unrealized_pnl = Column(Float, nullable=True)  # Unrealized P&L
+    unrealized_pnl_pct = Column(Float, nullable=True)  # Unrealized P&L percentage
+
+    # Currency & Fees
+    currency = Column(String(10), nullable=False, default="USD")  # Currency
+    commission = Column(Float, nullable=True)  # Commission paid
+    fees = Column(Float, nullable=True)  # Other fees
+    fx_rate = Column(Float, nullable=True)  # FX rate to base currency
+
+    # Tax lot identification
+    lot_id = Column(String(100), nullable=True, unique=True)  # Unique lot identifier
+
+    # Brokerage metadata
+    settlement_date = Column(Date, nullable=True)  # Settlement date
+    holding_period = Column(Integer, nullable=True)  # Days held
+
+    source = Column(
+        SQLEnum(TaxLotSource), nullable=False, default=TaxLotSource.OFFICIAL_STATEMENT
+    )
+
+    execution_id = Column(String(50), nullable=True)  # Brokerage execution ID
+
+    # Timestamps
+    created_at = Column(DateTime, default=func.now(), nullable=False)
+    updated_at = Column(DateTime, default=func.now(), onupdate=func.now())
+    last_price_update = Column(DateTime, nullable=True)
+
     # Relationships
-    holding = relationship("Holding", back_populates="tax_lots")
-    sales = relationship("TaxLotSale", back_populates="tax_lot")
-    
+    user = relationship("User", back_populates="tax_lots")
+
+    def __repr__(self):
+        return f"<TaxLot({self.symbol}: {self.quantity} @ ${self.cost_per_share:.2f})>"
+
     @property
-    def current_value(self) -> float:
-        """Current market value of remaining shares"""
-        if self.holding and self.holding.current_price:
-            return self.shares_remaining * self.holding.current_price
-        return 0.0
-    
-    @property
-    def unrealized_gain_loss(self) -> float:
-        """Unrealized gain/loss for remaining shares"""
-        return self.current_value - (self.shares_remaining * self.cost_per_share)
-    
-    @property
-    def unrealized_gain_loss_pct(self) -> float:
-        """Unrealized gain/loss percentage"""
-        cost_basis = self.shares_remaining * self.cost_per_share
-        if cost_basis > 0:
-            return (self.unrealized_gain_loss / cost_basis) * 100
-        return 0.0
-    
+    def is_official_brokerage_data(self) -> bool:
+        """Check if this is official brokerage tax lot data."""
+        return self.source == TaxLotSource.OFFICIAL_STATEMENT
+
     @property
     def holding_period_days(self) -> int:
-        """Number of days held"""
-        return (datetime.utcnow() - self.purchase_date).days
-    
-    @property
-    def tax_status(self) -> str:
-        """Current tax status (short-term or long-term)"""
-        return "long_term" if self.holding_period_days >= 365 else "short_term"
+        """Calculate holding period in days."""
+        if self.acquisition_date:
+            return (datetime.now().date() - self.acquisition_date).days
+        return 0
 
-class TaxLotSale(Base):
-    """Record of tax lot sales for realized gain/loss tracking"""
-    __tablename__ = "tax_lot_sales"
-    
-    id = Column(Integer, primary_key=True, index=True)
-    
-    # Reference to original tax lot
-    tax_lot_id = Column(Integer, ForeignKey("tax_lots.id", ondelete="CASCADE"))
-    
-    # Sale details
-    sale_date = Column(DateTime, nullable=False)
-    shares_sold = Column(Float, nullable=False)
-    sale_price_per_share = Column(Float, nullable=False)
-    total_proceeds = Column(Float, nullable=False)  # After fees/commissions
-    commission = Column(Float, default=0.0)
-    
-    # Tax calculations
-    cost_basis = Column(Float, nullable=False)  # Cost of shares sold
-    realized_gain_loss = Column(Float, nullable=False)
-    is_long_term = Column(Boolean, nullable=False)
-    is_wash_sale = Column(Boolean, default=False)
-    
-    # Tax lot method used
-    lot_method = Column(SQLEnum(TaxLotMethod), default=TaxLotMethod.FIFO)
-    
-    # Metadata
-    created_at = Column(DateTime, default=datetime.utcnow)
-    notes = Column(Text)
-    
-    # Relationships
-    tax_lot = relationship("TaxLot", back_populates="sales")
-    
     @property
-    def realized_gain_loss_pct(self) -> float:
-        """Realized gain/loss percentage"""
-        if self.cost_basis > 0:
-            return (self.realized_gain_loss / self.cost_basis) * 100
+    def is_long_term(self) -> bool:
+        """Check if this is a long-term holding (>365 days)."""
+        return self.holding_period_days > 365
+
+    @property
+    def gain_loss(self) -> float:
+        """Calculate realized gain/loss if sold at current price."""
+        if self.current_price:
+            return (self.current_price - self.cost_per_share) * self.quantity
         return 0.0
 
-class TaxStrategy(Base):
-    """Tax optimization strategies and recommendations"""
-    __tablename__ = "tax_strategies"
-    
-    id = Column(Integer, primary_key=True, index=True)
-    
-    # Strategy details
-    account_id = Column(String(20), nullable=False)
-    strategy_type = Column(String(50), nullable=False)  # tax_loss_harvesting, wash_sale_avoidance, etc.
-    
-    # Recommendations
-    symbol = Column(String(10), nullable=False)
-    action = Column(String(20), nullable=False)  # sell, hold, buy
-    shares = Column(Float)
-    target_price = Column(Float)
-    
-    # Tax impact
-    estimated_tax_savings = Column(Float)
-    estimated_tax_liability = Column(Float)
-    confidence_score = Column(Float, default=0.0)  # 0-1 confidence in recommendation
-    
-    # Timing
-    recommended_date = Column(DateTime)
-    expiration_date = Column(DateTime)
-    is_active = Column(Boolean, default=True)
-    
-    # Metadata
-    created_at = Column(DateTime, default=datetime.utcnow)
-    updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
-    description = Column(Text)
-    
-class TaxReport(Base):
-    """Tax reports and summaries"""
-    __tablename__ = "tax_reports"
-    
-    id = Column(Integer, primary_key=True, index=True)
-    
-    # Report details
-    account_id = Column(String(20), nullable=False)
-    report_type = Column(String(30), nullable=False)  # annual_summary, quarterly, tax_loss_harvesting
-    tax_year = Column(Integer, nullable=False)
-    
-    # Summary data
-    total_realized_gains = Column(Float, default=0.0)
-    total_realized_losses = Column(Float, default=0.0)
-    net_realized_gain_loss = Column(Float, default=0.0)
-    
-    short_term_gains = Column(Float, default=0.0)
-    short_term_losses = Column(Float, default=0.0)
-    long_term_gains = Column(Float, default=0.0)
-    long_term_losses = Column(Float, default=0.0)
-    
-    # Unrealized positions
-    total_unrealized_gains = Column(Float, default=0.0)
-    total_unrealized_losses = Column(Float, default=0.0)
-    
-    # Tax calculations
-    estimated_tax_liability = Column(Float, default=0.0)
-    estimated_tax_rate = Column(Float, default=0.0)
-    wash_sale_adjustments = Column(Float, default=0.0)
-    
-    # Metadata
-    generated_at = Column(DateTime, default=datetime.utcnow)
-    report_data = Column(Text)  # JSON data for detailed breakdown 
+    @property
+    def gain_loss_pct(self) -> float:
+        """Calculate gain/loss percentage."""
+        if self.cost_basis and self.cost_basis != 0:
+            return (self.gain_loss / self.cost_basis) * 100
+        return 0.0
