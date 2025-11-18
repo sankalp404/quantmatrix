@@ -13,7 +13,7 @@ from sqlalchemy.orm import Session
 
 from backend.models import SessionLocal  # Fixed import
 from backend.models.portfolio import Account, Holding
-from backend.services.market_data import market_data_service
+from backend.services.market.market_data_service import market_data_service
 
 logger = logging.getLogger(__name__)
 

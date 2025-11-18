@@ -59,6 +59,15 @@ api.interceptors.request.use(
   (config) => {
     console.log(`🚀 API Request: ${config.method?.toUpperCase()} ${config.url}`);
 
+    // Attach JWT if available
+    try {
+      const token = localStorage.getItem('qm_token');
+      if (token) {
+        config.headers = config.headers || {};
+        (config.headers as any)['Authorization'] = `Bearer ${token}`;
+      }
+    } catch { }
+
     // Add cache headers for GET requests
     if (config.method === 'get') {
       config.headers['Cache-Control'] = 'max-age=30';
@@ -123,8 +132,9 @@ export const portfolioApi = {
     return makeOptimizedRequest(() => api.get(url));
   },
 
-  sync: async (brokerage?: string) => {
-    return makeOptimizedRequest(() => api.post('/portfolio/sync', { brokerage }));
+  sync: async () => {
+    // Align to unified accounts sync-all endpoint
+    return makeOptimizedRequest(() => api.post('/accounts/sync-all'));
   },
 
   getTaxLots: async () => {
@@ -132,12 +142,19 @@ export const portfolioApi = {
   },
 
   getHoldingTaxLots: async (holdingId: number) => {
-    return makeOptimizedRequest(() => api.get(`/portfolio/holdings/${holdingId}/tax-lots`));
+    // Backend route is /portfolio/stocks/{position_id}/tax-lots
+    return makeOptimizedRequest(() => api.get(`/portfolio/stocks/${holdingId}/tax-lots`));
   },
 
-  getStocksOnly: async (accountId?: string) => {
-    const url = accountId ? `/portfolio/holdings/stocks-only?account_id=${encodeURIComponent(accountId)}` : '/portfolio/holdings/stocks-only';
+  // New aligned stocks endpoint
+  getStocks: async (accountId?: string) => {
+    const url = accountId ? `/portfolio/stocks?account_id=${encodeURIComponent(accountId)}` : '/portfolio/stocks';
     return makeOptimizedRequest(() => api.get(url));
+  },
+
+  // Back-compat shim for old callers
+  getStocksOnly: async (accountId?: string) => {
+    return portfolioApi.getStocks(accountId);
   },
 
   // Enhanced statements with error handling
@@ -198,15 +215,16 @@ export const portfolioApi = {
 // Options API endpoints - enhanced
 export const optionsApi = {
   getPortfolio: async () => {
-    return makeOptimizedRequest(() => api.get('/options/unified/portfolio'));
+    return makeOptimizedRequest(() => api.get('/portfolio/options/unified/portfolio'));
   },
 
   getSummary: async () => {
-    return makeOptimizedRequest(() => api.get('/options/unified/summary'));
+    return makeOptimizedRequest(() => api.get('/portfolio/options/unified/summary'));
   },
 
   sync: async () => {
-    return makeOptimizedRequest(() => api.post('/options/unified/sync'));
+    // No dedicated route; use accounts sync-all
+    return makeOptimizedRequest(() => api.post('/accounts/sync-all'));
   },
 
   // Batch options data
@@ -218,11 +236,59 @@ export const optionsApi = {
   }
 };
 
+// Market data endpoints
+export const marketDataApi = {
+  getHistory: async (symbol: string, period: string = '1y', interval: string = '1d') => {
+    return makeOptimizedRequest(() => api.get(`/market-data/history/${encodeURIComponent(symbol)}?period=${encodeURIComponent(period)}&interval=${encodeURIComponent(interval)}`));
+  },
+};
+
+// Unified Activity endpoints
+export const activityApi = {
+  getActivity: async (params: {
+    accountId?: string;
+    start?: string; // ISO date
+    end?: string;   // ISO date
+    symbol?: string;
+    category?: string;
+    side?: string;
+    limit?: number;
+    offset?: number;
+  }) => {
+    const q: string[] = [];
+    if (params.accountId) q.push(`account_id=${encodeURIComponent(params.accountId)}`);
+    if (params.start) q.push(`start=${encodeURIComponent(params.start)}`);
+    if (params.end) q.push(`end=${encodeURIComponent(params.end)}`);
+    if (params.symbol) q.push(`symbol=${encodeURIComponent(params.symbol)}`);
+    if (params.category) q.push(`category=${encodeURIComponent(params.category)}`);
+    if (params.side) q.push(`side=${encodeURIComponent(params.side)}`);
+    q.push(`limit=${encodeURIComponent(String(params.limit ?? 500))}`);
+    q.push(`offset=${encodeURIComponent(String(params.offset ?? 0))}`);
+    const url = `/portfolio/activity?${q.join('&')}`;
+    return makeOptimizedRequest(() => api.get(url));
+  },
+  getDailySummary: async (params: {
+    accountId?: string;
+    start?: string;
+    end?: string;
+    symbol?: string;
+  }) => {
+    const q: string[] = [];
+    if (params.accountId) q.push(`account_id=${encodeURIComponent(params.accountId)}`);
+    if (params.start) q.push(`start=${encodeURIComponent(params.start)}`);
+    if (params.end) q.push(`end=${encodeURIComponent(params.end)}`);
+    if (params.symbol) q.push(`symbol=${encodeURIComponent(params.symbol)}`);
+    const url = `/portfolio/activity/daily_summary?${q.join('&')}`;
+    return makeOptimizedRequest(() => api.get(url));
+  }
+};
+
 // TastyTrade API endpoints - enhanced
 export const tastytradeApi = {
   getAccounts: async () => {
     try {
-      return await makeOptimizedRequest(() => api.get('/tastytrade/accounts'));
+      // Align to unified accounts list
+      return await makeOptimizedRequest(() => api.get('/accounts'));
     } catch (error) {
       console.warn('TastyTrade API not available');
       return { status: 'error', message: 'TastyTrade API unavailable' };
@@ -230,7 +296,21 @@ export const tastytradeApi = {
   },
 
   sync: async () => {
-    return makeOptimizedRequest(() => api.post('/tastytrade/portfolio/sync'));
+    // Align to unified accounts sync-all
+    return makeOptimizedRequest(() => api.post('/accounts/sync-all'));
+  }
+};
+
+// FlexQuery (IBKR Tax Optimizer) API endpoints
+export const flexqueryApi = {
+  getStatus: async () => {
+    return makeOptimizedRequest(() => api.get('/portfolio/flexquery/status'));
+  },
+
+  syncTaxLots: async (accountId: string) => {
+    return makeOptimizedRequest(() => api.post('/portfolio/flexquery/sync-tax-lots', {
+      account_id: accountId
+    }));
   }
 };
 
@@ -319,4 +399,36 @@ export interface PortfolioSummary {
   accounts_summary: any[];
 }
 
-export default api; 
+export default api;
+
+// Auth API
+export const authApi = {
+  register: async (payload: { username: string; email: string; password: string; full_name?: string }) => {
+    return makeOptimizedRequest(() => api.post('/auth/register', payload));
+  },
+  login: async (payload: { username: string; password: string }) => {
+    return makeOptimizedRequest(() => api.post('/auth/login', payload));
+  },
+  me: async () => {
+    return makeOptimizedRequest(() => api.get('/auth/me'));
+  },
+};
+
+// Accounts API
+export const accountsApi = {
+  list: async () => makeOptimizedRequest(() => api.get('/accounts')),
+  add: async (payload: { broker: string; account_number: string; account_name?: string; account_type: string; api_credentials?: any; is_paper_trading?: boolean }) =>
+    makeOptimizedRequest(() => api.post('/accounts/add', payload)),
+  sync: async (accountId: number, sync_type: string = 'comprehensive') =>
+    makeOptimizedRequest(() => api.post(`/accounts/${accountId}/sync`, { sync_type })),
+  syncStatus: async (accountId: number) => makeOptimizedRequest(() => api.get(`/accounts/${accountId}/sync-status`)),
+  remove: async (accountId: number) => makeOptimizedRequest(() => api.delete(`/accounts/${accountId}`)),
+};
+
+// Aggregator API
+export const aggregatorApi = {
+  brokers: async () => makeOptimizedRequest(() => api.post('/aggregator/brokers')),
+  schwabLink: async (account_id: number, trading: boolean = false) =>
+    makeOptimizedRequest(() => api.post('/aggregator/schwab/link', { account_id, trading })),
+  config: async () => makeOptimizedRequest(() => api.get('/aggregator/config')),
+};

@@ -24,7 +24,7 @@ async def get_dividends(
     days: int = Query(365, ge=1, le=3650),
     user_id: int | None = Query(None, description="User ID (optional)"),
     account_id: str | None = Query(
-        None, description="Filter by account number (e.g., U19490886)"
+        None, description="Filter by account number (e.g., U19491234)"
     ),
     db: Session = Depends(get_db),
 ):

@@ -18,14 +18,16 @@ from pydantic import BaseModel
 from datetime import datetime
 
 from backend.database import get_db
-from backend.models import BrokerAccount
-from backend.models.broker_account import (
-    BrokerType,
-    AccountType,
-    AccountStatus,
-    SyncStatus,
-)
+from backend.models import BrokerAccount, BrokerType, AccountType, AccountStatus, SyncStatus
+from backend.models.position import Position
+from backend.models.tax_lot import TaxLot
 from backend.services.portfolio.broker_sync_service import broker_sync_service
+from backend.tasks.celery_app import celery_app
+from celery.result import AsyncResult
+from fastapi import Query
+from typing import Dict, Any
+from backend.api.routes.auth import get_current_user
+from backend.models.user import User
 
 router = APIRouter(prefix="/api/v1/accounts", tags=["Accounts"])
 
@@ -62,7 +64,7 @@ class SyncAccountRequest(BaseModel):
 @router.post("/add", response_model=BrokerAccountResponse)
 async def add_broker_account(
     request: AddBrokerAccountRequest,
-    user_id: int = 1,  # TODO: Get from auth
+    current_user: User = Depends(get_current_user),
     db: Session = Depends(get_db),
 ):
     """
@@ -93,7 +95,7 @@ async def add_broker_account(
         existing = (
             db.query(BrokerAccount)
             .filter(
-                BrokerAccount.user_id == user_id,
+                BrokerAccount.user_id == current_user.id,
                 BrokerAccount.account_number == request.account_number,
                 BrokerAccount.broker == broker_enum,
             )
@@ -108,7 +110,7 @@ async def add_broker_account(
 
         # Create new broker account
         broker_account = BrokerAccount(
-            user_id=user_id,
+            user_id=current_user.id,
             broker=broker_enum,
             account_number=request.account_number,
             account_name=request.account_name
@@ -153,10 +155,10 @@ async def add_broker_account(
 
 @router.get("", response_model=List[BrokerAccountResponse])
 async def list_broker_accounts(
-    user_id: int = 1, db: Session = Depends(get_db)  # TODO: Get from auth
+    current_user: User = Depends(get_current_user), db: Session = Depends(get_db)
 ):
     """List all broker accounts for the user."""
-    accounts = db.query(BrokerAccount).filter(BrokerAccount.user_id == user_id).all()
+    accounts = db.query(BrokerAccount).filter(BrokerAccount.user_id == current_user.id).all()
 
     return [
         BrokerAccountResponse(
@@ -179,7 +181,7 @@ async def list_broker_accounts(
 async def sync_broker_account(
     account_id: int,
     request: SyncAccountRequest,
-    user_id: int = 1,  # TODO: Get from auth
+    current_user: User = Depends(get_current_user),
     db: Session = Depends(get_db),
 ):
     """
@@ -192,7 +194,7 @@ async def sync_broker_account(
         # Verify account belongs to user
         account = (
             db.query(BrokerAccount)
-            .filter(BrokerAccount.id == account_id, BrokerAccount.user_id == user_id)
+            .filter(BrokerAccount.id == account_id, BrokerAccount.user_id == current_user.id)
             .first()
         )
 
@@ -203,24 +205,19 @@ async def sync_broker_account(
             raise HTTPException(status_code=400, detail="Account is disabled")
 
         # Update sync status
-        account.sync_status = SyncStatus.IN_PROGRESS
+        account.sync_status = SyncStatus.RUNNING
         account.last_sync_attempt = datetime.now()
         db.commit()
 
-        # Perform sync
-        result = await broker_sync_service.sync_account(account_id, request.sync_type)
-
-        # Update status based on result
-        if "error" in result:
-            account.sync_status = SyncStatus.FAILED
-            account.sync_error_message = result["error"]
-        else:
-            account.sync_status = SyncStatus.COMPLETED
-            account.last_successful_sync = datetime.now()
-            account.sync_error_message = None
-
+        # Enqueue Celery task and return 202 with task id
+        task = celery_app.send_task(
+            "backend.tasks.account_sync.sync_account_task",
+            args=[account_id, request.sync_type],
+        )
+        account.sync_status = SyncStatus.QUEUED
+        account.sync_error_message = None
         db.commit()
-        return result
+        return {"status": "queued", "task_id": task.id}
 
     except HTTPException:
         raise
@@ -233,12 +230,23 @@ async def sync_broker_account(
 
 @router.post("/sync-all")
 async def sync_all_accounts(
-    user_id: int = 1, db: Session = Depends(get_db)  # TODO: Get from auth
+    current_user: User = Depends(get_current_user), db: Session = Depends(get_db)
 ):
     """Sync all enabled broker accounts for the user."""
     try:
-        result = await broker_sync_service.sync_all_accounts(user_id)
-        return result
+        accounts = (
+            db.query(BrokerAccount)
+            .filter(BrokerAccount.user_id == current_user.id, BrokerAccount.is_enabled == True)
+            .all()
+        )
+        results: Dict[str, Any] = {}
+        for account in accounts:
+            key = f"{account.broker.value}_{account.account_number}"
+            try:
+                results[key] = broker_sync_service.sync_account(account.account_number, db)
+            except ValueError as ve:
+                results[key] = {"status": "skipped", "reason": str(ve)}
+        return results
 
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Error syncing accounts: {str(e)}")
@@ -247,14 +255,14 @@ async def sync_all_accounts(
 @router.delete("/{account_id}")
 async def delete_broker_account(
     account_id: int,
-    user_id: int = 1,  # TODO: Get from auth
+    current_user: User = Depends(get_current_user),
     db: Session = Depends(get_db),
 ):
     """Delete a broker account (soft delete - disable it)."""
     try:
         account = (
             db.query(BrokerAccount)
-            .filter(BrokerAccount.id == account_id, BrokerAccount.user_id == user_id)
+            .filter(BrokerAccount.id == account_id, BrokerAccount.user_id == current_user.id)
             .first()
         )
 
@@ -274,3 +282,146 @@ async def delete_broker_account(
     except Exception as e:
         db.rollback()
         raise HTTPException(status_code=500, detail=f"Error deleting account: {str(e)}")
+
+
+@router.get("/{account_id}/sync-status")
+async def get_account_sync_status(
+    account_id: int, current_user: User = Depends(get_current_user), db: Session = Depends(get_db)
+):
+    """Return current sync status for an account from DB."""
+    account = (
+        db.query(BrokerAccount)
+        .filter(BrokerAccount.id == account_id, BrokerAccount.user_id == current_user.id)
+        .first()
+    )
+    if not account:
+        raise HTTPException(status_code=404, detail="Account not found")
+    return {
+        "account_id": account.id,
+        "account_number": account.account_number,
+        "broker": account.broker.value,
+        "sync_status": account.sync_status.value if account.sync_status else None,
+        "last_sync_attempt": account.last_sync_attempt,
+        "last_successful_sync": account.last_successful_sync,
+        "sync_error_message": account.sync_error_message,
+    }
+
+
+@router.get("/tasks/{task_id}")
+async def get_task_status(task_id: str):
+    """Return Celery task status and (if finished) result metadata."""
+    res = AsyncResult(task_id, app=celery_app)
+    state = res.state
+    response = {"task_id": task_id, "state": state}
+    if state in ("SUCCESS", "FAILURE", "REVOKED"):
+        try:
+            response["result"] = (
+                res.result if isinstance(res.result, dict) else str(res.result)
+            )
+        except Exception:
+            response["result"] = None
+    return response
+
+
+# Inline price refresh relocated from market_data routes for better cohesion
+@router.post("/prices/refresh")
+async def refresh_prices(
+    account_id: Optional[int] = Query(
+        default=None, description="Broker account ID to scope refresh"
+    ),
+    symbols: Optional[List[str]] = Query(
+        default=None, description="Optional subset of symbols to refresh"
+    ),
+    db: Session = Depends(get_db),
+) -> Dict[str, Any]:
+    from backend.services.market.market_data_service import MarketDataService
+
+    try:
+        market_service = MarketDataService()
+
+        # Load target positions
+        q = db.query(BrokerAccount, Position).join(
+            Position, Position.account_id == BrokerAccount.id
+        )
+        if account_id is not None:
+            q = q.filter(BrokerAccount.id == account_id)
+        positions = [p for _, p in q.all() if p.quantity != 0 and p.symbol]
+        if not positions:
+            return {"updated_positions": 0, "updated_tax_lots": 0, "symbols": []}
+
+        unique_symbols = sorted({p.symbol for p in positions if p.symbol})
+
+        # Fetch prices concurrently
+        import asyncio as _asyncio
+
+        price_tasks = [market_service.get_current_price(sym) for sym in unique_symbols]
+        prices = await _asyncio.gather(*price_tasks, return_exceptions=True)
+        symbol_to_price = {}
+        for sym, price in zip(unique_symbols, prices):
+            try:
+                if isinstance(price, (int, float)) and price > 0:
+                    symbol_to_price[sym] = float(price)
+            except Exception:
+                continue
+
+        # Update positions
+        updated_positions = 0
+        for p in positions:
+            price = symbol_to_price.get(p.symbol)
+            if price is None:
+                continue
+            try:
+                quantity_abs = float(abs(p.quantity or 0))
+                total_cost = float(p.total_cost_basis or 0)
+                market_value = quantity_abs * price
+                unrealized = market_value - total_cost
+                unrealized_pct = (
+                    (unrealized / total_cost * 100) if total_cost > 0 else 0.0
+                )
+                p.current_price = price
+                p.market_value = market_value
+                p.unrealized_pnl = unrealized
+                p.unrealized_pnl_pct = unrealized_pct
+                updated_positions += 1
+            except Exception:
+                continue
+
+        # Update tax lots for same scope
+        tq = db.query(TaxLot)
+        if account_id is not None:
+            tq = tq.filter(TaxLot.account_id == account_id)
+        if symbols:
+            tq = tq.filter(TaxLot.symbol.in_(symbols))
+        lots: List[TaxLot] = tq.all()
+
+        updated_lots = 0
+        for lot in lots:
+            price = symbol_to_price.get(lot.symbol)
+            if price is None:
+                continue
+            try:
+                qty_abs = float(abs(lot.quantity or 0))
+                cost_basis = float(lot.cost_basis or 0)
+                market_value = qty_abs * price
+                unrealized = market_value - cost_basis
+                unrealized_pct = (
+                    (unrealized / cost_basis * 100) if cost_basis > 0 else 0.0
+                )
+                lot.current_price = price
+                lot.market_value = market_value
+                lot.unrealized_pnl = unrealized
+                lot.unrealized_pnl_pct = unrealized_pct
+                updated_lots += 1
+            except Exception:
+                continue
+
+        db.flush()
+        db.commit()
+        return {
+            "updated_positions": updated_positions,
+            "updated_tax_lots": updated_lots,
+            "symbols": list(symbol_to_price.keys()),
+        }
+    except Exception as e:
+        db.rollback()
+        raise HTTPException(status_code=500, detail=f"Price refresh failed: {e}")

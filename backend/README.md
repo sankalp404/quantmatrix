@@ -50,7 +50,7 @@ Operational Notes
 -----------------
 - .env lives at repo root; never overwrite from code.
 - When dependencies change, rebuild containers; do not pip install on host.
-- If IBKR account `U15891532` shows no data, verify FlexQuery report config and throttling.
+- If an IBKR account shows no data, verify FlexQuery report config and throttling.
 
 Housekeeping
 ------------
@@ -58,6 +58,7 @@ Housekeeping
 - Keep scripts under `backend/scripts/` or remove if obsolete. Avoid standalone root-level scripts unless required.
 Docs
 ----
+- API routes overview: `backend/api/README.md`
 - See ../../docs/ARCHITECTURE.md, ../../docs/ROADMAP.md, ../../docs/STATUS.md
 - Models reference: ../../docs/MODELS.md
 - Test plan: ../../docs/TEST_PLAN.md and ../../docs/TESTS.md

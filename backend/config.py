@@ -11,10 +11,10 @@ class Settings(BaseSettings):
     # Database Configuration - using SQLite for development
     DATABASE_URL: str = "sqlite:///./quantmatrix.db"
 
-    # Redis Configuration
-    REDIS_URL: str = "redis://localhost:6379/0"
-    CELERY_BROKER_URL: str = "redis://localhost:6379/0"
-    CELERY_RESULT_BACKEND: str = "redis://localhost:6379/0"
+    # Redis Configuration (Docker defaults; override via env in non-Docker)
+    REDIS_URL: str = "redis://:redispassword@redis:6379/0"
+    CELERY_BROKER_URL: str = "redis://:redispassword@redis:6379/0"
+    CELERY_RESULT_BACKEND: str = "redis://:redispassword@redis:6379/0"
 
     # API Keys
     ALPHA_VANTAGE_API_KEY: Optional[str] = None
@@ -22,24 +22,31 @@ class Settings(BaseSettings):
     TWELVE_DATA_API_KEY: Optional[str] = None
     FMP_API_KEY: Optional[str] = None
 
-    # Tastytrade Configuration
+    # TastyTrade Configuration
     TASTYTRADE_USERNAME: Optional[str] = None
     TASTYTRADE_PASSWORD: Optional[str] = None
-    TASTYTRADE_IS_TEST: bool = True  # Match user's .env variable name
+    TASTYTRADE_IS_TEST: bool = True
+    TASTYTRADE_DISCOVER_ON_STARTUP: bool = False
 
     # IBKR Configuration
     IBKR_HOST: str = "127.0.0.1"
     IBKR_PORT: int = 7497
     IBKR_CLIENT_ID: int = 1
     IBKR_ACCOUNTS: Optional[str] = None  # Comma separated account numbers
+    IBKR_DISCOVER_ON_SEED: bool = False
     IBKR_FLEX_TOKEN: Optional[str] = None
     IBKR_FLEX_QUERY_ID: Optional[str] = None
+    IBKR_FLEX_LOOKBACK_YEARS: int = (
+        10  # Intended history window; configure FlexQuery accordingly
+    )
 
     # Schwab (optional) - comma-separated account numbers for seeding
     SCHWAB_ACCOUNTS: Optional[str] = None
     SCHWAB_CLIENT_ID: Optional[str] = None
     SCHWAB_CLIENT_SECRET: Optional[str] = None
     SCHWAB_REDIRECT_URI: Optional[str] = None
+    SCHWAB_AUTH_BASE: Optional[str] = None
+    SCHWAB_CLIENT_ID_SUFFIX: Optional[str] = None
 
     # Discord Configuration (5 separate webhooks for different purposes)
     DISCORD_WEBHOOK_SIGNALS: Optional[str] = None  # Entry/exit signals
@@ -51,6 +58,9 @@ class Settings(BaseSettings):
     # Security Configuration
     SECRET_KEY: str = "your-secret-key-here-change-in-production"
     ACCESS_TOKEN_EXPIRE_MINUTES: int = 30
+    ENCRYPTION_KEY: Optional[str] = None
+    ENABLE_TRADING: bool = False
+    SEED_ACCOUNTS_ON_STARTUP: bool = False
 
     # Application Settings
     PORT: int = 8000
@@ -62,6 +72,17 @@ class Settings(BaseSettings):
     # Logging Configuration
     LOG_LEVEL: str = "INFO"
 
+    # Market data bootstrap
+    DEFAULT_PRICE_SYMBOLS: Optional[str] = (
+        None  # Comma-separated list to prefetch on startup
+    )
+
+    # Market data provider policy and caching
+    # Values: "paid" (prefer paid providers like FMP), "free" (prefer free/fallbacks)
+    MARKET_PROVIDER_POLICY: str = "paid"
+    # Default cache TTL for market-data service (seconds)
+    MARKET_DATA_CACHE_TTL: int = 300
+
     model_config = {
         "env_file": ".env",
         "case_sensitive": True,
@@ -72,6 +93,8 @@ class Settings(BaseSettings):
 # Global settings instance
 settings = Settings()
 
+
+# Keep settings as provided; rely on .env and docker-compose. No band-aid normalization here.
 
 # Market Data Configuration
 MARKET_DATA_PROVIDERS = {"primary": "yfinance", "fallback": "alpha_vantage"}

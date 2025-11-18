@@ -12,13 +12,7 @@ from datetime import datetime
 from unittest.mock import patch
 
 from backend.database import SessionLocal
-from backend.models import (
-    BrokerAccount,
-    TaxLot,
-    Instrument,
-    Position,
-    User,
-)
+from backend.models import BrokerAccount, TaxLot, Instrument, Position, User, PortfolioSnapshot
 from backend.services.portfolio.ibkr_sync_service import IBKRSyncService
 
 
@@ -52,7 +46,7 @@ class TestIBKRSyncService:
 
         broker_account = BrokerAccount(
             user_id=test_user.id,
-            account_id="U19490886",
+            account_id="IBKR_TEST_ACCOUNT_A",
             broker=BrokerType.IBKR,
             account_type=AccountType.TAXABLE,
             sync_status=SyncStatus.SUCCESS,
@@ -151,7 +145,9 @@ class TestIBKRSyncService:
         ):
 
             # Run comprehensive sync
-            result = await sync_service.sync_comprehensive_portfolio("U19490886")
+            result = await sync_service.sync_comprehensive_portfolio(
+                "IBKR_TEST_ACCOUNT_A"
+            )
 
             # Verify sync success
             assert "error" not in result
@@ -180,7 +176,7 @@ class TestIBKRSyncService:
                 return_value=mock_flexquery_data,
             ):
 
-                result = await sync_service._sync_instruments(db, "U19490886")
+                result = await sync_service._sync_instruments(db, "IBKR_TEST_ACCOUNT_A")
 
                 # Verify result
                 assert result["synced"] == 2
@@ -210,7 +206,7 @@ class TestIBKRSyncService:
             ):
 
                 result = await sync_service._sync_tax_lots_from_flexquery(
-                    db, test_broker_account, "U19490886"
+                    db, test_broker_account, "IBKR_TEST_ACCOUNT_A"
                 )
 
                 # Verify result
@@ -428,7 +424,7 @@ class TestIBKRSyncService:
 
                 # First sync
                 await sync_service._sync_tax_lots_from_flexquery(
-                    db, test_broker_account, "U19490886"
+                    db, test_broker_account, "IBKR_TEST_ACCOUNT_A"
                 )
                 first_count = (
                     db.query(TaxLot)
@@ -438,7 +434,7 @@ class TestIBKRSyncService:
 
                 # Second sync (should clear and recreate)
                 await sync_service._sync_tax_lots_from_flexquery(
-                    db, test_broker_account, "U19490886"
+                    db, test_broker_account, "IBKR_TEST_ACCOUNT_A"
                 )
                 second_count = (
                     db.query(TaxLot)

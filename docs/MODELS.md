@@ -22,14 +22,14 @@ Core
 
 - Trade
   - Unique: (account_id, execution_id) and (account_id, order_id)
-  - Fields: symbol, side, quantity, price, executed_at, commission, exchange, contract_type
+  - Fields: symbol, side, quantity, price, executed_at, commission, exchange, asset_category
 
 - Transaction
   - Unique: (account_id, external_id) and (account_id, execution_id)
   - Fields: symbol, description, transaction_type, quantity, trade_price, amount, currency, transaction_date
 
 - TaxLot
-  - Fields: acquisition_date, quantity, cost_per_share, current_price, unrealized_pnl, is_long_term
+  - Fields: acquisition_date, quantity, cost_per_share, current_price, market_value, unrealized_pnl, is_long_term, asset_category
   - Methods: FIFO/LIFO/HIFO support in service layer
 
 - AccountBalance
@@ -37,6 +37,28 @@ Core
 
 - Signals/Alerts
   - ATR signals, portfolio alerts; Discord notifications
+
+Market Data
+-----------
+- PriceData
+  - Purpose: canonical OHLCV store for symbols (daily/intraday slices)
+  - Key: unique on (symbol, date, interval) via constraint `uq_symbol_date_interval`
+  - Fields: open_price, high_price, low_price, close_price (required), adjusted_close, volume, true_range, data_source, interval, is_adjusted, created_at
+  - Notes: backfills use ON CONFLICT DO NOTHING; missing O/H/L coalesce to Close, Volume defaults to 0
+
+- MarketAnalysisCache
+  - Purpose: compact, query-friendly latest technical snapshot per symbol
+  - Key: latest row by (symbol, analysis_type) ordered by `analysis_timestamp`
+  - Core fields: current_price, rsi, atr_value/percent/distance, SMA(20/50/100/200), EMA(10/8/21/200), MACD + signal, performance windows (1d/3d/5d/20d/60d/120d/252d/MTD/QTD/YTD)
+  - Pine metrics: pct and ATR distances to EMA(8/21/200), TD Sequential counts, gap counts, simple trendline counts
+  - Stage: `stage_label`, `stage_slope_pct`, `stage_dist_pct`
+  - Notes: `raw_analysis` JSON stores full payload; `expiry_timestamp` enables TTL; refreshed by Celery tasks
+
+- MarketAnalysisHistory
+  - Purpose: immutable daily snapshots for backtesting/analytics
+  - Unique: (symbol, analysis_type, as_of_date)
+  - Headline fields: current_price, rsi, atr_value, sma_50, macd, macd_signal
+  - Payload: `analysis_payload` JSON mirrors snapshot contents for reproducibility
 
 Constraints and Integrity
 - Enforced uniqueness on trades, transactions, and options to prevent brokerage dupes
@@ -48,7 +70,7 @@ Naming conventions (reduce confusion)
 - Use "stocks" and "options" in routes/pages; avoid the term "holdings".
 - Use "position" to refer to a position row (stock or option). For stocks: `Position`. For options: `Option`.
 - Align DTO field names across API responses:
-  - For stocks, prefer: position (quantity), average_cost, market_price, position_value, day_change.
+  - For stocks, prefer: position (quantity), average_cost, market_price, market_value, day_change.
   - For options, prefer: quantity (contracts), average_open_price, current_price, market_value.
 
 Testing Checklist per Model

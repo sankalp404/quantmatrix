@@ -63,7 +63,7 @@ async def get_option_accounts(
 @router.get("/unified/portfolio")
 async def get_unified_options_portfolio(
     account_id: Optional[str] = Query(
-        None, description="Filter by account number (e.g., U19490886)"
+        None, description="Filter by account number (e.g., IBKR_ACCOUNT)"
     ),
     user_id: Optional[int] = Query(None, description="User ID (optional)"),
     db: Session = Depends(get_db),
@@ -191,7 +191,7 @@ async def get_unified_options_portfolio(
 @router.get("/unified/summary")
 async def get_unified_options_summary(
     account_id: Optional[str] = Query(
-        None, description="Filter by account number (e.g., U19490886)"
+        None, description="Filter by account number (e.g., IBKR_ACCOUNT)"
     ),
     user_id: Optional[int] = Query(None, description="User ID (optional)"),
     db: Session = Depends(get_db),

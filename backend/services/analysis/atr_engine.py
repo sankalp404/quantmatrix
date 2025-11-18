@@ -681,7 +681,8 @@ class ATREngine:
             logger.info(f"📊 Fetching constituents for indices: {indices}")
 
             # Get all index constituents from our production service
-            all_indices_data = await index_service.get_all_tradeable_symbols(indices)
+            from backend.services.market.market_data_service import market_data_service
+            all_indices_data = await market_data_service.get_all_tradeable_symbols(indices)
 
             # Combine all symbols
             all_symbols = []

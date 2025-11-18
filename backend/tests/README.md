@@ -1,158 +1,54 @@
 # QuantMatrix V1 - Test Suite
 ============================
 
-## 📁 **Organized Test Structure**
+Scope and Structure
+-------------------
+Tests are organized to validate core APIs, models, sync services, and analytics. Heavy external dependencies are mocked; local runs accept 200/404/422/500 for smoke tests when data isn’t seeded yet.
 
+Layout (key files)
+------------------
 ```
 backend/tests/
-├── test_atr_system_complete.py      # 🏆 Main ATR test suite
-├── test_atr_validation.py           # ✅ Core ATR calculations  
-├── test_pre_rebuild_validation.py   # 🔍 Pre-rebuild checks
-├── test_database_api.py             # 🗃️ Post-rebuild validation
-├── test_ibkr_simple.py              # 📊 IBKR connection tests
-├── test_ibkr_debug.py               # 🔧 IBKR debugging
-├── conftest.py                      # ⚙️ PyTest configuration
-└── README.md                        # 📖 This file
+├── test_api_smoke.py          # Minimal health + core endpoints
+├── test_api_endpoints.py      # Portfolio + Market Data endpoint coverage
+├── test_models_uniqueness.py  # DB uniqueness constraints (Trade, Transaction, Option)
+├── test_models.py             # Model invariants/helpers
+├── test_services.py           # Service-level pure logic
+├── test_broker_sync_service.py# Broker sync orchestration (mocked)
+├── test_atr_system_complete.py# ATR engine (if enabled)
+└── conftest.py                # Pytest config/fixtures
 ```
 
-## 🧪 **Test Categories**
+What we assert now
+------------------
+- API availability and basic shapes for:
+  - `/api/v1/portfolio/live`, `/portfolio/stocks`, `/portfolio/options/...`
+  - `/api/v1/portfolio/statements`, `/portfolio/dividends`
+  - `/api/v1/market-data/prices/refresh`, `/technical/*`
+- Model dedupe constraints:
+  - `Trade(account_id, execution_id)` and fallback `(account_id, order_id)`
+  - `Transaction(account_id, external_id)` and fallback `(account_id, execution_id)`
+  - `Option(account_id, underlying_symbol, strike_price, expiry_date, option_type)`
 
-### **Core ATR Tests** (`test_atr_system_complete.py`)
-- ✅ True Range calculations (Wilder's method)
-- ✅ ATR smoothing accuracy
-- ✅ Volatility regime classification  
-- ✅ Breakout detection (2x ATR threshold)
-- ✅ Market data integration
-- ✅ Index constituents service
-- ✅ Discord notifications
-- ✅ ATR engine integration
+Conventions
+-----------
+- Keep tests systematic and concise; extend existing files instead of creating many variants.
+- Mark true integration tests with `@pytest.mark.integration` and skip in default runs.
+- Avoid hardcoding secrets or account numbers; derive from environment fixtures.
 
-### **ATR Validation** (`test_atr_validation.py`)
-- ✅ Standalone ATR calculator
-- ✅ Mathematical accuracy verification
-- ✅ Edge case handling
-- ✅ Performance testing
-
-### **Pre-Rebuild Validation** (`test_pre_rebuild_validation.py`)
-- 🔍 File structure checks
-- 🔧 Environment configuration
-- 📊 Core services validation
-- 🌍 API access verification
-- 🗃️ Database configuration
-
-### **Database & API Tests** (`test_database_api.py`)
-- 🗃️ Database operations (post-rebuild)
-- 🔌 API endpoint testing
-- 🔗 End-to-end integration
-- 📊 System validation
-
-## 🚀 **Usage**
-
-### **Single Test Runner:**
-```bash
-python3 backend/run_tests.py                # All tests
-python3 backend/run_tests.py --quick        # Core ATR only
-python3 backend/run_tests.py --discord      # Discord integration
-python3 backend/run_tests.py --integration  # Market data APIs
+Running tests
+-------------
+Inside Docker:
+```
+docker-compose exec backend bash -lc "pytest -q"
+```
+Focused:
+```
+docker-compose exec backend bash -lc "pytest -q backend/tests/test_api_endpoints.py"
 ```
 
-### **Rebuild Workflow:**
-```bash
-# 1. Pre-rebuild validation
-python3 backend/run_tests.py --pre-rebuild
-
-# 2. Fix any issues found
-# (Environment vars, table conflicts, etc.)
-
-# 3. Rebuild database
-./backend/rebuild_db_docker.sh
-
-# 4. Post-rebuild validation  
-python3 backend/run_tests.py --post-rebuild
-```
-
-### **Individual Test Files:**
-```bash
-# Core ATR tests
-python3 -m pytest backend/tests/test_atr_system_complete.py
-
-# ATR validation only
-python3 -m pytest backend/tests/test_atr_validation.py
-
-# Pre-rebuild checks
-python3 backend/tests/test_pre_rebuild_validation.py
-
-# IBKR tests
-python3 -m pytest backend/tests/test_ibkr_simple.py
-```
-
-## 🎯 **Current Status**
-
-### ✅ **Completed:**
-- Tests consolidated from 15+ scattered files
-- Single test runner implemented
-- Core ATR functionality validated
-- Discord integration working
-- Pre-rebuild validation implemented
-
-### 🔧 **Pre-Rebuild Issues Found:**
-1. **Missing Environment Variables:**
-   - `DATABASE_URL` (required)
-   - `REDIS_URL` (required)  
-   - `SECRET_KEY` (required)
-
-2. **Database Table Conflicts:**
-   - `notifications` table already defined
-   - Need to clean up duplicate model definitions
-
-3. **API Access (Optional):**
-   - Market data authentication
-   - Index constituents compatibility
-
-### 🎯 **Next Steps:**
-1. Fix environment configuration
-2. Resolve table definition conflicts
-3. Run database rebuild
-4. Execute post-rebuild validation
-5. Deploy to production!
-
-## 🏆 **Test Results**
-
-### **Quick Tests:**
-```
-✅ True Range calculation (50 values)
-✅ Wilder's ATR calculation (final: 2.353)
-✅ Volatility regime (MEDIUM, 29.7th percentile)  
-✅ Breakout detection (validated)
-```
-
-### **Discord Tests:**
-```
-✅ Webhooks configured (5/5 working)
-✅ Signal sending successful
-✅ All channels tested
-```
-
-### **Pre-Rebuild Validation:**
-```
-✅ File structure check passed
-✅ ATR calculations working
-⚠️ Environment configuration needs fixes
-⚠️ Database table conflicts need resolution
-```
-
-## 📚 **Documentation**
-
-- **Architecture:** `../ARCHITECTURE_REVIEW.md`
-- **Test Guide:** `../TEST_SUITE_GUIDE.md`  
-- **Consolidation:** `../CONSOLIDATED_SUMMARY.md`
-- **Setup:** `../setup_atr_cron.sh`
-
----
-
-## 🎉 **Achievement: From Chaos to Order**
-
-**Before:** 15+ scattered test files, redundant code, unclear structure  
-**After:** Organized test suite, single runner, clear validation workflow
-
-**Ready for production deployment after database rebuild! 🚀** 
+Next additions
+--------------
+- Options lifecycle mapping tests (buy/open, close/expire) from Trades → Options panel.
+- Market technicals persistence tests (Weinstein weekly metrics).
+- Portfolio API enrichment tests for stage/RS/MA bucket badges.

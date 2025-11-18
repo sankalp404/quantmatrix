@@ -23,6 +23,7 @@ Docs
 - Canonical docs live under `docs/`:
   - Architecture: `docs/ARCHITECTURE.md`
   - Models: `docs/MODELS.md`
+  - Market Data: `docs/MARKET_DATA.md`
   - Tests: `docs/TESTS.md`, `docs/TEST_PLAN.md`
   - Roadmap/Status: `docs/ROADMAP.md`, `docs/STATUS.md`
   - Brokers: `docs/BROKERS.md`
@@ -47,4 +48,16 @@ Naming
 - Position = equities (stocks/ETFs)
 - Option = option contracts (per-contract state)
 - Avoid “holdings” in routes and UI; use “stocks” and “options” consistently
+
+Task Flow (Celery)
+------------------
+- See `backend/tasks/README.md` for full task descriptions and schedules.
+- Daily pipeline (high level):
+  - Portfolio backfill (delta-only, ~270 bars) → `price_data`
+  - Indicator refresh (portfolio + indices) → `market_analysis_cache`
+  - Daily history snapshots → `market_analysis_history`
+  - Optional Pine metrics enrichment → latest cache row
+- Operations:
+  - Flower: http://localhost:5555 (Workers → current worker → Tasks)
+  - Provider policy: paid month prioritizes FMP; free mode prioritizes Finnhub → Twelve Data → yfinance; indicators computed locally from stored OHLCV
 

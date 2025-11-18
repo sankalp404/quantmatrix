@@ -13,7 +13,7 @@ from backend.tasks.celery_app import celery_app
 from backend.services.analysis_cache_service import analysis_cache_service
 from backend.services.polygon_service import polygon_service
 from backend.services.discord_notifier import discord_notifier
-from backend.services.market_data import market_data_service
+from backend.services.market.market_data_service import market_data_service
 from backend.services.news_service import news_service
 from backend.models import SessionLocal
 

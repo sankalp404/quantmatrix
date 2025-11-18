@@ -40,7 +40,9 @@ class TestAccountConfigService:
     def mock_settings(self):
         """Mock settings with test account data."""
         mock_settings = Mock()
-        mock_settings.IBKR_ACCOUNTS = "U19490886:TAXABLE,U15891532:IRA"
+        mock_settings.IBKR_ACCOUNTS = (
+            "IBKR_TEST_ACCOUNT_A:TAXABLE,IBKR_TEST_ACCOUNT_B:IRA"
+        )
         mock_settings.TASTYTRADE_USERNAME = "testuser@example.com"
         mock_settings.FIDELITY_ACCOUNTS = ""  # Empty for testing
         return mock_settings
@@ -60,12 +62,12 @@ class TestAccountConfigService:
         assert len(accounts) == 2
 
         # Test first account (TAXABLE)
-        assert accounts[0]["account_id"] == "U19490886"
+        assert accounts[0]["account_id"] == "IBKR_TEST_ACCOUNT_A"
         assert accounts[0]["account_type"] == AccountType.TAXABLE
         assert accounts[0]["broker"] == BrokerType.IBKR
 
         # Test second account (IRA)
-        assert accounts[1]["account_id"] == "U15891532"
+        assert accounts[1]["account_id"] == "IBKR_TEST_ACCOUNT_B"
         assert accounts[1]["account_type"] == AccountType.IRA
         assert accounts[1]["broker"] == BrokerType.IBKR
 
@@ -85,11 +87,11 @@ class TestAccountConfigService:
     def test_account_type_detection(self, account_service):
         """Test automatic account type detection from account number patterns."""
         # Test TAXABLE account (U prefix)
-        taxable_type = account_service._detect_account_type("U19490886")
+        taxable_type = account_service._detect_account_type("IBKR_TEST_ACCOUNT_A")
         assert taxable_type == AccountType.TAXABLE
 
         # Test IRA account (specific pattern)
-        ira_type = account_service._detect_account_type("U15891532")
+        ira_type = account_service._detect_account_type("IBKR_TEST_ACCOUNT_B")
         assert ira_type == AccountType.IRA
 
         # Test default case
@@ -144,7 +146,9 @@ class TestAccountConfigService:
     ):
         """Test complete broker account seeding process."""
         # Setup mock settings
-        mock_settings_patch.IBKR_ACCOUNTS = "U19490886:TAXABLE,U15891532:IRA"
+        mock_settings_patch.IBKR_ACCOUNTS = (
+            "IBKR_TEST_ACCOUNT_A:TAXABLE,IBKR_TEST_ACCOUNT_B:IRA"
+        )
         mock_settings_patch.TASTYTRADE_USERNAME = "testuser@example.com"
         mock_settings_patch.FIDELITY_ACCOUNTS = ""
 
@@ -167,14 +171,16 @@ class TestAccountConfigService:
         assert len(ibkr_accounts) == 2
 
         ibkr_taxable = next(
-            (acc for acc in ibkr_accounts if acc.account_id == "U19490886"), None
+            (acc for acc in ibkr_accounts if acc.account_id == "IBKR_TEST_ACCOUNT_A"),
+            None,
         )
         assert ibkr_taxable is not None
         assert ibkr_taxable.account_type == AccountType.TAXABLE
         assert ibkr_taxable.user_id == user.id
 
         ibkr_ira = next(
-            (acc for acc in ibkr_accounts if acc.account_id == "U15891532"), None
+            (acc for acc in ibkr_accounts if acc.account_id == "IBKR_TEST_ACCOUNT_B"),
+            None,
         )
         assert ibkr_ira is not None
         assert ibkr_ira.account_type == AccountType.IRA
@@ -219,12 +225,11 @@ class TestAccountConfigService:
         # Get the source code of the service
         source = inspect.getsource(AccountConfigService)
 
-        # Check that specific account numbers are not hardcoded
-        hardcoded_accounts = ["U19490886", "U15891532"]
-        for account_num in hardcoded_accounts:
-            assert (
-                account_num not in source
-            ), f"❌ Hardcoded account number found: {account_num}"
+        # Check that no IBKR-style account numbers are hardcoded (e.g., U########)
+        import re
+
+        found = re.findall(r"U\\d{7,}", source)
+        assert not found, f"❌ Hardcoded-looking IBKR account numbers found: {found}"
 
         print("✅ No hardcoded account numbers found - DRY principle maintained")
 

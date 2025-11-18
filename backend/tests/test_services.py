@@ -167,12 +167,11 @@ class TestIndexConstituentsService:
     async def test_index_service_import(self):
         """Test index service can be imported."""
         try:
-            from backend.services.market.index_constituents_service import index_service
+            from backend.services.market.market_data_service import market_data_service
 
-            assert index_service is not None
-            assert hasattr(index_service, "get_index_constituents")
-            assert hasattr(index_service, "get_all_tradeable_symbols")
-            assert hasattr(index_service, "get_universe_for_atr")
+            assert market_data_service is not None
+            assert hasattr(market_data_service, "get_index_constituents")
+            assert hasattr(market_data_service, "get_all_tradeable_symbols")
 
             logger.info("✅ Index Constituents Service import test passed")
 
@@ -183,9 +182,9 @@ class TestIndexConstituentsService:
     async def test_dow30_constituents(self):
         """Test getting Dow 30 constituents."""
         try:
-            from backend.services.market.index_constituents_service import index_service
+            from backend.services.market.market_data_service import market_data_service
 
-            dow30_symbols = await index_service.get_index_constituents("DOW30")
+            dow30_symbols = await market_data_service.get_index_constituents("DOW30")
 
             if dow30_symbols and len(dow30_symbols) > 10:
                 assert isinstance(dow30_symbols, list)
@@ -206,11 +205,10 @@ class TestIndexConstituentsService:
     async def test_atr_universe_generation(self):
         """Test ATR universe generation."""
         try:
-            from backend.services.market.index_constituents_service import (
-                get_atr_universe,
-            )
+            from backend.services.market.market_data_service import market_data_service
 
-            universe = await get_atr_universe()
+            data = await market_data_service.get_all_tradeable_symbols(["SP500","NASDAQ100"])  # example
+            universe = sorted({s for lst in data.values() for s in lst})
 
             if universe and len(universe) > 50:
                 assert isinstance(universe, list)

@@ -108,7 +108,7 @@ class TestIBKRClient:
         """Test successful position retrieval."""
         # Mock position data
         mock_position = Mock()
-        mock_position.account = "U19490886"
+        mock_position.account = "IBKR_TEST_ACCOUNT_A"
         mock_position.contract.symbol = "AAPL"
         mock_position.position = 100.0
         mock_position.marketValue = 15000.0
@@ -122,11 +122,11 @@ class TestIBKRClient:
         client.ib.positions.return_value = [mock_position]
 
         with patch.object(client, "_ensure_connected", return_value=True):
-            positions = await client.get_positions("U19490886")
+            positions = await client.get_positions("IBKR_TEST_ACCOUNT_A")
 
             assert len(positions) == 1
             position = positions[0]
-            assert position["account"] == "U19490886"
+            assert position["account"] == "IBKR_TEST_ACCOUNT_A"
             assert position["symbol"] == "AAPL"
             assert position["position"] == 100.0
             assert position["market_value"] == 15000.0
@@ -140,7 +140,7 @@ class TestIBKRClient:
     async def test_get_positions_no_connection(self, client):
         """Test position retrieval when not connected."""
         with patch.object(client, "_ensure_connected", return_value=False):
-            positions = await client.get_positions("U19490886")
+            positions = await client.get_positions("IBKR_TEST_ACCOUNT_A")
             assert positions == []
 
     @pytest.mark.asyncio
@@ -149,10 +149,10 @@ class TestIBKRClient:
         # Mock position data with zero position
         mock_position_zero = Mock()
         mock_position_zero.position = 0.0
-        mock_position_zero.account = "U19490886"
+        mock_position_zero.account = "IBKR_TEST_ACCOUNT_A"
 
         mock_position_nonzero = Mock()
-        mock_position_nonzero.account = "U19490886"
+        mock_position_nonzero.account = "IBKR_TEST_ACCOUNT_A"
         mock_position_nonzero.contract.symbol = "AAPL"
         mock_position_nonzero.position = 100.0
         mock_position_nonzero.marketValue = 15000.0
@@ -166,7 +166,7 @@ class TestIBKRClient:
         client.ib.positions.return_value = [mock_position_zero, mock_position_nonzero]
 
         with patch.object(client, "_ensure_connected", return_value=True):
-            positions = await client.get_positions("U19490886")
+            positions = await client.get_positions("IBKR_TEST_ACCOUNT_A")
 
             # Should only return non-zero positions
             assert len(positions) == 1
@@ -176,7 +176,7 @@ class TestIBKRClient:
     async def test_get_positions_handles_none_values(self, client):
         """Test that None values in position data are handled gracefully."""
         mock_position = Mock()
-        mock_position.account = "U19490886"
+        mock_position.account = "IBKR_TEST_ACCOUNT_A"
         mock_position.contract.symbol = "AAPL"
         mock_position.position = 100.0
         mock_position.marketValue = None  # None value
@@ -190,7 +190,7 @@ class TestIBKRClient:
         client.ib.positions.return_value = [mock_position]
 
         with patch.object(client, "_ensure_connected", return_value=True):
-            positions = await client.get_positions("U19490886")
+            positions = await client.get_positions("IBKR_TEST_ACCOUNT_A")
 
             assert len(positions) == 1
             position = positions[0]
@@ -253,7 +253,7 @@ class TestIBKRClient:
         client.ib.positions.side_effect = Exception("API Error")
 
         with patch.object(client, "_ensure_connected", return_value=True):
-            positions = await client.get_positions("U19490886")
+            positions = await client.get_positions("IBKR_TEST_ACCOUNT_A")
             assert positions == []
 
 
@@ -274,7 +274,7 @@ class TestIBKRClientIntegration:
             assert client.ib is not None
 
             # Test getting positions
-            positions = await client.get_positions("U19490886")
+            positions = await client.get_positions("IBKR_TEST_ACCOUNT_A")
             assert isinstance(positions, list)
 
             # Clean up
@@ -293,7 +293,7 @@ class TestIBKRClientIntegration:
             pytest.skip("IBKR TWS/Gateway not available")
 
         try:
-            positions = await client.get_positions("U19490886")
+            positions = await client.get_positions("IBKR_TEST_ACCOUNT_A")
 
             if positions:
                 # Verify structure of real position data

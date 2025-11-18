@@ -24,7 +24,7 @@ async def get_statements(
     days: int = Query(30, ge=1, le=3650),
     user_id: Optional[int] = Query(None, description="User ID (optional)"),
     account_id: Optional[str] = Query(
-        None, description="Filter by account number (e.g., U19490886)"
+        None, description="Filter by account number (e.g., IBKR_ACCOUNT)"
     ),
     db: Session = Depends(get_db),
 ) -> Dict[str, Any]:

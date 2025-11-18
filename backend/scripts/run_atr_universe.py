@@ -38,7 +38,7 @@ import json
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", ".."))
 
 from backend.services.analysis.atr_engine import atr_engine
-from backend.services.market.index_constituents_service import index_service
+from backend.services.market.market_data_service import market_data_service
 from backend.services.signals.atr_signal_generator import atr_signal_generator
 
 # Configure logging
@@ -142,7 +142,7 @@ class ATRUniverseProcessor:
             logger.info(f"🌍 Fetching stock universe from live APIs: {self.indices}")
 
             # Get universe from index service
-            all_indices = await index_service.get_all_tradeable_symbols(self.indices)
+            all_indices = await market_data_service.get_all_tradeable_symbols(self.indices)
 
             # Combine all symbols
             all_symbols = []

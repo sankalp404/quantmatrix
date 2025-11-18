@@ -19,6 +19,7 @@ from datetime import datetime
 from backend.services.clients.ibkr_flexquery_client import IBKRFlexQueryClient
 
 
+@pytest.mark.no_db
 class TestIBKRFlexQueryClient:
     """Test suite for IBKRFlexQueryClient."""
 
@@ -33,27 +34,27 @@ class TestIBKRFlexQueryClient:
         return """<?xml version="1.0" encoding="UTF-8"?>
         <FlexQueryResponse queryName="Test" type="AF">
             <FlexStatements count="1">
-                <FlexStatement accountId="U19490886" period="Last365CalendarDays">
+                <FlexStatement accountId="IBKR_TEST_ACCOUNT_A" period="Last365CalendarDays">
                     <AccountInformation>
-                        <AccountInformation accountId="U19490886" currency="USD" />
+                        <AccountInformation accountId="IBKR_TEST_ACCOUNT_A" currency="USD" />
                     </AccountInformation>
                     <OpenPositions>
-                        <OpenPosition accountId="U19490886" symbol="AAPL" position="100" markPrice="150.0" />
+                        <OpenPosition accountId="IBKR_TEST_ACCOUNT_A" symbol="AAPL" position="100" markPrice="150.0" />
                     </OpenPositions>
                     <Trades>
-                        <Trade accountId="U19490886" symbol="AAPL" quantity="100" tradePrice="149.0" tradeDate="20240115" tradeID="123456" assetCategory="STK" />
+                        <Trade accountId="IBKR_TEST_ACCOUNT_A" symbol="AAPL" quantity="100" tradePrice="149.0" tradeDate="20240115" tradeID="123456" assetCategory="STK" />
                     </Trades>
                     <OptionEAE>
-                        <OptionEAE accountId="U19490886" symbol="AAPL240315C150" underlyingSymbol="AAPL" putCall="C" strike="150" expiry="20240315" exercisedQuantity="1" />
+                        <OptionEAE accountId="IBKR_TEST_ACCOUNT_A" symbol="AAPL240315C150" underlyingSymbol="AAPL" putCall="C" strike="150" expiry="20240315" exercisedQuantity="1" />
                     </OptionEAE>
                     <CashTransactions>
-                        <CashTransaction accountId="U19490886" symbol="AAPL" type="Dividends" amount="50.0" />
+                        <CashTransaction accountId="IBKR_TEST_ACCOUNT_A" symbol="AAPL" type="Dividends" amount="50.0" />
                     </CashTransactions>
                     <InterestAccruals>
-                        <InterestAccrual accountId="U19490886" currency="USD" fromDate="20240101" toDate="20240131" rate="5.5" />
+                        <InterestAccrual accountId="IBKR_TEST_ACCOUNT_A" currency="USD" fromDate="20240101" toDate="20240131" rate="5.5" />
                     </InterestAccruals>
                     <Transfers>
-                        <Transfer accountId="U19490886" symbol="AAPL" quantity="50" direction="IN" />
+                        <Transfer accountId="IBKR_TEST_ACCOUNT_A" symbol="AAPL" quantity="50" direction="IN" />
                     </Transfers>
                 </FlexStatement>
             </FlexStatements>
@@ -78,7 +79,9 @@ class TestIBKRFlexQueryClient:
 
             client = IBKRFlexQueryClient()
             # Since direct credentials are set, they should take precedence
-            assert client.token == "205375653752966209211660"
+            assert (
+                client.token == "test_token"
+            )  # todo: Sankalp has real token 205375653752966209211660
 
     @pytest.mark.asyncio
     async def test_request_report_success(self, client):
@@ -150,19 +153,21 @@ class TestIBKRFlexQueryClient:
 
     def test_parse_tax_lots(self, client, sample_flexquery_xml):
         """Test tax lots parsing from FlexQuery XML."""
-        tax_lots = client._parse_tax_lots(sample_flexquery_xml, "U19490886")
+        tax_lots = client._parse_tax_lots(sample_flexquery_xml, "IBKR_TEST_ACCOUNT_A")
 
         assert len(tax_lots) >= 1
         tax_lot = tax_lots[0]
         assert tax_lot["symbol"] == "AAPL"
-        assert tax_lot["account_id"] == "U19490886"
+        assert tax_lot["account_id"] == "IBKR_TEST_ACCOUNT_A"
         assert "quantity" in tax_lot
         assert "cost_basis" in tax_lot
         assert "contract_type" in tax_lot
 
     def test_parse_option_exercises(self, client, sample_flexquery_xml):
         """Test option exercises parsing from OptionEAE section."""
-        exercises = client._parse_option_exercises(sample_flexquery_xml, "U19490886")
+        exercises = client._parse_option_exercises(
+            sample_flexquery_xml, "IBKR_TEST_ACCOUNT_A"
+        )
 
         assert len(exercises) >= 1
         exercise = exercises[0]
@@ -174,7 +179,9 @@ class TestIBKRFlexQueryClient:
 
     def test_parse_option_positions(self, client, sample_flexquery_xml):
         """Test option positions parsing from OpenPositions section."""
-        positions = client._parse_option_positions(sample_flexquery_xml, "U19490886")
+        positions = client._parse_option_positions(
+            sample_flexquery_xml, "IBKR_TEST_ACCOUNT_A"
+        )
 
         # This sample doesn't have options in OpenPositions, so should be empty
         assert len(positions) == 0
@@ -195,7 +202,7 @@ class TestIBKRFlexQueryClient:
         client.token = None
         client.query_id = None
 
-        result = await client.get_official_tax_lots("U19490886")
+        result = await client.get_official_tax_lots("IBKR_TEST_ACCOUNT_A")
         assert result == []
 
     @pytest.mark.asyncio
@@ -207,7 +214,7 @@ class TestIBKRFlexQueryClient:
             patch("asyncio.sleep"),
         ):
 
-            result = await client.get_official_tax_lots("U19490886")
+            result = await client.get_official_tax_lots("IBKR_TEST_ACCOUNT_A")
             assert len(result) >= 1
             assert result[0]["symbol"] == "AAPL"
 
@@ -222,7 +229,7 @@ class TestIBKRFlexQueryClient:
             patch("asyncio.sleep"),
         ):
 
-            result = await client.get_historical_option_exercises("U19490886")
+            result = await client.get_historical_option_exercises("IBKR_TEST_ACCOUNT_A")
             assert len(result) >= 1
             assert result[0]["symbol"] == "AAPL240315C150"
 
@@ -247,10 +254,10 @@ class TestIBKRFlexQueryClient:
         """Test XML parsing handles malformed XML gracefully."""
         malformed_xml = "<invalid>xml<structure>"
 
-        result = client._parse_tax_lots(malformed_xml, "U19490886")
+        result = client._parse_tax_lots(malformed_xml, "IBKR_TEST_ACCOUNT_A")
         assert result == []
 
-        result = client._parse_option_exercises(malformed_xml, "U19490886")
+        result = client._parse_option_exercises(malformed_xml, "IBKR_TEST_ACCOUNT_A")
         assert result == []
 
     def test_account_filtering(self, client):
@@ -258,20 +265,20 @@ class TestIBKRFlexQueryClient:
         multi_account_xml = """<?xml version="1.0" encoding="UTF-8"?>
         <FlexQueryResponse>
             <FlexStatements>
-                <FlexStatement accountId="U19490886">
+                <FlexStatement accountId="IBKR_TEST_ACCOUNT_A">
                     <Trades>
-                        <Trade accountId="U19490886" symbol="AAPL" quantity="100" tradePrice="149.0" tradeDate="20240115" tradeID="123456" assetCategory="STK" />
-                        <Trade accountId="U15891532" symbol="MSFT" quantity="50" tradePrice="250.0" tradeDate="20240115" tradeID="123457" assetCategory="STK" />
+                        <Trade accountId="IBKR_TEST_ACCOUNT_A" symbol="AAPL" quantity="100" tradePrice="149.0" tradeDate="20240115" tradeID="123456" assetCategory="STK" />
+                        <Trade accountId="IBKR_TEST_ACCOUNT_B" symbol="MSFT" quantity="50" tradePrice="250.0" tradeDate="20240115" tradeID="123457" assetCategory="STK" />
                     </Trades>
                 </FlexStatement>
             </FlexStatements>
         </FlexQueryResponse>"""
 
         # Should only return trades for the specified account
-        tax_lots = client._parse_tax_lots(multi_account_xml, "U19490886")
+        tax_lots = client._parse_tax_lots(multi_account_xml, "IBKR_TEST_ACCOUNT_A")
         assert len(tax_lots) >= 1
         for lot in tax_lots:
-            assert lot["account_id"] == "U19490886"
+            assert lot["account_id"] == "IBKR_TEST_ACCOUNT_A"
             assert lot["symbol"] == "AAPL"  # Should not include MSFT from other account
 
 
@@ -307,7 +314,7 @@ class TestIBKRFlexQueryClientIntegration:
         if not client.token or not client.query_id:
             pytest.skip("FlexQuery credentials not configured")
 
-        tax_lots = await client.get_official_tax_lots("U19490886")
+        tax_lots = await client.get_official_tax_lots("IBKR_TEST_ACCOUNT_A")
 
         # Should return list (may be empty if no positions)
         assert isinstance(tax_lots, list)

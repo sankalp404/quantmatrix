@@ -51,7 +51,7 @@ class TestBrokerSyncService:
         """Create test IBKR broker account."""
         account = BrokerAccount(
             user_id=test_user.id,
-            account_id="U19490886",
+            account_id="IBKR_TEST_ACCOUNT_A",
             broker=BrokerType.IBKR,
             account_type=AccountType.TAXABLE,
             sync_status=SyncStatus.PENDING,
@@ -238,12 +238,14 @@ class TestBrokerSyncService:
             }
 
             # Execute sync
-            broker_sync_service.sync_account(test_ibkr_account.account_id, db_session)
+            broker_sync_service.sync_account(
+                test_ibkr_account.account_number, db_session
+            )
 
             # Verify status was updated
             db_session.refresh(test_ibkr_account)
             assert test_ibkr_account.sync_status == SyncStatus.SUCCESS
-            assert test_ibkr_account.last_sync_at is not None
+            assert test_ibkr_account.last_successful_sync is not None
 
         print("✅ Account sync status update working correctly")
 
@@ -263,7 +265,7 @@ class TestBrokerSyncService:
 
             # Execute sync - should handle error gracefully
             result = broker_sync_service.sync_account(
-                test_ibkr_account.account_id, db_session
+                test_ibkr_account.account_number, db_session
             )
 
             # Verify error was handled

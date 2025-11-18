@@ -91,9 +91,12 @@ import {
   FiArrowDown,
 } from 'react-icons/fi';
 import { portfolioApi } from '../services/api';
+import useFlexQuery from '../hooks/useFlexQuery';
 import SortableTable, { Column } from '../components/SortableTable';
 import AccountFilterWrapper from '../components/AccountFilterWrapper';
 import { transformPortfolioToAccounts } from '../hooks/useAccountFilter';
+import EmptyState from '../components/ui/EmptyState';
+import { useAccountContext } from '../context/AccountContext';
 
 interface OptionPosition {
   id: string;
@@ -396,6 +399,7 @@ const UnderlyingCard: React.FC<{
 };
 
 const OptionsPortfolio: React.FC = () => {
+  const { selected, setSelected } = useAccountContext();
   const [portfolioData, setPortfolioData] = useState<any>(null);
   const [positions, setPositions] = useState<OptionPosition[]>([]);
   const [summary, setSummary] = useState<OptionsSummary | null>(null);
@@ -412,10 +416,13 @@ const OptionsPortfolio: React.FC = () => {
   const cardBg = useColorModeValue('white', 'gray.800');
   const borderColor = useColorModeValue('gray.200', 'gray.600');
   const toast = useToast();
+  const { status: flexStatus, loading: flexLoading, error: flexError, refresh: refreshFlex, syncTaxLots } = useFlexQuery();
 
   useEffect(() => {
-    fetchOptionsData();
-  }, []);
+    const param = selected === 'all' || selected === 'taxable' || selected === 'ira' ? undefined : selected;
+    fetchOptionsData(param);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [selected]);
 
   const fetchOptionsData = async (selectedAccount?: string) => {
     setLoading(true);
@@ -425,24 +432,10 @@ const OptionsPortfolio: React.FC = () => {
       const portfolioResult = await portfolioApi.getLive();
       setPortfolioData(portfolioResult.data);
 
-      // Build URLs with optional account filtering
-      const portfolioUrl = selectedAccount
-        ? `/api/v1/options/unified/portfolio?account_id=${selectedAccount}`
-        : '/api/v1/options/unified/portfolio';
-
-      const summaryUrl = selectedAccount
-        ? `/api/v1/options/unified/summary?account_id=${selectedAccount}`
-        : '/api/v1/options/unified/summary';
-
-      // Fetch options data using enhanced API with account filtering
-      const [optionsPortfolioResponse, optionsSummaryResponse] = await Promise.all([
-        fetch(portfolioUrl),
-        fetch(summaryUrl),
-      ]);
-
+      // Fetch options data using unified API with account filtering (axios baseURL aware)
       const [optionsPortfolioResult, optionsSummaryResult] = await Promise.all([
-        optionsPortfolioResponse.json(),
-        optionsSummaryResponse.json(),
+        (await fetch(selectedAccount ? `/api/v1/portfolio/options/unified/portfolio?account_id=${selectedAccount}` : '/api/v1/portfolio/options/unified/portfolio')).json(),
+        (await fetch(selectedAccount ? `/api/v1/portfolio/options/unified/summary?account_id=${selectedAccount}` : '/api/v1/portfolio/options/unified/summary')).json(),
       ]);
 
       if (optionsPortfolioResult.status === 'success') {
@@ -673,6 +666,16 @@ const OptionsPortfolio: React.FC = () => {
   return (
     <Container maxW="container.xl" py={8}>
       <VStack spacing={6} align="stretch">
+        {/* Empty state for no positions */}
+        {positions.length === 0 && (
+          <EmptyState
+            icon={FiTarget}
+            title="No options positions found"
+            description="We couldn’t find any open options in your FlexQuery report. Ensure your Activity Flex Query includes the Open Positions section with derivatives and quantity fields enabled. Once updated, run the sync again."
+            action={{ label: 'Refresh', onClick: handleRefresh }}
+            secondaryAction={{ label: 'Open API Docs', onClick: () => window.open('/docs', '_blank') }}
+          />
+        )}
         {/* Header */}
         <Box>
           <HStack justify="space-between" mb={4}>
@@ -681,10 +684,45 @@ const OptionsPortfolio: React.FC = () => {
               <Text color="gray.600">
                 {positions.length} total positions • {Object.keys(underlyings).length} underlyings
               </Text>
+              {/* FlexQuery status badge */}
+              {flexStatus && (
+                <HStack>
+                  <Badge colorScheme={flexStatus.configured ? 'green' : 'yellow'}>
+                    FlexQuery: {flexStatus.configured ? 'Configured' : 'Setup Required'}
+                  </Badge>
+                  {!flexStatus.configured && (
+                    <Tooltip label="Open backend /docs to configure FlexQuery token & query id">
+                      <InfoIcon color="gray.500" />
+                    </Tooltip>
+                  )}
+                </HStack>
+              )}
             </VStack>
             <HStack spacing={3}>
               <Button leftIcon={<RepeatIcon />} size="sm" variant="outline" onClick={handleRefresh}>
                 Refresh
+              </Button>
+              <Button
+                size="sm"
+                variant="solid"
+                colorScheme="blue"
+                isLoading={flexLoading}
+                onClick={async () => {
+                  try {
+                    const account = selectedAccountSSR || accounts?.[0]?.account_id;
+                    if (!account) {
+                      toast({ title: 'No account selected', status: 'warning' });
+                      return;
+                    }
+                    const res: any = await syncTaxLots(account);
+                    toast({ title: res?.message || 'Tax lots synced', status: res?.success ? 'success' : 'info' });
+                    refreshFlex();
+                  } catch (e: any) {
+                    toast({ title: e?.message || 'Sync failed', status: 'error' });
+                  }
+                }}
+              >
+                Sync Official Tax Lots
               </Button>
               <Button leftIcon={<DownloadIcon />} size="sm" variant="outline">
                 Export
@@ -705,10 +743,13 @@ const OptionsPortfolio: React.FC = () => {
             showAllOption: true,
             showSummary: true,
             variant: 'detailed',
-            size: 'md'
+            size: 'md',
+            // default to first account
+            defaultSelection: selected || (accounts.length > 0 ? accounts[0].account_id : 'all')
           }}
           onAccountChange={(accountId) => {
-            const param = accountId === 'all' ? undefined : accountId;
+            setSelected(accountId as any);
+            const param = accountId === 'all' || accountId === 'taxable' || accountId === 'ira' ? undefined : accountId;
             setSelectedAccountSSR(param);
             fetchOptionsData(param);
           }}

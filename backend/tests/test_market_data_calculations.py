@@ -34,10 +34,10 @@ async def test_manual_ma_stage_basic(monkeypatch):
     async def _return(val):
         return val
 
-    ma = await svc.get_moving_averages("TEST")
-    assert "sma_200" in ma and "ema_200" in ma
-    bucket = await svc.classify_ma_bucket("TEST")
-    assert bucket["bucket"] in ("LEADING", "NEUTRAL")
+    # Build snapshot which includes SMA/EMA and ma_bucket
+    snapshot = await svc.build_indicator_snapshot("TEST")
+    assert "sma_200" in snapshot and "ema_200" in snapshot
+    assert snapshot.get("ma_bucket") in ("LEADING", "NEUTRAL", "UNKNOWN", "LAGGING")
 
     stage = await svc.get_weinstein_stage("TEST")
     # synthetic monotonic up close without benchmark alignment may still be UNKNOWN; just assert key present

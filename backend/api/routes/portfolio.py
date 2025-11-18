@@ -7,8 +7,9 @@ AFTER: Clean, focused endpoints with proper separation of concerns
 """
 
 from fastapi import APIRouter, Depends, HTTPException, Query
+from pydantic import BaseModel
 from sqlalchemy.orm import Session
-from typing import List, Optional, Dict, Any
+from typing import Optional, Dict, Any
 import logging
 from datetime import datetime, timedelta
 
@@ -16,6 +17,7 @@ from datetime import datetime, timedelta
 from backend.database import get_db
 from backend.models.user import User
 from backend.services.portfolio.ibkr_sync_service import IBKRSyncService
+from backend.models import BrokerAccount
 
 # Auth dependency (to be implemented)
 from backend.api.dependencies import get_current_user
@@ -23,6 +25,11 @@ from backend.api.dependencies import get_current_user
 logger = logging.getLogger(__name__)
 
 router = APIRouter()
+
+
+class FlexSyncRequest(BaseModel):
+    account_id: str
+
 
 # =============================================================================
 # PORTFOLIO SUMMARY ENDPOINTS (Clean & Focused)
@@ -116,6 +123,7 @@ async def get_portfolio_performance(
 @router.get("/tax-lots")
 async def get_tax_lots(
     symbol: Optional[str] = Query(None, description="Filter by symbol"),
+    account_id: Optional[str] = Query(None, description="Filter by account number"),
     user: User = Depends(get_current_user),
     db: Session = Depends(get_db),
 ) -> Dict[str, Any]:
@@ -127,26 +135,49 @@ async def get_tax_lots(
         from backend.services.portfolio.tax_lot_service import TaxLotService
 
         tls = TaxLotService(db)
-        tax_lots_models = await tls.get_tax_lots_for_user(user.id, symbol=symbol)
+        tax_lots_models = []
+        if account_id:
+            # Map human account_number to internal broker_account.id
+            acc = (
+                db.query(BrokerAccount)
+                .filter(
+                    BrokerAccount.user_id == user.id,
+                    BrokerAccount.account_number == account_id,
+                )
+                .first()
+            )
+            if not acc:
+                raise HTTPException(status_code=404, detail="Account not found")
+            tax_lots_models = await tls.get_tax_lots_for_account(
+                user.id, acc.id, symbol=symbol
+            )
+        else:
+            tax_lots_models = await tls.get_tax_lots_for_user(user.id, symbol=symbol)
         # Serialize for JSON
-        tax_lots = [
-            {
-                "lot_id": tl.id,
-                "symbol": tl.symbol,
-                "quantity": float(tl.remaining_quantity),
-                "cost_per_share": float(tl.cost_per_share),
-                "acquisition_date": (
-                    tl.acquisition_date.isoformat() if tl.acquisition_date else None
-                ),
-                "days_held": tl.days_held,
-                "is_long_term": tl.is_long_term,
-            }
-            for tl in tax_lots_models
-        ]
+        tax_lots = []
+        for tl in tax_lots_models:
+            tax_lots.append(
+                {
+                    "lot_id": tl.id,
+                    "symbol": tl.symbol,
+                    "quantity": float(tl.quantity or 0),
+                    "cost_per_share": (
+                        float(tl.cost_per_share or 0)
+                        if tl.cost_per_share is not None
+                        else 0
+                    ),
+                    "acquisition_date": (
+                        tl.acquisition_date.isoformat() if tl.acquisition_date else None
+                    ),
+                    "days_held": getattr(tl, "holding_period_days", 0),
+                    "is_long_term": bool(getattr(tl, "is_long_term", False)),
+                }
+            )
 
         return {
             "user_id": user.id,
             "symbol_filter": symbol,
+            "account_filter": account_id,
             "tax_lots": tax_lots,
             "total_lots": len(tax_lots),
             "timestamp": datetime.now().isoformat(),
@@ -336,7 +367,7 @@ async def get_flexquery_status(
 
 @router.post("/flexquery/sync-tax-lots")
 async def sync_official_tax_lots(
-    account_id: str,
+    payload: FlexSyncRequest,
     user: User = Depends(get_current_user),
     db: Session = Depends(get_db),
 ) -> Dict[str, Any]:
@@ -348,7 +379,9 @@ async def sync_official_tax_lots(
         from backend.services.clients.ibkr_flexquery_client import flexquery_client
 
         # Get official tax lots from IBKR
-        official_tax_lots = await flexquery_client.get_official_tax_lots(account_id)
+        official_tax_lots = await flexquery_client.get_official_tax_lots(
+            payload.account_id
+        )
 
         if not official_tax_lots:
             return {
@@ -357,15 +390,31 @@ async def sync_official_tax_lots(
                 "tax_lots_synced": 0,
             }
 
-        # TODO: Save to database (implement when TaxLotService is ready)
-        # tax_lot_service = TaxLotService(db)
-        # await tax_lot_service.sync_official_tax_lots(user.id, official_tax_lots)
+        # Persist to DB
+        from backend.services.portfolio.tax_lot_service import TaxLotService
+        from backend.models.broker_account import BrokerAccount
+
+        broker_account = (
+            db.query(BrokerAccount)
+            .filter(
+                BrokerAccount.user_id == user.id,
+                BrokerAccount.account_number == payload.account_id,
+            )
+            .first()
+        )
+        if not broker_account:
+            raise HTTPException(status_code=404, detail="Broker account not found")
+
+        tls = TaxLotService(db)
+        result = await tls.sync_official_tax_lots(
+            user.id, broker_account, official_tax_lots
+        )
 
         return {
             "success": True,
-            "message": f"Successfully retrieved {len(official_tax_lots)} official tax lots",
-            "tax_lots_synced": len(official_tax_lots),
-            "account_id": account_id,
+            "message": f"Synced {result['total']} official tax lots",
+            "synced": result,
+            "account_id": payload.account_id,
             "source": "ibkr_flexquery_official",
         }
 
@@ -558,360 +607,3 @@ async def get_performance_metrics(
     except Exception as e:
         logger.error(f"❌ Performance metrics error: {e}")
         raise HTTPException(status_code=500, detail=str(e))
-
-
-"""
-Portfolio API Routes
-===================
-
-Enhanced portfolio management endpoints with comprehensive analytics.
-"""
-
-from fastapi import APIRouter, Depends, Query
-from sqlalchemy.orm import Session
-from typing import Optional, Dict, Any
-
-from backend.database import get_db
-from backend.models import TaxLot, Position, BrokerAccount
-from backend.services.clients.ibkr_flexquery_client import IBKRFlexQueryClient
-
-router = APIRouter()
-
-
-@router.get("/analytics/{account_id}")
-async def get_portfolio_analytics(
-    account_id: str, db: Session = Depends(get_db)
-) -> Dict[str, Any]:
-    """
-    Get comprehensive portfolio analytics for an account.
-
-    Returns position summary, tax lot breakdown, performance metrics,
-    and portfolio composition analysis.
-    """
-    # Get account
-    account = db.query(BrokerAccount).filter_by(account_number=account_id).first()
-    if not account:
-        raise HTTPException(status_code=404, detail="Account not found")
-
-    # Get positions
-    positions = db.query(Position).filter_by(account_id=account.id).all()
-    tax_lots = db.query(TaxLot).filter_by(account_id=account_id).all()
-
-    # Calculate summary metrics
-    total_cost_basis = sum(position.total_cost_basis for position in positions)
-    total_shares = sum(position.quantity for position in positions)
-    total_market_value = sum(position.market_value or 0 for position in positions)
-    total_unrealized_pnl = (
-        total_market_value - total_cost_basis if total_market_value > 0 else 0
-    )
-
-    # Positions by symbol
-    positions_data = []
-    for position in positions:
-        positions_data.append(
-            {
-                "symbol": position.symbol,
-                "quantity": float(position.quantity),
-                "average_cost": float(position.average_cost),
-                "current_price": float(position.current_price or 0),
-                "cost_basis": float(position.total_cost_basis),
-                "market_value": float(position.market_value or 0),
-                "unrealized_pnl": float(position.unrealized_pnl or 0),
-                "unrealized_pnl_pct": float(position.unrealized_pnl_pct or 0),
-                "day_pnl": float(position.day_pnl or 0),
-                "sector": position.sector,
-                "industry": position.industry,
-                "first_acquired": (
-                    position.created_at.isoformat() if position.created_at else None
-                ),
-            }
-        )
-
-    # Tax lot breakdown
-    tax_lot_summary = {}
-    for lot in tax_lots:
-        symbol = lot.symbol
-        if symbol not in tax_lot_summary:
-            tax_lot_summary[symbol] = []
-
-        tax_lot_summary[symbol].append(
-            {
-                "lot_id": lot.lot_id,
-                "quantity": float(lot.original_quantity),
-                "cost_basis": float(lot.cost_basis),
-                "acquisition_date": (
-                    lot.acquisition_date.isoformat() if lot.acquisition_date else None
-                ),
-                "tax_method": lot.tax_method.value if lot.tax_method else "FIFO",
-                "days_held": lot.days_held,
-            }
-        )
-
-        return {
-            "account": {
-                "account_number": account.account_number,
-                "account_name": account.account_name,
-                "account_type": account.account_type,
-            },
-            "summary": {
-                "total_positions": len(positions),
-                "total_shares": float(total_shares),
-                "total_cost_basis": float(total_cost_basis),
-                "total_market_value": float(total_market_value),
-                "total_unrealized_pnl": float(total_unrealized_pnl),
-                "total_unrealized_pnl_pct": (
-                    float(total_unrealized_pnl / total_cost_basis * 100)
-                    if total_cost_basis > 0
-                    else 0
-                ),
-                "total_tax_lots": len(tax_lots),
-            },
-            "positions": positions_data,
-            "tax_lots": tax_lot_summary,
-            "last_updated": datetime.utcnow().isoformat(),
-        }
-
-
-@router.get("/positions/{account_id}")
-async def get_account_positions(
-    account_id: str, db: Session = Depends(get_db)
-) -> List[Dict[str, Any]]:
-    """Get all positions for a specific account with current market data."""
-
-    account = db.query(BrokerAccount).filter_by(account_number=account_id).first()
-    if not account:
-        raise HTTPException(status_code=404, detail="Account not found")
-
-    positions = db.query(Position).filter_by(account_id=account.id).all()
-
-    positions_data = []
-    for position in positions:
-        positions_data.append(
-            {
-                "symbol": position.symbol,
-                "quantity": float(position.quantity),
-                "average_cost": float(position.average_cost),
-                "current_price": float(position.current_price or 0),
-                "market_value": float(position.market_value or 0),
-                "cost_basis": float(position.total_cost_basis),
-                "unrealized_pnl": float(position.unrealized_pnl or 0),
-                "unrealized_pnl_pct": float(position.unrealized_pnl_pct or 0),
-                "day_pnl": float(position.day_pnl or 0),
-                "day_pnl_pct": float(position.day_pnl_pct or 0),
-                "sector": position.sector,
-                "industry": position.industry,
-                "market_cap": position.market_cap,
-                "margin_priority": position.margin_priority,
-                "custom_category": position.custom_category,
-                "notes": position.notes,
-                "created_at": (
-                    position.created_at.isoformat() if position.created_at else None
-                ),
-                "updated_at": (
-                    position.updated_at.isoformat() if position.updated_at else None
-                ),
-            }
-        )
-
-    return positions_data
-
-
-@router.get("/tax-lots/{account_id}")
-async def get_account_tax_lots(
-    account_id: str,
-    symbol: Optional[str] = Query(None, description="Filter by specific symbol"),
-    db: Session = Depends(get_db),
-) -> List[Dict[str, Any]]:
-    """Get tax lots for an account, optionally filtered by symbol."""
-
-    query = db.query(TaxLot).filter_by(account_id=account_id)
-    if symbol:
-        query = query.filter_by(symbol=symbol)
-
-    tax_lots = query.all()
-
-    tax_lots_data = []
-    for lot in tax_lots:
-        tax_lots_data.append(
-            {
-                "lot_id": lot.lot_id,
-                "symbol": lot.symbol,
-                "quantity": float(lot.original_quantity),
-                "cost_basis": float(lot.cost_basis),
-                "acquisition_date": (
-                    lot.acquisition_date.isoformat() if lot.acquisition_date else None
-                ),
-                "current_price": float(lot.current_price or 0),
-                "current_value": float(lot.current_value or 0),
-                "unrealized_pnl": float(lot.unrealized_pnl or 0),
-                "unrealized_pnl_pct": float(lot.unrealized_pnl_pct or 0),
-                "days_held": lot.days_held,
-                "tax_method": lot.tax_method.value if lot.tax_method else "FIFO",
-                "source": lot.source.value if lot.source else "UNKNOWN",
-                "created_at": lot.created_at.isoformat() if lot.created_at else None,
-            }
-        )
-
-    return tax_lots_data
-
-
-@router.post("/sync/{account_id}")
-async def sync_portfolio_data(
-    account_id: str, db: Session = Depends(get_db)
-) -> Dict[str, Any]:
-    """Trigger portfolio data sync from broker for specified account."""
-
-    account = db.query(BrokerAccount).filter_by(account_number=account_id).first()
-    if not account:
-        raise HTTPException(status_code=404, detail="Account not found")
-
-    try:
-        # Initialize FlexQuery client for IBKR data
-        client = IBKRFlexQueryClient()
-
-        # Get fresh tax lots data
-        tax_lots_data = await client.get_official_tax_lots(account_id)
-
-        if tax_lots_data:
-            # Clear existing data
-            db.query(TaxLot).filter_by(account_id=account_id).delete()
-            db.query(Position).filter_by(account_id=account.id).delete()
-
-            # Import fresh tax lots
-            imported_count = 0
-            for i, lot_data in enumerate(tax_lots_data):
-                tax_lot = TaxLot(
-                    account_id=account_id,
-                    lot_id=f"SYNC_{lot_data.get('symbol')}_{i+1}",
-                    symbol=lot_data.get("symbol"),
-                    original_quantity=float(lot_data.get("quantity", 0)),
-                    cost_basis=float(lot_data.get("cost_basis", 0)),
-                    acquisition_date=lot_data.get("acquisition_date"),
-                    source="IBKR_FLEXQUERY",
-                    tax_method="FIFO",
-                )
-                db.add(tax_lot)
-                imported_count += 1
-
-            # Aggregate positions
-            positions_data = {}
-            for tax_lot in db.query(TaxLot).filter_by(account_id=account_id).all():
-                symbol = tax_lot.symbol
-                if symbol not in positions_data:
-                    positions_data[symbol] = {
-                        "quantity": 0,
-                        "total_cost": 0,
-                        "first_acquired": tax_lot.acquisition_date,
-                    }
-
-                positions_data[symbol]["quantity"] += float(tax_lot.original_quantity)
-                positions_data[symbol]["total_cost"] += float(tax_lot.cost_basis)
-
-                if tax_lot.acquisition_date and (
-                    not positions_data[symbol]["first_acquired"]
-                    or tax_lot.acquisition_date
-                    < positions_data[symbol]["first_acquired"]
-                ):
-                    positions_data[symbol]["first_acquired"] = tax_lot.acquisition_date
-
-            # Create position records
-            for symbol, data in positions_data.items():
-                average_cost = (
-                    data["total_cost"] / data["quantity"] if data["quantity"] > 0 else 0
-                )
-
-                position = Position(
-                    account_id=account.id,
-                    symbol=symbol,
-                    quantity=data["quantity"],
-                    average_cost=average_cost,
-                    current_price=0.0,
-                    market_value=0.0,
-                    unrealized_pnl=0.0,
-                    unrealized_pnl_pct=0.0,
-                    currency="USD",
-                    first_acquired=data["first_acquired"],
-                )
-                db.add(position)
-
-            db.commit()
-
-            return {
-                "status": "success",
-                "message": f"Synced {imported_count} tax lots and {len(positions_data)} positions",
-                "tax_lots_imported": imported_count,
-                "positions_created": len(positions_data),
-                "sync_timestamp": datetime.utcnow().isoformat(),
-            }
-        else:
-            return {
-                "status": "no_data",
-                "message": "No data returned from broker",
-                "sync_timestamp": datetime.utcnow().isoformat(),
-            }
-
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=f"Sync failed: {str(e)}")
-
-
-@router.get("/performance/{account_id}")
-async def get_portfolio_performance(
-    account_id: str,
-    period: str = Query(
-        "1M", description="Performance period: 1D, 1W, 1M, 3M, 6M, 1Y, YTD"
-    ),
-    db: Session = Depends(get_db),
-) -> Dict[str, Any]:
-    """Get portfolio performance metrics for specified period."""
-
-    account = db.query(BrokerAccount).filter_by(account_number=account_id).first()
-    if not account:
-        raise HTTPException(status_code=404, detail="Account not found")
-
-    positions = db.query(Position).filter_by(account_id=account.id).all()
-
-    # Calculate current performance metrics
-    total_cost_basis = sum(position.total_cost_basis for position in positions)
-    total_market_value = sum(position.market_value or 0 for position in positions)
-    total_unrealized_pnl = (
-        total_market_value - total_cost_basis if total_market_value > 0 else 0
-    )
-    total_day_pnl = sum(position.day_pnl or 0 for position in positions)
-
-    # Performance by position
-    positions_performance = []
-    for position in positions:
-        positions_performance.append(
-            {
-                "symbol": position.symbol,
-                "cost_basis": float(position.total_cost_basis),
-                "market_value": float(position.market_value or 0),
-                "unrealized_pnl": float(position.unrealized_pnl or 0),
-                "unrealized_pnl_pct": float(position.unrealized_pnl_pct or 0),
-                "day_pnl": float(position.day_pnl or 0),
-                "day_pnl_pct": float(position.day_pnl_pct or 0),
-            }
-        )
-
-        return {
-            "account_id": account_id,
-            "period": period,
-            "summary": {
-                "total_cost_basis": float(total_cost_basis),
-                "total_market_value": float(total_market_value),
-                "total_unrealized_pnl": float(total_unrealized_pnl),
-                "total_unrealized_pnl_pct": (
-                    float(total_unrealized_pnl / total_cost_basis * 100)
-                    if total_cost_basis > 0
-                    else 0
-                ),
-                "total_day_pnl": float(total_day_pnl),
-                "total_day_pnl_pct": (
-                    float(total_day_pnl / total_market_value * 100)
-                    if total_market_value > 0
-                    else 0
-                ),
-            },
-            "positions": positions_performance,
-            "last_updated": datetime.utcnow().isoformat(),
-        }

@@ -181,29 +181,29 @@ const AccountSelector: React.FC<AccountSelectorProps> = ({
                   <SimpleGrid columns={2} spacing={4}>
                     <Stat size="sm">
                       <StatLabel>Account Value</StatLabel>
-                      <StatNumber fontSize="md">{formatCurrency(selectedAccountData.total_value)}</StatNumber>
+                      <StatNumber fontSize="md">{formatCurrency(selectedAccountData?.total_value || 0)}</StatNumber>
                     </Stat>
                     <Stat size="sm">
                       <StatLabel>Unrealized P&L</StatLabel>
-                      <StatNumber fontSize="md" color={getChangeColor(selectedAccountData.unrealized_pnl)}>
-                        <StatArrow type={selectedAccountData.unrealized_pnl >= 0 ? 'increase' : 'decrease'} />
-                        {formatCurrency(Math.abs(selectedAccountData.unrealized_pnl))}
+                      <StatNumber fontSize="md" color={getChangeColor(selectedAccountData?.unrealized_pnl)}>
+                        <StatArrow type={(selectedAccountData?.unrealized_pnl || 0) >= 0 ? 'increase' : 'decrease'} />
+                        {formatCurrency(Math.abs(selectedAccountData?.unrealized_pnl || 0))}
                       </StatNumber>
                       <StatHelpText>{formatPercentage(selectedAccountData.unrealized_pnl_pct)}</StatHelpText>
                     </Stat>
                     <Stat size="sm">
                       <StatLabel>Positions</StatLabel>
-                      <StatNumber fontSize="md">{selectedAccountData.positions_count}</StatNumber>
+                      <StatNumber fontSize="md">{selectedAccountData?.positions_count || 0}</StatNumber>
                     </Stat>
                     <Stat size="sm">
                       <StatLabel>Allocation</StatLabel>
-                      <StatNumber fontSize="md">{selectedAccountData.allocation_pct.toFixed(1)}%</StatNumber>
+                      <StatNumber fontSize="md">{((selectedAccountData?.allocation_pct ?? 0).toFixed(1))}%</StatNumber>
                     </Stat>
-                    {selectedAccountData.buying_power && (
+                    {(selectedAccountData?.buying_power != null) && (
                       <>
                         <Stat size="sm">
                           <StatLabel>Buying Power</StatLabel>
-                          <StatNumber fontSize="md">{formatCurrency(selectedAccountData.buying_power)}</StatNumber>
+                          <StatNumber fontSize="md">{formatCurrency(selectedAccountData?.buying_power || 0)}</StatNumber>
                         </Stat>
                         <Stat size="sm">
                           <StatLabel>Available Funds</StatLabel>
@@ -291,7 +291,7 @@ const AccountSelector: React.FC<AccountSelectorProps> = ({
               <Stat size="sm">
                 <StatLabel>Allocation</StatLabel>
                 <StatNumber>
-                  {selectedAccount === 'all' ? '100%' : `${selectedAccountData?.allocation_pct.toFixed(1) || 0}%`}
+                  {selectedAccount === 'all' ? '100%' : `${(selectedAccountData?.allocation_pct ?? 0).toFixed(1)}%`}
                 </StatNumber>
                 <StatHelpText>
                   {selectedAccount === 'all' ? 'Combined' : `of total portfolio`}

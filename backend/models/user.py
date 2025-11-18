@@ -99,3 +99,20 @@ class User(Base):
         Index("idx_users_email_active", "email", "is_active"),
         Index("idx_users_last_login", "last_login"),
     )
+
+    @property
+    def full_name(self) -> str:
+        first = self.first_name or ""
+        last = self.last_name or ""
+        name = f"{first} {last}".strip()
+        return name or self.username
+
+    @full_name.setter
+    def full_name(self, value: str):
+        if not value:
+            self.first_name = None
+            self.last_name = None
+            return
+        parts = str(value).strip().split()
+        self.first_name = parts[0] if parts else None
+        self.last_name = " ".join(parts[1:]) if len(parts) > 1 else None

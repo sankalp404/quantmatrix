@@ -61,7 +61,7 @@ class TaxOptimizationOpportunity:
 
     symbol: str
     opportunity_type: str  # "tax_loss_harvest", "ltcg_realization", "wash_sale_warning"
-    current_value: float
+    market_value: float
     unrealized_pnl: float
     days_held: int
     estimated_tax_impact: float
@@ -237,7 +237,7 @@ class PortfolioAnalyticsService:
             symbol = lot.get("symbol", "")
             unrealized_pnl = lot.get("unrealized_pnl", 0)
             days_held = lot.get("days_held", 0)
-            current_value = lot.get("current_value", 0)
+            current_value = lot.get("market_value", 0)
 
             # Tax loss harvesting opportunity
             if unrealized_pnl < -1000:  # $1000+ loss
@@ -249,7 +249,7 @@ class PortfolioAnalyticsService:
                     TaxOptimizationOpportunity(
                         symbol=symbol,
                         opportunity_type="tax_loss_harvest",
-                        current_value=current_value,
+                        market_value=current_value,
                         unrealized_pnl=unrealized_pnl,
                         days_held=days_held,
                         estimated_tax_impact=estimated_tax_savings,
@@ -264,7 +264,7 @@ class PortfolioAnalyticsService:
                     TaxOptimizationOpportunity(
                         symbol=symbol,
                         opportunity_type="ltcg_opportunity",
-                        current_value=current_value,
+                        market_value=current_value,
                         unrealized_pnl=unrealized_pnl,
                         days_held=days_held,
                         estimated_tax_impact=0,

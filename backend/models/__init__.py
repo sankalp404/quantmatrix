@@ -13,35 +13,36 @@ Base = declarative_base()
 
 # Essential Core Models (verified to exist)
 from .user import User, UserRole
-from .broker_account import BrokerAccount, BrokerType, AccountType
+from .broker_account import BrokerAccount, BrokerType, AccountType, AccountStatus, SyncStatus
 
 # Instruments & Market Data
 from .instrument import Instrument, InstrumentType
-from .market_data import PriceData, StockInfo, ATRData
+from .market_data import PriceData, MarketSnapshot, MarketSnapshotHistory
+from .index_constituent import IndexConstituent
 
 # Trading & Positions
 from .position import Position, PositionType, PositionStatus
 from .trade import Trade, TradeSignal
 
-# Portfolio Management (CLEANED - Removed duplicates, using Position instead)
+# Portfolio Management
 from .portfolio import PortfolioSnapshot, Category, PositionCategory
 
-# Tax Lots & Cost Basis (Multi-brokerage support)
+# Tax Lots & Cost Basis
 from .tax_lot import TaxLot, TaxLotMethod, TaxLotSource
 
-# Account Balances & Margin (Multi-brokerage enhanced)
+# Account Balances & Margin
 from .account_balance import AccountBalance, AccountBalanceType
 
-# Margin Interest Tracking (Multi-brokerage enhanced)
+# Margin Interest Tracking
 from .margin_interest import MarginInterest
 
-# Transfers & Position Movements (Multi-brokerage enhanced)
+# Transfers & Position Movements
 from .transfer import Transfer, TransferType
 
 # Transactions & Dividends
 from .transaction import Transaction, TransactionType, Dividend
 
-# Options Trading (Multi-brokerage support)
+# Options Trading
 from .options import Option, OptionType
 
 # Essential models list
@@ -52,11 +53,14 @@ __all__ = [
     "BrokerAccount",
     "BrokerType",
     "AccountType",
+    "AccountStatus",
+    "SyncStatus",
     "Instrument",
     "InstrumentType",
     "PriceData",
-    "StockInfo",
-    "ATRData",
+    "MarketSnapshot",
+    "MarketSnapshotHistory",
+    "IndexConstituent",
     "Position",
     "PositionType",
     "PositionStatus",

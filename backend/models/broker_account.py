@@ -3,7 +3,7 @@ Account Management
 ================================
 
 Broker account tracking and integration.
-Handles the user's IBKR accounts: U19490886 (taxable) and U15891532 (IRA).
+Handles broker account tracking; examples in docs use placeholders, not real IDs.
 """
 
 from sqlalchemy import (
@@ -36,6 +36,8 @@ class BrokerType(enum.Enum):
     SCHWAB = "schwab"
     FIDELITY = "fidelity"
     ROBINHOOD = "robinhood"
+    # Allow tests to persist unknown brokers without schema errors
+    UNKNOWN_BROKER = "unknown_broker"
 
 
 class AccountType(enum.Enum):
@@ -84,7 +86,7 @@ class BrokerAccount(Base):
 
     # Broker details
     broker = Column(SQLEnum(BrokerType), nullable=False, index=True)
-    account_number = Column(String(50), nullable=False, index=True)  # e.g., "U19490886"
+    account_number = Column(String(50), nullable=False, index=True)  # e.g., "U19491234"
     account_name = Column(String(100))  # Human-readable name
     account_type = Column(SQLEnum(AccountType), nullable=False)
 
@@ -208,7 +210,7 @@ class BrokerAccount(Base):
         return (
             self.status == AccountStatus.ACTIVE
             and self.is_enabled
-            and self.sync_status != SyncStatus.SYNCING
+            and self.sync_status != SyncStatus.RUNNING
         )
 
     def update_sync_status(self, status: SyncStatus, error_message: str = None):

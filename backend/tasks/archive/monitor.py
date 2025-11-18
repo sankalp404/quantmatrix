@@ -8,7 +8,7 @@ from .celery_app import celery_app
 from backend.models import SessionLocal
 from backend.models.portfolio import Portfolio, Position
 from backend.models.alert import Alert, AlertCondition, AlertHistory
-from backend.services.market_data import market_data_service
+from backend.services.market.market_data_service import market_data_service
 from backend.services.discord_notifier import discord_notifier
 
 logger = logging.getLogger(__name__)

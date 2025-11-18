@@ -19,11 +19,14 @@ from backend.api.routes import (
     portfolio_statements,
     portfolio_options,
     portfolio_dividends,
+    atr,
     # strategies,      # DISABLED: Causing import errors with strategy_manager
     market_data,
     # notifications,   # DISABLED: Non-essential for FlexQuery sync
     # admin           # DISABLED: Non-essential for FlexQuery sync
 )
+from backend.api.routes import activity as activity_routes
+from backend.api.routes import aggregator as aggregator_routes
 
 # Import new account management routes
 from backend.api.routes import account_management
@@ -61,6 +64,8 @@ app.add_middleware(
     CORSMiddleware,
     allow_origins=[
         "http://localhost:3000",
+        "http://127.0.0.1:3000",
+        "http://0.0.0.0:3000",
         "https://quantmatrix.com",
         "https://staging.quantmatrix.com",
     ],
@@ -75,23 +80,40 @@ app.add_middleware(
 async def startup_event():
     """Initialize database and services."""
     try:
-        # Create tables
-        Base.metadata.create_all(bind=engine)
-        logger.info("✅ database tables created/verified")
+        # Apply Alembic migrations automatically on startup
+        try:
+            import os
+            from alembic import command as _alembic_command
+            from alembic.config import Config as _AlembicConfig
+
+            backend_dir = os.path.dirname(os.path.dirname(__file__))
+            alembic_ini_path = os.path.join(backend_dir, "alembic.ini")
+            cfg = _AlembicConfig(alembic_ini_path)
+            # Force script_location to absolute path to avoid '/app/alembic' resolution
+            cfg.set_main_option("script_location", os.path.join(backend_dir, "alembic"))
+            _alembic_command.upgrade(cfg, "head")
+            logger.info("✅ Alembic migrations applied (upgrade head)")
+        except Exception as mig_e:
+            logger.warning(f"Alembic migration skipped/failed: {mig_e}")
 
         # Initialize services
         logger.info("🚀 QuantMatrix V1 API starting up...")
+        # Optional price bootstrap temporarily disabled until MarketDataService is stabilized
         # Seed default user and broker accounts from .env for dev convenience
         try:
-            seeding = account_config_service.seed_broker_accounts(user_id=1)
-            logger.info(f"🌱 Account seeding: {seeding}")
+            if getattr(settings, "SEED_ACCOUNTS_ON_STARTUP", False):
+                seeding = account_config_service.seed_broker_accounts(user_id=1)
+                logger.info(f"🌱 Account seeding: {seeding}")
+            else:
+                logger.info("🌱 Account seeding disabled (SEED_ACCOUNTS_ON_STARTUP=false)")
         except Exception as se:
             logger.warning(f"Account seeding skipped/failed: {se}")
 
-        # Optional: auto-discover TastyTrade accounts when only username/password are provided
+        # Optional: TastyTrade autodiscovery (opt-in only)
         try:
             if (
                 TASTYTRADE_AVAILABLE
+                and getattr(settings, "TASTYTRADE_DISCOVER_ON_STARTUP", False)
                 and getattr(settings, "TASTYTRADE_USERNAME", None)
                 and getattr(settings, "TASTYTRADE_PASSWORD", None)
             ):
@@ -148,6 +170,17 @@ async def startup_event():
         except Exception as e:
             logger.warning(f"TastyTrade autodiscovery skipped: {e}")
 
+        # Instruments normalization pass (make instruments table pristine after migrations)
+        try:
+            from backend.services.portfolio.ibkr_sync_service import portfolio_sync_service
+            db = SessionLocal()
+            norm = portfolio_sync_service.normalize_instruments_from_activity(db)
+            db.commit()
+            db.close()
+            logger.info(f"🧹 Instrument normalization: {norm}")
+        except Exception as ne:
+            logger.warning(f"Instrument normalization skipped: {ne}")
+
     except Exception as e:
         logger.error(f"❌ Startup error: {e}")
 
@@ -199,12 +232,13 @@ app.include_router(
     portfolio_options.router, prefix="/api/v1/portfolio/options", tags=["Portfolio"]
 )
 # app.include_router(strategies.router, prefix="/api/v1/strategies", tags=["Strategies"])  # DISABLED: Import errors
-app.include_router(
-    market_data.router, prefix="/api/v1/market-data", tags=["Market Data"]
-)
+# ATR endpoints remain disabled
 # app.include_router(notifications.router, prefix="/api/v1/notifications", tags=["Notifications"])  # DISABLED: Non-essential
 # app.include_router(admin.router, prefix="/api/v1/admin", tags=["Admin"])  # DISABLED: Non-essential
 app.include_router(account_management.router)
+app.include_router(market_data.router, prefix="/api/v1/market-data", tags=["Market Data & Technicals"])
+app.include_router(activity_routes.router, prefix="/api/v1/portfolio", tags=["Activity"])
+app.include_router(aggregator_routes.router, prefix="/api/v1/aggregator", tags=["Aggregator"])
 
 
 # Global error handler

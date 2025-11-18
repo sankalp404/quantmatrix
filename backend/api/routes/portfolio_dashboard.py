@@ -67,10 +67,31 @@ async def get_dashboard(
             "dividends_count_last_period": divs,
         }
         return {
-            "user_id": user.id,
-            "summary": summary,
-            "positions": positions,
-            "generated_at": datetime.utcnow().isoformat(),
+            "status": "success",
+            "data": {
+                "user_id": user.id,
+                "summary": summary,
+                "positions": positions,
+                "generated_at": datetime.utcnow().isoformat(),
+                # Minimal placeholders to satisfy frontend shape
+                "total_value": total_value,
+                "total_unrealized_pnl": summary["unrealized_pnl"],
+                "total_unrealized_pnl_pct": (
+                    (summary["unrealized_pnl"] / summary["total_cost_basis"] * 100)
+                    if summary["total_cost_basis"]
+                    else 0
+                ),
+                "day_change": 0,
+                "day_change_pct": 0,
+                "accounts_summary": [],
+                "accounts_count": 0,
+                "sector_allocation": [],
+                "top_performers": [],
+                "top_losers": [],
+                "holdings_count": len(positions),
+                "last_updated": datetime.utcnow().isoformat(),
+                "brokerages": ["IBKR", "TASTYTRADE"],
+            },
         }
     except Exception as e:
         logger.error(f"dashboard error: {e}")

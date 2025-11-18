@@ -74,14 +74,11 @@ const TradingViewChart: React.FC<TradingViewChartProps> = ({
       show_popup_button: true,
       popup_width: "1000",
       popup_height: "650",
-      // Professional features
-      details: true,
-      hotlist: true,
-      calendar: true,
-      studies: [
-        "Volume@tv-basicstudies",
-        "MACD@tv-basicstudies"
-      ],
+      // Professional features (lean default - no indicators on load)
+      details: false,
+      hotlist: false,
+      calendar: false,
+      studies: [],
       // Enhanced toolbar
       toolbar_bg: "#f1f3f6",
       withdateranges: true,

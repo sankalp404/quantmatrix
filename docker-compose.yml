@@ -45,11 +45,7 @@ services:
     container_name: quantmatrix_backend
     env_file:
       - .env
-    environment:
-      - PYTHONPATH=/app
-      - DATABASE_URL=postgresql://quantmatrix:password@postgres:5432/quantmatrix
-      - REDIS_URL=redis://:redispassword@redis:6379/0
-      - IBKR_HOST=host.docker.internal
+    # merged environment is defined further below to include New Relic
     ports:
       - "8000:8000"
     volumes:
@@ -60,7 +56,20 @@ services:
         condition: service_healthy
       redis:
         condition: service_started
-    command: sh -c "cd /app/backend && python -m uvicorn api.main:app --host 0.0.0.0 --port 8000 --log-level info"
+    environment:
+      - PYTHONPATH=/app
+      - DATABASE_URL=postgresql://quantmatrix:password@postgres:5432/quantmatrix
+      - REDIS_URL=redis://:redispassword@redis:6379/0
+      - CELERY_BROKER_URL=redis://:redispassword@redis:6379/0
+      - CELERY_RESULT_BACKEND=redis://:redispassword@redis:6379/0
+      - MARKET_PROVIDER_POLICY=paid
+      - IBKR_HOST=host.docker.internal
+      - NEW_RELIC_CONFIG_FILE=/app/newrelic.ini
+      - NEW_RELIC_APP_NAME=QuantMatrix Backend
+      - NEW_RELIC_LICENSE_KEY=${NEW_RELIC_LICENSE_KEY}
+      - NEW_RELIC_LOG=stdout
+      - NEW_RELIC_LOG_LEVEL=info
+    command: sh -c "cd /app && newrelic-admin run-program python -m uvicorn backend.api.main:app --host 0.0.0.0 --port 8000 --log-level info"
     networks:
       - quantmatrix_network
     restart: unless-stopped
@@ -78,17 +87,24 @@ services:
       - REDIS_URL=redis://:redispassword@redis:6379/0
       - CELERY_BROKER_URL=redis://:redispassword@redis:6379/0
       - CELERY_RESULT_BACKEND=redis://:redispassword@redis:6379/0
+      - MARKET_PROVIDER_POLICY=paid
       - IBKR_HOST=host.docker.internal # Override for Docker to connect to host machine
+      - NEW_RELIC_CONFIG_FILE=/app/newrelic.ini
+      - NEW_RELIC_APP_NAME=QuantMatrix Celery Worker
+      - NEW_RELIC_LICENSE_KEY=${NEW_RELIC_LICENSE_KEY}
+      - NEW_RELIC_LOG=stdout
+      - NEW_RELIC_LOG_LEVEL=info
     volumes:
       - ./backend:/app/backend
       - ./requirements.txt:/app/requirements.txt
+      - ./newrelic.ini:/app/newrelic.ini
     depends_on:
       - postgres
       - redis
       - backend
     networks:
       - quantmatrix_network
-    command: celery -A backend.tasks.celery_app worker --loglevel=info
+    command: bash -lc "newrelic-admin run-program celery -A backend.tasks.celery_app worker --loglevel=info"
 
   # Celery Beat Scheduler
   celery_beat:
@@ -103,18 +119,25 @@ services:
       - REDIS_URL=redis://:redispassword@redis:6379/0
       - CELERY_BROKER_URL=redis://:redispassword@redis:6379/0
       - CELERY_RESULT_BACKEND=redis://:redispassword@redis:6379/0
+      - MARKET_PROVIDER_POLICY=paid
       - IBKR_HOST=host.docker.internal # Override for Docker to connect to host machine
+      - NEW_RELIC_CONFIG_FILE=/app/newrelic.ini
+      - NEW_RELIC_APP_NAME=QuantMatrix Celery Beat
+      - NEW_RELIC_LICENSE_KEY=${NEW_RELIC_LICENSE_KEY}
+      - NEW_RELIC_LOG=stdout
+      - NEW_RELIC_LOG_LEVEL=info
     volumes:
       - ./backend:/app/backend
       - ./requirements.txt:/app/requirements.txt
       - celery_beat_data:/app/celerybeat-schedule
+      - ./newrelic.ini:/app/newrelic.ini
     depends_on:
       - postgres
       - redis
       - backend
     networks:
       - quantmatrix_network
-    command: celery -A backend.tasks.celery_app beat --loglevel=info
+    command: bash -lc "newrelic-admin run-program celery -A backend.tasks.celery_app beat --loglevel=info"
 
   # Flower (Celery Monitoring)
   flower:
@@ -122,6 +145,8 @@ services:
       context: .
       dockerfile: Dockerfile.backend
     container_name: quantmatrix_flower
+    env_file:
+      - .env
     environment:
       - CELERY_BROKER_URL=redis://:redispassword@redis:6379/0
       - CELERY_RESULT_BACKEND=redis://:redispassword@redis:6379/0
@@ -132,7 +157,7 @@ services:
       - celery_worker
     networks:
       - quantmatrix_network
-    command: celery -A backend.tasks.celery_app flower --port=5555
+    command: bash -lc "export FLOWER_UNAUTHENTICATED_API=1; celery -A backend.tasks.celery_app flower --address=0.0.0.0 --port=5555"
 
   # React Frontend (Development)
   frontend:
@@ -171,6 +196,19 @@ services:
       - quantmatrix_network
     profiles:
       - production
+
+  # Cloudflare Tunnel for stable HTTPS dev callback
+  cloudflared:
+    image: cloudflare/cloudflared:latest
+    container_name: quantmatrix_cloudflared
+    environment:
+      - TUNNEL_TOKEN=${CLOUDFLARED_TUNNEL_TOKEN}
+    command: tunnel --no-autoupdate run --token ${CLOUDFLARED_TUNNEL_TOKEN}
+    depends_on:
+      - backend
+    networks:
+      - quantmatrix_network
+    restart: unless-stopped
 
 networks:
   quantmatrix_network:

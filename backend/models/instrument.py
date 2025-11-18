@@ -72,7 +72,7 @@ class Instrument(Base):
 
     # Primary identification
     id = Column(Integer, primary_key=True, autoincrement=True)
-    symbol = Column(String(20), unique=True, nullable=False, index=True)
+    symbol = Column(String(100), unique=True, nullable=False, index=True)
 
     # Basic information
     name = Column(String(200))  # Company/fund name

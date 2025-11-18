@@ -77,6 +77,34 @@ class TastyTradeSyncService:
         logger.info("TastyTrade sync complete → %s", counts)
         return counts
 
+    async def sync_account_comprehensive(
+        self, account_number: str, db_session=None
+    ) -> Dict[str, int]:
+        """Adapter to align with broker-agnostic sync interface used by BrokerSyncService."""
+        db = db_session or self._get_db_session()
+        try:
+            # Resolve BrokerAccount by account_number
+            ba = (
+                db.query(BrokerAccount)
+                .filter(BrokerAccount.account_number == account_number)
+                .first()
+            )
+            if not ba:
+                return {"status": "error", "error": "Broker account not found"}
+            return await self.sync_account(db, ba)
+        finally:
+            if db_session is None:
+                try:
+                    db.close()
+                except Exception:
+                    pass
+
+    def _get_db_session(self) -> Session:
+        # Lazy import to avoid circulars
+        from backend.database import SessionLocal
+
+        return SessionLocal()
+
     # ------------------------------------------------------------------
     # Internal helpers (1 per table)
     # ------------------------------------------------------------------

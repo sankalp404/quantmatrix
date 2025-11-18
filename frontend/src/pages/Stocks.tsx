@@ -36,8 +36,10 @@ import AccountFilterWrapper from '../components/AccountFilterWrapper';
 import TradingViewChart from '../components/TradingViewChart';
 import ErrorBoundary from '../components/ErrorBoundary';
 import { HoldingsTableSkeleton, LoadingSpinner } from '../components/LoadingStates';
+import PageHeader from '../components/ui/PageHeader';
+import EmptyState from '../components/ui/EmptyState';
+import { useAccountContext } from '../context/AccountContext';
 
-// Types and Interfaces
 interface TaxLot {
   id: string;
   shares: number;
@@ -71,7 +73,6 @@ interface StockHolding {
   last_updated: string;
 }
 
-// AccountData interface to match what AccountFilterWrapper expects
 interface AccountData {
   account_id: string;
   account_name: string;
@@ -85,22 +86,17 @@ interface AccountData {
   positions_count: number;
 }
 
-// Utility functions
 const transformPortfolioToAccounts = (portfolioData: any): AccountData[] => {
   if (!portfolioData?.accounts) return [];
-
-  // Calculate total portfolio value for allocation percentages
   const totalPortfolioValue = Object.values(portfolioData.accounts).reduce((sum: number, data: any) => {
     return sum + (data.account_summary?.net_liquidation || 0);
   }, 0);
-
   return Object.entries(portfolioData.accounts).map(([id, data]: [string, any]) => {
     const accountValue = data.account_summary?.net_liquidation || 0;
-
     return {
       account_id: id,
       account_name: data.account_summary?.account_name || id,
-      account_type: id.includes('U19490886') ? 'Taxable' : 'Tax-Deferred',
+      account_type: id.toLowerCase().includes('ira') ? 'Tax-Deferred' : 'Taxable',
       broker: 'IBKR',
       total_value: accountValue,
       unrealized_pnl: data.account_summary?.unrealized_pnl || 0,
@@ -112,7 +108,6 @@ const transformPortfolioToAccounts = (portfolioData: any): AccountData[] => {
   });
 };
 
-// Modern Holding Card Component with enhanced loading states
 const HoldingCard: React.FC<{
   holding: StockHolding;
   isLoading?: boolean;
@@ -120,18 +115,14 @@ const HoldingCard: React.FC<{
   onClick?: () => void;
   showChart?: boolean;
 }> = ({ holding, isLoading = false, isSelected = false, onClick, showChart = false }) => {
-  // All color mode values at top level to maintain hooks order
   const cardBg = useColorModeValue('white', 'gray.800');
   const borderColor = useColorModeValue('gray.200', 'gray.600');
   const selectedBorderColor = useColorModeValue('blue.400', 'blue.300');
   const taxLotBg = useColorModeValue('gray.50', 'gray.700');
   const taxLotBorderColor = useColorModeValue('gray.200', 'gray.600');
-
-  // Calculate colors based on P&L but don't use hooks conditionally
   const profitColor = holding?.unrealized_pnl >= 0 ? 'green.500' : 'red.500';
   const dayProfitColor = holding?.day_pnl >= 0 ? 'green.500' : 'red.500';
 
-  // Get real tax lots from backend API call with enhanced error handling
   const [taxLots, setTaxLots] = useState<TaxLot[]>([]);
   const [loadingTaxLots, setLoadingTaxLots] = useState(false);
   const [taxLotsError, setTaxLotsError] = useState<string | null>(null);
@@ -150,25 +141,18 @@ const HoldingCard: React.FC<{
 
   const fetchTaxLots = async () => {
     if (!holding?.id) return;
-
     setLoadingTaxLots(true);
     setTaxLotsError(null);
-
     try {
-      // Use improved backend API
       const result = await portfolioApi.getHoldingTaxLots(holding.id);
-
       if (result.status === 'success' && result.data?.tax_lots) {
         const lots = result.data.tax_lots.length > 0 ? result.data.tax_lots : [];
         setTaxLots(lots);
-
-        // Calculate tax lot discrepancy
         if (lots.length > 0) {
           const taxLotTotalShares = lots.reduce((sum, lot) => sum + (lot.shares_remaining || lot.shares || 0), 0);
           const holdingShares = holding.shares;
           const difference = Math.abs(holdingShares - taxLotTotalShares);
-
-          if (difference > 0.01) { // Allow for small rounding differences
+          if (difference > 0.01) {
             setTaxLotDiscrepancy({
               hasDiscrepancy: true,
               holdingShares: holdingShares,
@@ -180,11 +164,6 @@ const HoldingCard: React.FC<{
           }
         } else {
           setTaxLotDiscrepancy(null);
-        }
-
-        // Log performance if available
-        if (result.data.processing_time_ms) {
-          console.log(`Tax lots loaded in ${result.data.processing_time_ms}ms from ${result.data.source}`);
         }
       } else {
         setTaxLots([]);
@@ -238,7 +217,6 @@ const HoldingCard: React.FC<{
     >
       <CardBody>
         <VStack align="stretch" spacing={3}>
-          {/* Main holding info */}
           <HStack justify="space-between">
             <HStack spacing={3}>
               <Box
@@ -262,7 +240,6 @@ const HoldingCard: React.FC<{
                 </Text>
               </VStack>
             </HStack>
-
             <VStack align="end" spacing={1}>
               <Text fontWeight="bold" fontSize="lg">
                 {holding.market_value.toLocaleString('en-US', { style: 'currency', currency: 'USD' })}
@@ -277,8 +254,6 @@ const HoldingCard: React.FC<{
               </HStack>
             </VStack>
           </HStack>
-
-          {/* Performance metrics */}
           <Grid templateColumns="repeat(3, 1fr)" gap={4}>
             <Stat size="sm">
               <StatLabel fontSize="xs">Current Price</StatLabel>
@@ -295,8 +270,6 @@ const HoldingCard: React.FC<{
               </StatNumber>
             </Stat>
           </Grid>
-
-          {/* Tax lots section */}
           <Box>
             <Button
               size="sm"
@@ -310,10 +283,8 @@ const HoldingCard: React.FC<{
             >
               Tax Lots ({taxLots.length})
             </Button>
-
             <Collapse in={isTaxLotsOpen} animateOpacity>
               <VStack spacing={3} mt={3} align="stretch">
-                {/* Discrepancy */}
                 {taxLotDiscrepancy?.hasDiscrepancy && (
                   <Alert status="warning" size="sm" borderRadius="md">
                     <AlertIcon />
@@ -327,12 +298,10 @@ const HoldingCard: React.FC<{
                     </Box>
                   </Alert>
                 )}
-
                 {taxLotsError ? (
                   <Text fontSize="sm" color="red.500">{taxLotsError}</Text>
                 ) : taxLots.length > 0 ? (
                   (() => {
-                    // Merge identical lots (same date, same cost) to reduce noise
                     const mergedMap = new Map<string, TaxLot>();
                     for (const lot of taxLots) {
                       const key = `${lot.purchase_date?.slice(0, 10)}|${(lot.cost_per_share || 0).toFixed(4)}|${lot.is_long_term ? 'L' : 'S'}`;
@@ -351,7 +320,6 @@ const HoldingCard: React.FC<{
                     const sorted = merged.sort((a, b) => new Date(b.purchase_date).getTime() - new Date(a.purchase_date).getTime());
                     const longLots = sorted.filter(l => l.is_long_term);
                     const shortLots = sorted.filter(l => !l.is_long_term);
-
                     const renderGroup = (lots: TaxLot[], title: string) => (
                       <VStack align="stretch" spacing={2}>
                         <Text fontSize="sm" fontWeight="semibold" color="gray.600">{title} ({lots.length})</Text>
@@ -387,7 +355,6 @@ const HoldingCard: React.FC<{
                         ))}
                       </VStack>
                     );
-
                     return (
                       <VStack align="stretch" spacing={4}>
                         {shortLots.length > 0 && renderGroup(shortLots, 'Short Term')}
@@ -407,8 +374,8 @@ const HoldingCard: React.FC<{
   );
 };
 
-// Enhanced Holdings page with comprehensive loading states
-const Holdings: React.FC = () => {
+const Stocks: React.FC = () => {
+  const { selected, setSelected } = useAccountContext();
   const [portfolioData, setPortfolioData] = useState<any>(null);
   const [holdings, setHoldings] = useState<StockHolding[]>([]);
   const [loading, setLoading] = useState(true);
@@ -422,23 +389,21 @@ const Holdings: React.FC = () => {
   const bgColor = useColorModeValue('white', 'gray.800');
   const borderColor = useColorModeValue('gray.200', 'gray.600');
   const toast = useToast();
-
-  // Responsive layout
   const isMobile = useBreakpointValue({ base: true, lg: false });
   const chartPosition = useBreakpointValue({ base: 'top', lg: 'side' });
 
   useEffect(() => {
-    fetchHoldingsData();
-  }, []);
+    const param = selected === 'taxable' || selected === 'ira' || selected === 'all' ? undefined : selected;
+    fetchHoldingsData(false, param);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [selected]);
 
   const fetchHoldingsData = async (isRetry = false, accountId?: string) => {
     if (!isRetry) {
       setLoading(true);
     }
     setError(null);
-
     try {
-      // Show loading message based on retry status
       if (isRetry && retryCount > 0) {
         toast({
           title: 'Retrying...',
@@ -447,17 +412,15 @@ const Holdings: React.FC = () => {
           duration: 2000,
         });
       }
-
-      // Get portfolio data for account selector with timeout
-      const portfolioResult = await portfolioApi.getLive(accountId);
+      const portfolioResult = await portfolioApi.getLive();
       setPortfolioData(portfolioResult.data);
-
-      // Get real holdings data from backend with enhanced error handling
-      const holdingsResult = await portfolioApi.getStocksOnly(accountId);
-
+      const allAccounts = Object.keys(portfolioResult.data?.accounts || {});
+      const effectiveAccountId = accountId || (allAccounts.length > 0 ? allAccounts[0] : undefined);
+      const holdingsResult = await portfolioApi.getStocksOnly(effectiveAccountId);
       if (holdingsResult.status === 'success') {
-        setHoldings(holdingsResult.data.holdings || []);
-        setRetryCount(0); // Reset retry count on success
+        const rows = holdingsResult.data.holdings || holdingsResult.data.stocks || [];
+        setHoldings(rows);
+        setRetryCount(0);
       } else {
         throw new Error(holdingsResult.error || 'Failed to load holdings');
       }
@@ -465,10 +428,8 @@ const Holdings: React.FC = () => {
       console.error('Error fetching holdings data:', err);
       const errorMessage = handleApiError(err);
       setError(errorMessage);
-
-      // Show error toast
       toast({
-        title: 'Error Loading Holdings',
+        title: 'Error Loading Stocks',
         description: errorMessage,
         status: 'error',
         duration: 5000,
@@ -479,14 +440,10 @@ const Holdings: React.FC = () => {
     }
   };
 
-  // Enhanced retry with exponential backoff
   const handleRetry = async () => {
     const newRetryCount = retryCount + 1;
     setRetryCount(newRetryCount);
-
-    // Exponential backoff: wait 1s, 2s, 4s, etc.
     const delay = Math.min(1000 * Math.pow(2, newRetryCount - 1), 10000);
-
     if (newRetryCount <= 3) {
       setTimeout(() => {
         fetchHoldingsData(true);
@@ -501,22 +458,19 @@ const Holdings: React.FC = () => {
     }
   };
 
-  // Get unique sectors (from all holdings for dropdown)
   const sectors = useMemo(() => {
     const sectorSet = new Set(holdings.map(h => h.sector).filter(Boolean));
     return Array.from(sectorSet).sort();
   }, [holdings]);
 
-  // Transform portfolio data for account selector
   const accounts = portfolioData ? transformPortfolioToAccounts(portfolioData) : [];
 
-  // Enhanced loading state with skeleton
   if (loading) {
     return (
       <Box p={6}>
         <VStack spacing={6} align="stretch">
           <Box>
-            <Heading size="lg" mb={2}>Stock Holdings</Heading>
+            <Heading size="lg" mb={2}>Stocks</Heading>
             <Text color="gray.500" fontSize="sm">
               Loading your stock positions...
             </Text>
@@ -527,7 +481,6 @@ const Holdings: React.FC = () => {
     );
   }
 
-  // Enhanced error state with retry options
   if (error) {
     return (
       <Box p={6}>
@@ -535,10 +488,9 @@ const Holdings: React.FC = () => {
           <Box>
             <Heading size="lg" mb={2}>Stocks</Heading>
             <Text color="gray.500" fontSize="sm">
-              Error loading holdings data
+              Error loading stocks
             </Text>
           </Box>
-
           <Alert status="error" borderRadius="md">
             <AlertIcon />
             <Box flex="1">
@@ -561,20 +513,22 @@ const Holdings: React.FC = () => {
     );
   }
 
-  // Main holdings display
   return (
     <ErrorBoundary>
       <Box p={6}>
         <VStack spacing={6} align="stretch">
-          {/* Header */}
-          <Box>
-            <Heading size="lg" mb={2}>Stocks</Heading>
-            <Text color="gray.500" fontSize="sm">
-              Real-time data from IBKR • Last updated: {new Date().toLocaleTimeString()}
-            </Text>
-          </Box>
-
-          {/* Account Filter */}
+          <PageHeader
+            title="Stocks"
+            subtitle={`Real data from backend • Last updated: ${new Date().toLocaleTimeString()}`}
+          />
+          {holdings.length === 0 && (
+            <EmptyState
+              icon={FiTrendingUp}
+              title="No stock holdings found"
+              description="We couldn’t find any stock positions. Once your IBKR FlexQuery sync completes and stocks are available, they will appear here."
+              action={{ label: 'Retry', onClick: () => fetchHoldingsData() }}
+            />
+          )}
           <AccountFilterWrapper
             data={holdings}
             accounts={accounts}
@@ -582,17 +536,18 @@ const Holdings: React.FC = () => {
               showAllOption: true,
               showSummary: true,
               size: 'lg',
-              variant: 'detailed'
+              variant: 'detailed',
+              defaultSelection: selected || (accounts.length > 0 ? accounts[0].account_id : 'all')
             }}
             loading={loading}
             error={error}
             onAccountChange={(account) => {
-              const accParam = account === 'all' ? undefined : account;
+              setSelected(account as any);
+              const accParam = account === 'all' || account === 'taxable' || account === 'ira' ? undefined : account;
               fetchHoldingsData(false, accParam);
             }}
           >
             {(accountFilteredHoldings, filterState) => {
-              // Top summary bar from live portfolio snapshot for selected account
               const selectedAccountId = filterState?.selectedAccount && filterState.selectedAccount !== 'all' ? filterState.selectedAccount : undefined;
               const accountSummary = useMemo(() => {
                 if (!portfolioData?.accounts) return null;
@@ -606,7 +561,6 @@ const Holdings: React.FC = () => {
                   day_change: (acc.day_change || 0) + (s.day_change || 0)
                 }), {});
               }, [portfolioData, selectedAccountId]);
-
               const summaryBar = accountSummary ? (
                 <HStack spacing={6} p={3} border="1px" borderColor={borderColor} borderRadius="md">
                   <VStack align="start" spacing={0}>
@@ -627,18 +581,13 @@ const Holdings: React.FC = () => {
                   </VStack>
                 </HStack>
               ) : null;
-
-              // Filter and sort holdings based on account-filtered data
               const filteredAndSortedHoldings = useMemo(() => {
                 let filtered = accountFilteredHoldings.filter(holding => {
                   const matchesSearch = holding.symbol.toLowerCase().includes(searchTerm.toLowerCase()) ||
                     holding.industry.toLowerCase().includes(searchTerm.toLowerCase());
                   const matchesSector = selectedSector === 'all' || holding.sector === selectedSector;
-
                   return matchesSearch && matchesSector;
                 });
-
-                // Sort holdings
                 filtered.sort((a, b) => {
                   switch (sortBy) {
                     case 'market_value':
@@ -653,14 +602,11 @@ const Holdings: React.FC = () => {
                       return 0;
                   }
                 });
-
                 return filtered;
               }, [accountFilteredHoldings, searchTerm, selectedSector, sortBy]);
-
               return (
                 <VStack spacing={6} align="stretch">
                   {summaryBar}
-                  {/* Search and Filters */}
                   <HStack spacing={4} wrap="wrap">
                     <Box flex="1" minW="200px">
                       <InputGroup>
@@ -674,14 +620,12 @@ const Holdings: React.FC = () => {
                         />
                       </InputGroup>
                     </Box>
-
                     <Select value={selectedSector} onChange={(e) => setSelectedSector(e.target.value)} maxW="200px">
                       <option value="all">All Sectors</option>
                       {sectors.map(sector => (
                         <option key={sector} value={sector}>{sector}</option>
                       ))}
                     </Select>
-
                     <Select value={sortBy} onChange={(e) => setSortBy(e.target.value)} maxW="200px">
                       <option value="market_value">Market Value</option>
                       <option value="unrealized_pnl">Total P&L</option>
@@ -689,8 +633,6 @@ const Holdings: React.FC = () => {
                       <option value="symbol">Symbol</option>
                     </Select>
                   </HStack>
-
-                  {/* Holdings Grid */}
                   <Grid templateColumns={isMobile ? "1fr" : "repeat(auto-fill, minmax(400px, 1fr))"} gap={6}>
                     {filteredAndSortedHoldings.map((holding) => (
                       <GridItem key={holding.id}>
@@ -702,8 +644,6 @@ const Holdings: React.FC = () => {
                           )}
                           showChart={selectedHolding === holding.symbol}
                         />
-
-                        {/* TradingView Chart */}
                         {selectedHolding === holding.symbol && (
                           <Box mt={4}>
                             <TradingViewChart
@@ -718,8 +658,6 @@ const Holdings: React.FC = () => {
                       </GridItem>
                     ))}
                   </Grid>
-
-                  {/* Empty state */}
                   {filteredAndSortedHoldings.length === 0 && (
                     <Box textAlign="center" py={12}>
                       <Text fontSize="lg" color="gray.500">
@@ -737,4 +675,4 @@ const Holdings: React.FC = () => {
   );
 };
 
-export default Holdings; 
+export default Stocks;

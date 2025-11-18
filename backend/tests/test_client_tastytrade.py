@@ -57,11 +57,8 @@ class TestTastyTradeClient:
         """Test successful connection to TastyTrade."""
         mock_session = Mock()
         mock_account = Mock()
-        import os
 
-        mock_account.account_number = os.getenv(
-            "TASTYTRADE_ACCOUNT_NUMBER", "TEST_ACCOUNT"
-        )
+        mock_account.account_number = "TEST_ACCOUNT"
         mock_account.nickname = "Test Account"
         mock_account.account_type_name = "Individual"
 
@@ -91,7 +88,7 @@ class TestTastyTradeClient:
             assert client.connected is True
             assert client.session == mock_session
             assert len(client.accounts) == 1
-            assert client.accounts[0].account_number == "5WZ21096"
+            assert client.accounts[0].account_number == "TT_DEMO_ACCOUNT"
 
     @pytest.mark.asyncio
     async def test_connect_no_credentials(self, client):
@@ -165,13 +162,13 @@ class TestTastyTradeClient:
     async def test_get_accounts_success(self, client):
         """Test successful account retrieval."""
         mock_account1 = Mock()
-        mock_account1.account_number = "5WZ21096"
+        mock_account1.account_number = "TT_DEMO_ACCOUNT"
         mock_account1.nickname = "Primary"
         mock_account1.account_type_name = "Individual"
         mock_account1.is_closed = False
 
         mock_account2 = Mock()
-        mock_account2.account_number = "5WZ21097"
+        mock_account2.account_number = "TT_DEMO_ACCOUNT_2"
         mock_account2.nickname = "IRA"
         mock_account2.account_type_name = "Traditional IRA"
         mock_account2.is_closed = False
@@ -182,10 +179,10 @@ class TestTastyTradeClient:
         accounts = await client.get_accounts()
 
         assert len(accounts) == 2
-        assert accounts[0]["account_number"] == "5WZ21096"
+        assert accounts[0]["account_number"] == "TT_DEMO_ACCOUNT"
         assert accounts[0]["nickname"] == "Primary"
         assert accounts[0]["account_type"] == "Individual"
-        assert accounts[1]["account_number"] == "5WZ21097"
+        assert accounts[1]["account_number"] == "TT_DEMO_ACCOUNT_2"
 
     @pytest.mark.asyncio
     async def test_get_accounts_not_connected(self, client):
@@ -199,11 +196,8 @@ class TestTastyTradeClient:
     async def test_get_current_positions_success(self, client):
         """Test successful position retrieval."""
         mock_account = Mock()
-        import os
 
-        mock_account.account_number = os.getenv(
-            "TASTYTRADE_ACCOUNT_NUMBER", "TEST_ACCOUNT"
-        )
+        mock_account.account_number = "TEST_ACCOUNT"
 
         mock_position = Mock()
         mock_position.symbol = "AAPL"
@@ -249,9 +243,7 @@ class TestTastyTradeClient:
         client.connected = True
         client.accounts = [mock_account]
 
-        positions = await client.get_current_positions(
-            os.getenv("TASTYTRADE_ACCOUNT_NUMBER", "TEST_ACCOUNT")
-        )
+        positions = await client.get_current_positions("TEST_ACCOUNT")
 
         assert len(positions) == 1
         position = positions[0]
@@ -259,7 +251,7 @@ class TestTastyTradeClient:
         assert position["instrument_type"] == "Equity"
         assert position["quantity"] == 100.0
         assert position["mark_value"] == 15050.0
-        assert position["account_number"] == "5WZ21096"
+        assert position["account_number"] == "TT_DEMO_ACCOUNT"
         assert position["underlying_symbol"] == ""
         assert position["exchange"] == "NASDAQ"
 
@@ -267,11 +259,8 @@ class TestTastyTradeClient:
     async def test_get_current_positions_options(self, client):
         """Test position retrieval for options."""
         mock_account = Mock()
-        import os
 
-        mock_account.account_number = os.getenv(
-            "TASTYTRADE_ACCOUNT_NUMBER", "TEST_ACCOUNT"
-        )
+        mock_account.account_number = "TEST_ACCOUNT"
 
         mock_option_position = Mock()
         mock_option_position.symbol = "AAPL 240315C150"
@@ -325,11 +314,8 @@ class TestTastyTradeClient:
         client.connected = True
         client.accounts = [mock_account]
 
-        import os
 
-        positions = await client.get_current_positions(
-            os.getenv("TASTYTRADE_ACCOUNT_NUMBER", "TEST_ACCOUNT")
-        )
+        positions = await client.get_current_positions("TEST_ACCOUNT")
 
         assert len(positions) == 1
         position = positions[0]
@@ -358,18 +344,15 @@ class TestTastyTradeClient:
         """Test position retrieval when not connected."""
         client.connected = False
 
-        positions = await client.get_current_positions("5WZ21096")
+        positions = await client.get_current_positions("TT_DEMO_ACCOUNT")
         assert positions == []
 
     @pytest.mark.asyncio
     async def test_get_transaction_history_success(self, client):
         """Test successful transaction history retrieval."""
         mock_account = Mock()
-        import os
 
-        mock_account.account_number = os.getenv(
-            "TASTYTRADE_ACCOUNT_NUMBER", "TEST_ACCOUNT"
-        )
+        mock_account.account_number = "TEST_ACCOUNT"
 
         mock_transaction = Mock()
         mock_transaction.id = "TXN123456"
@@ -406,16 +389,13 @@ class TestTastyTradeClient:
         client.connected = True
         client.accounts = [mock_account]
 
-        import os
 
-        transactions = await client.get_transaction_history(
-            os.getenv("TASTYTRADE_ACCOUNT_NUMBER", "TEST_ACCOUNT"), days=30
-        )
+        transactions = await client.get_transaction_history("TEST_ACCOUNT", days=30)
 
         assert len(transactions) == 1
         transaction = transactions[0]
         assert transaction["id"] == "TXN123456"
-        assert transaction["account_number"] == "5WZ21096"
+        assert transaction["account_number"] == "TT_DEMO_ACCOUNT"
         assert transaction["symbol"] == "AAPL"
         assert transaction["action"] == "Buy to Open"
         assert transaction["quantity"] == 100.0
@@ -436,33 +416,33 @@ class TestTastyTradeClient:
         """Test transaction history when not connected."""
         client.connected = False
 
-        transactions = await client.get_transaction_history("5WZ21096")
+        transactions = await client.get_transaction_history("TT_DEMO_ACCOUNT")
         assert transactions == []
 
     @pytest.mark.asyncio
     async def test_error_handling_in_positions(self, client):
         """Test error handling in get_current_positions."""
         mock_account = Mock()
-        mock_account.account_number = "5WZ21096"
+        mock_account.account_number = "TT_DEMO_ACCOUNT"
         mock_account.get_positions.side_effect = Exception("API Error")
 
         client.connected = True
         client.accounts = [mock_account]
 
-        positions = await client.get_current_positions("5WZ21096")
+        positions = await client.get_current_positions("TT_DEMO_ACCOUNT")
         assert positions == []
 
     @pytest.mark.asyncio
     async def test_error_handling_in_transactions(self, client):
         """Test error handling in get_transaction_history."""
         mock_account = Mock()
-        mock_account.account_number = "5WZ21096"
+        mock_account.account_number = "TT_DEMO_ACCOUNT"
         mock_account.get_history.side_effect = Exception("API Error")
 
         client.connected = True
         client.accounts = [mock_account]
 
-        transactions = await client.get_transaction_history("5WZ21096")
+        transactions = await client.get_transaction_history("TT_DEMO_ACCOUNT")
         assert transactions == []
 
 

@@ -22,7 +22,7 @@ router = APIRouter()
 async def get_live_portfolio(
     user_id: int | None = Query(None, description="User ID (optional)"),
     account_id: str | None = Query(
-        None, description="Filter by account number (e.g., U19490886)"
+        None, description="Filter by account number (e.g., IBKR_ACCOUNT)"
     ),
     db: Session = Depends(get_db),
 ):

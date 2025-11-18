@@ -1,0 +1,42 @@
+import React from 'react';
+import { Box, VStack, Heading, Text, Icon, Button } from '@chakra-ui/react';
+
+interface EmptyStateProps {
+  icon?: React.ElementType;
+  title: string;
+  description?: string;
+  action?: { label: string; onClick: () => void };
+  secondaryAction?: { label: string; onClick: () => void };
+}
+
+const EmptyState: React.FC<EmptyStateProps> = ({ icon, title, description, action, secondaryAction }) => {
+  return (
+    <Box textAlign="center" py={12}>
+      <VStack spacing={3}>
+        {icon && <Icon as={icon} boxSize={10} color="gray.500" />}
+        <Heading size="md">{title}</Heading>
+        {description && (
+          <Text color="gray.500" maxW="3xl">
+            {description}
+          </Text>
+        )}
+        <VStack spacing={2}>
+          {action && (
+            <Button colorScheme="blue" onClick={action.onClick}>
+              {action.label}
+            </Button>
+          )}
+          {secondaryAction && (
+            <Button variant="ghost" onClick={secondaryAction.onClick}>
+              {secondaryAction.label}
+            </Button>
+          )}
+        </VStack>
+      </VStack>
+    </Box>
+  );
+};
+
+export default EmptyState;
+
+

@@ -20,7 +20,7 @@ router = APIRouter()
 async def get_stocks(
     user_id: int | None = Query(None, description="User ID (optional)"),
     account_id: str | None = Query(
-        None, description="Filter by account number (e.g., U19490886)"
+        None, description="Filter by account number (e.g., IBKR_ACCOUNT)"
     ),
     db: Session = Depends(get_db),
 ):
@@ -112,7 +112,7 @@ async def get_tax_lots_for_stock(
                         else None
                     ),
                     "cost_per_share": float(lot.cost_per_share or 0),
-                    "current_value": float(lot.market_value or 0),
+                    "market_value": float(lot.market_value or 0),
                     "unrealized_pnl": float(lot.unrealized_pnl or 0),
                     "unrealized_pnl_pct": float(lot.unrealized_pnl_pct or 0),
                     "is_long_term": (lot.holding_period or 0) >= 365,

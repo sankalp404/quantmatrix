@@ -85,7 +85,7 @@ Position(symbol="AAPL", quantity=1001, average_cost=150.25, market_value=175313.
 - **Risk metrics**: Position sizing, Greeks (options), sector exposure
 - **Performance**: Unrealized P&L, day changes
 
-#### **`options.py` - Options-Specific Data** ⭐ *CLEANED*
+#### **`options.py` - Options-Specific Data** 
 **Purpose**: Options contracts (per-contract state) and exercise/assignment tracking (IBKR FlexQuery Option Exercises)
 ```python
 Option(symbol="AAPL", strike=150, expiry="2024-03-15", option_type="CALL")
@@ -107,7 +107,7 @@ Trade(symbol="AAPL", side="BUY", quantity=100, price=150.25, strategy="ATR_ENTRY
 - **P&L tracking**: Realized gains/losses from trading
 - **Risk management**: Position sizing, ATR distances
 
-#### **`transaction.py` - Cash Flow Tracking** ⭐ *ENHANCED*
+#### **`transaction.py` - Cash Flow Tracking**
 **Purpose**: Complete cash transaction history (IBKR FlexQuery Cash Transactions - 45 fields)
 ```python
 Transaction(type="DIVIDEND", symbol="AAPL", amount=50.25)
@@ -175,7 +175,7 @@ Transfer(symbol="AAPL", quantity=100, direction="INCOMING", transfer_company="SC
 - `user.py` - User management
 - `broker_account.py` - Broker accounts (multi-brokerage)
 - `portfolio.py` - Portfolio snapshots & categorization
-- `account_balance.py` - Enhanced account balances ⭐
+- `account_balance.py` - Enhanced account balances
 - `instrument.py` - Security master
 - `position.py` - Current equity positions
 - `options.py` - Options tracking
@@ -206,12 +206,12 @@ Transfer(symbol="AAPL", quantity=100, direction="INCOMING", transfer_company="SC
 User(id=1, email="your@email.com", role="ADMIN")
 
 # Your IBKR Accounts  
-BrokerAccount(user_id=1, account_number="U19490886")
-BrokerAccount(user_id=1, account_number="U15891532")
+BrokerAccount(user_id=1, account_number="IBKR_TAXABLE_PLACEHOLDER")
+BrokerAccount(user_id=1, account_number="IBKR_IRA_PLACEHOLDER")
 
 # Your AAPL Position
 Instrument(symbol="AAPL", type="STOCK")
-Position(user_id=1, account_id="U19490886", symbol="AAPL", quantity=1001)
+Position(user_id=1, account_id="IBKR_TAXABLE_PLACEHOLDER", symbol="AAPL", quantity=1001)
 
 # Your AAPL Purchase
 Trade(symbol="AAPL", side="BUY", quantity=1001)
@@ -227,7 +227,7 @@ AccountBalance(net_liquidation_value=500000, buying_power=250000)
 
 This architecture ensures:
 - ✅ **Accurate cost basis tracking** (your AAPL 1,001 shares test)
-- ✅ **Multi-account support** (U19490886 & U15891532)
+- ✅ **Multi-account support** (multiple IBKR accounts)
 - ✅ **Real-time portfolio monitoring**
 - ✅ **Complete tax reporting** (all transactions & lots)
 - ✅ **Future scalability** (additional users & brokerages) 

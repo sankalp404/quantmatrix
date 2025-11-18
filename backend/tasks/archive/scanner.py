@@ -5,16 +5,50 @@ from datetime import datetime
 
 from celery import Task
 from .celery_app import celery_app
-from backend.services.market_data import market_data_service
-from backend.core.strategies.atr_matrix import atr_matrix_strategy
-from backend.services.discord_notifier import discord_notifier
+from backend.services.market.market_data_service import (
+    market_data_service,
+    POPULAR_STOCKS,
+)
+
+try:
+    # Optional strategy import; provide fallback if unavailable
+    from backend.core.strategies.atr_matrix import atr_matrix_strategy  # type: ignore
+except Exception:  # pragma: no cover - fallback for non-critical optional module
+
+    class _DummyAnalysis:
+        def __init__(self):
+            self.recommendation = "HOLD"
+            self.confidence = 0.0
+            self.overall_score = 0.0
+            self.signals = []
+
+    class _DummyStrategy:
+        async def analyze(self, symbol: str, technical_data):
+            return _DummyAnalysis()
+
+    atr_matrix_strategy = _DummyStrategy()
+
+try:
+    from backend.services.notifications.discord_service import (
+        discord_notifier,
+    )
+except Exception:
+
+    class _NullNotifier:
+        def is_configured(self) -> bool:
+            return False
+
+        async def send_scanner_results(self, *args, **kwargs):
+            return None
+
+        async def send_entry_signal(self, *args, **kwargs):
+            return None
+
+    discord_notifier = _NullNotifier()
 
 logger = logging.getLogger(__name__)
 
-# Import popular stocks from market data service
-from backend.services.market_data import POPULAR_STOCKS
-
-# Use a subset for regular scanning to respect Alpha Vantage rate limits
+# Use a subset for regular scanning to respect API limits
 SCAN_UNIVERSE = POPULAR_STOCKS[:30]  # Top 30 stocks for regular scans
 
 

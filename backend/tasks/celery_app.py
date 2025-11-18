@@ -2,23 +2,25 @@ from celery import Celery
 from celery.schedules import crontab
 from backend.config import settings
 
-# Create Celery instance
 celery_app = Celery(
     "quantmatrix",
     broker=settings.CELERY_BROKER_URL,
     backend=settings.CELERY_RESULT_BACKEND,
     include=[
-        "backend.tasks.scanner",
-        "backend.tasks.monitor",
+        "backend.tasks.account_sync",
+        "backend.tasks.market_data_tasks",
     ],
 )
+
+# Use values provided by settings (from .env/docker-compose)
+celery_app.conf.broker_url = settings.CELERY_BROKER_URL
+celery_app.conf.result_backend = settings.CELERY_RESULT_BACKEND
 
 # Celery configuration
 celery_app.conf.update(
     # Task routing
     task_routes={
-        "backend.tasks.scanner.*": {"queue": "scanner"},
-        "backend.tasks.monitor.*": {"queue": "monitor"},
+        "backend.tasks.account_sync.*": {"queue": "account_sync"},
     },
     # Worker configuration
     worker_max_tasks_per_child=1000,
@@ -35,69 +37,45 @@ celery_app.conf.update(
     enable_utc=True,
     # Beat schedule for periodic tasks
     beat_schedule={
-        # Morning Brew - Daily market intelligence at 7:30 AM ET
-        "morning-brew": {
-            "task": "backend.tasks.monitor.send_morning_brew",
-            "schedule": crontab(hour=12, minute=30),  # 7:30 AM ET in UTC
+        # Nightly (ordered chronologically, UTC):
+        # 1) IBKR Flex sync
+        "ibkr-daily-flex-sync": {
+            "task": "backend.tasks.account_sync.sync_all_ibkr_accounts",
+            "schedule": crontab(hour=2, minute=15),  # 10:15 PM ET
             "args": (),
         },
-        # Daily ATR Matrix scan at 9:15 AM and 3:15 PM ET
-        "daily-atr-scan-morning": {
-            "task": "backend.tasks.scanner.run_atr_matrix_scan",
-            "schedule": crontab(hour=14, minute=15),  # 9:15 AM ET in UTC
+        # 2) Build tracked set and delta in Redis
+        "update-tracked-symbol-cache": {
+            "task": "backend.tasks.market_data_tasks.update_tracked_symbol_cache",
+            "schedule": crontab(hour=2, minute=30),  # 10:30 PM ET
             "args": (),
         },
-        "daily-atr-scan-afternoon": {
-            "task": "backend.tasks.scanner.run_atr_matrix_scan",
-            "schedule": crontab(hour=20, minute=15),  # 3:15 PM ET in UTC
+        # 3) Backfill only newly tracked symbols
+        "backfill-new-tracked": {
+            "task": "backend.tasks.market_data_tasks.backfill_new_tracked",
+            "schedule": crontab(hour=2, minute=45),  # 10:45 PM ET
             "args": (),
         },
-        # Portfolio monitoring every 5 minutes during market hours
-        "portfolio-monitor": {
-            "task": "backend.tasks.monitor.monitor_portfolios",
-            "schedule": crontab(minute="*/5", hour="14-21"),  # 9 AM - 4 PM ET
+        # 4) Delta backfill for all tracked symbols (indices ∪ portfolio)
+        "backfill-last-200": {
+            "task": "backend.tasks.market_data_tasks.backfill_last_200_bars",
+            "schedule": crontab(hour=3, minute=0),  # 11:00 PM ET
             "args": (),
         },
-        # Alert checking every minute during market hours
-        "check-alerts": {
-            "task": "backend.tasks.monitor.check_alerts",
-            "schedule": crontab(
-                minute="*", hour="14-21"
-            ),  # Every minute 9 AM - 4 PM ET
+        # 5) Record immutable daily history before final recompute (captures end-of-day state)
+        "record-daily-history": {
+            "task": "backend.tasks.market_data_tasks.record_daily_history",
+            "schedule": crontab(hour=3, minute=20),  # 11:20 PM ET
             "args": (),
         },
-        # Daily portfolio summary at market close
-        "daily-portfolio-summary": {
-            "task": "backend.tasks.monitor.send_daily_summary",
-            "schedule": crontab(hour=21, minute=30),  # 4:30 PM ET
-            "args": (),
-        },
-        # Weekly performance report on Sunday
-        "weekly-performance-report": {
-            "task": "backend.tasks.monitor.send_weekly_report",
-            "schedule": crontab(day_of_week=0, hour=10, minute=0),  # Sunday 10 AM
-            "args": (),
-        },
-        # Clean up old data monthly
-        "cleanup-old-data": {
-            "task": "backend.tasks.monitor.cleanup_old_data",
-            "schedule": crontab(
-                day_of_month=1, hour=2, minute=0
-            ),  # 1st of month at 2 AM
+        # 6) Recompute indicators last for next-day use/performance (freshest cache)
+        "recompute-indicators-universe": {
+            "task": "backend.tasks.market_data_tasks.recompute_indicators_universe",
+            "schedule": crontab(hour=3, minute=35),  # 11:35 PM ET
             "args": (),
         },
     },
 )
 
 # Optional: Only enable beat schedule in production
-if not settings.DEBUG:
-    celery_app.conf.beat_schedule = celery_app.conf.beat_schedule
-else:
-    # Reduced schedule for development
-    celery_app.conf.beat_schedule = {
-        "test-scanner": {
-            "task": "backend.tasks.scanner.run_atr_matrix_scan",
-            "schedule": 300.0,  # Every 5 minutes
-            "args": (),
-        },
-    }
+celery_app.conf.beat_schedule = celery_app.conf.beat_schedule

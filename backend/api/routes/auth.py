@@ -7,6 +7,7 @@ Includes JWT token handling and user profile management.
 """
 
 from datetime import datetime, timedelta
+import hashlib
 from typing import Optional
 from fastapi import APIRouter, Depends, HTTPException, status
 from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
@@ -26,7 +27,8 @@ logger = logging.getLogger(__name__)
 
 # Security setup
 security = HTTPBearer()
-pwd_context = CryptContext(schemes=["bcrypt"], deprecated="auto")
+# Prefer sha256_crypt for new hashes; keep bcrypt to verify legacy hashes
+pwd_context = CryptContext(schemes=["sha256_crypt", "bcrypt"], deprecated="auto")
 
 # JWT configuration
 SECRET_KEY = getattr(settings, "SECRET_KEY", "fallback-secret-key-for-development")
@@ -159,7 +161,7 @@ def authenticate_user(db: Session, username: str, password: str) -> Optional[Use
     user = db.query(User).filter(User.username == username).first()
     if not user:
         return None
-    if not verify_password(password, user.hashed_password):
+    if not verify_password(password, user.password_hash or ""):
         return None
     return user
 
@@ -232,7 +234,7 @@ async def register_user(
     db_user = User(
         username=user_data.username,
         email=user_data.email,
-        hashed_password=hashed_password,
+        password_hash=hashed_password,
         full_name=user_data.full_name,
         is_active=True,
     )
@@ -315,13 +317,13 @@ async def change_password(
     Requires valid authentication token and current password.
     """
     # Verify current password
-    if not verify_password(current_password, current_user.hashed_password):
+    if not verify_password(current_password, current_user.password_hash or ""):
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST, detail="Incorrect current password"
         )
 
     # Update password
-    current_user.hashed_password = get_password_hash(new_password)
+    current_user.password_hash = get_password_hash(new_password)
     db.commit()
 
     logger.info(f"Password changed for user: {current_user.username}")

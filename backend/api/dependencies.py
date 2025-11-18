@@ -3,7 +3,7 @@ QuantMatrix V1 - API Dependencies
 Common dependencies for API endpoints.
 """
 
-from fastapi import Depends, HTTPException, status
+from fastapi import Depends, HTTPException, status, Security
 from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
 from sqlalchemy.orm import Session
 import logging
@@ -14,6 +14,7 @@ from backend.models.user import User
 logger = logging.getLogger(__name__)
 
 security = HTTPBearer()
+optional_security = HTTPBearer(auto_error=False)
 
 
 async def get_current_user(
@@ -78,3 +79,29 @@ async def get_admin_user(current_user: User = Depends(get_current_user)) -> User
         )
 
     return current_user
+
+
+async def get_optional_user(
+    credentials: HTTPAuthorizationCredentials | None = Security(optional_security),
+    db: Session = Depends(get_db),
+):
+    """Return None if no credentials provided; otherwise validate like get_current_user."""
+    if not credentials:
+        return None
+    try:
+        _token = credentials.credentials
+        user_id = 1  # TODO: decode from JWT when implemented
+        user = db.query(User).filter(User.id == user_id).first()
+        if not user or not user.is_active:
+            raise HTTPException(
+                status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid user"
+            )
+        return user
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"❌ Optional auth error: {e}")
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Could not validate credentials",
+        )
