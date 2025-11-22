@@ -171,6 +171,40 @@ class TastyTradeClient:
             )
             return False
 
+    async def connect_with_credentials(self, username: str, password: str, is_test_env: Optional[bool] = None, mfa_code: Optional[str] = None) -> bool:
+        """Login using provided credentials (no env seeding)."""
+        if not TASTYTRADE_AVAILABLE:
+            return False
+        try:
+            is_test = is_test_env if is_test_env is not None else getattr(settings, "TASTYTRADE_IS_TEST", True)
+            # The SDK may require MFA; if supported by Session, pass it; otherwise handle error text
+            try:
+                self.session = Session(username, password, is_test=is_test) if mfa_code is None else Session(username, password, is_test=is_test, mfa_code=mfa_code)  # type: ignore[arg-type]
+            except TypeError:
+                # Fallback if SDK signature does not accept mfa_code param
+                self.session = Session(username, password, is_test=is_test)
+            self.accounts = Account.get(self.session) or []
+            if not self.accounts:
+                raise Exception("No TastyTrade accounts found")
+            self.connected = True
+            self.connection_start_time = datetime.now()
+            self.connection_health.update(
+                {
+                    "status": "connected",
+                    "last_successful_request": datetime.now(),
+                    "consecutive_failures": 0,
+                    "connection_uptime": 0,
+                }
+            )
+            return True
+        except Exception as e:
+            logger.error(f"TastyTrade login failed: {e}")
+            self.connection_health["last_error"] = str(e)
+            self.connected = False
+            self.session = None
+            self.accounts = []
+            return False
+
     async def _verify_connection(self) -> bool:
         """Verify connection health with a simple API call."""
         try:

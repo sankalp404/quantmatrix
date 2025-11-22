@@ -14,12 +14,13 @@ from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
 from pydantic import BaseModel, EmailStr
 from sqlalchemy.orm import Session
 from passlib.context import CryptContext
-import jwt
 import logging
 
 from backend.database import get_db
 from backend.models.user import User
 from backend.config import settings
+from backend.api.security import create_access_token
+from backend.api.dependencies import get_current_user
 from fastapi.responses import RedirectResponse
 import httpx
 
@@ -31,8 +32,6 @@ security = HTTPBearer()
 pwd_context = CryptContext(schemes=["sha256_crypt", "bcrypt"], deprecated="auto")
 
 # JWT configuration
-SECRET_KEY = getattr(settings, "SECRET_KEY", "fallback-secret-key-for-development")
-ALGORITHM = "HS256"
 ACCESS_TOKEN_EXPIRE_MINUTES = 30
 
 router = APIRouter()
@@ -104,6 +103,7 @@ class Token(BaseModel):
 
     access_token: str
     token_type: str
+    role: Optional[str] = None
 
 
 class UserResponse(BaseModel):
@@ -115,6 +115,7 @@ class UserResponse(BaseModel):
     full_name: Optional[str]
     is_active: bool
     created_at: datetime
+    role: Optional[str] = None
 
     class Config:
         from_attributes = True
@@ -131,29 +132,9 @@ def get_password_hash(password: str) -> str:
     return pwd_context.hash(password)
 
 
-def create_access_token(data: dict, expires_delta: Optional[timedelta] = None):
-    """Create a JWT access token."""
-    to_encode = data.copy()
-    if expires_delta:
-        expire = datetime.utcnow() + expires_delta
-    else:
-        expire = datetime.utcnow() + timedelta(minutes=15)
-
-    to_encode.update({"exp": expire})
-    encoded_jwt = jwt.encode(to_encode, SECRET_KEY, algorithm=ALGORITHM)
-    return encoded_jwt
-
-
 def verify_token(token: str) -> Optional[str]:
-    """Verify a JWT token and return the username."""
-    try:
-        payload = jwt.decode(token, SECRET_KEY, algorithms=[ALGORITHM])
-        username: str = payload.get("sub")
-        if username is None:
-            return None
-        return username
-    except jwt.PyJWTError:
-        return None
+    """Deprecated: use dependencies.get_current_user instead."""
+    return None
 
 
 def authenticate_user(db: Session, username: str, password: str) -> Optional[User]:
@@ -166,36 +147,7 @@ def authenticate_user(db: Session, username: str, password: str) -> Optional[Use
     return user
 
 
-# Dependency to get current user
-async def get_current_user(
-    credentials: HTTPAuthorizationCredentials = Depends(security),
-    db: Session = Depends(get_db),
-) -> User:
-    """
-    Dependency to get the current authenticated user.
-    Validates JWT token and returns the user object.
-    """
-    credentials_exception = HTTPException(
-        status_code=status.HTTP_401_UNAUTHORIZED,
-        detail="Could not validate credentials",
-        headers={"WWW-Authenticate": "Bearer"},
-    )
-
-    try:
-        # Extract token from Authorization header
-        token = credentials.credentials
-        username = verify_token(token)
-        if username is None:
-            raise credentials_exception
-    except Exception:
-        raise credentials_exception
-
-    # Get user from database
-    user = db.query(User).filter(User.username == username).first()
-    if user is None:
-        raise credentials_exception
-
-    return user
+#
 
 
 async def get_current_active_user(
@@ -264,12 +216,12 @@ async def login_user(user_data: UserLogin, db: Session = Depends(get_db)) -> Tok
     # Create access token
     access_token_expires = timedelta(minutes=ACCESS_TOKEN_EXPIRE_MINUTES)
     access_token = create_access_token(
-        data={"sub": user.username}, expires_delta=access_token_expires
+        data={"sub": user.username, "role": getattr(user.role, "value", None)}, expires_delta=access_token_expires
     )
 
     logger.info(f"User logged in: {user.username}")
 
-    return {"access_token": access_token, "token_type": "bearer"}
+    return {"access_token": access_token, "token_type": "bearer", "role": getattr(user.role, "value", None)}
 
 
 @router.get("/me", response_model=UserResponse)
@@ -278,7 +230,9 @@ async def get_current_user_info(user: User = Depends(get_current_user)) -> UserR
     Get current user information.
     Requires valid authentication token.
     """
-    return UserResponse.from_orm(user)
+    resp = UserResponse.from_orm(user)
+    resp.role = getattr(user.role, "value", None)
+    return resp
 
 
 @router.put("/me", response_model=UserResponse)

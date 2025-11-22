@@ -42,11 +42,13 @@ from backend.models.broker_account import (
     AccountStatus,
     SyncStatus,
 )
+from backend.models.user import User, UserRole
 from backend.services.clients.tastytrade_client import (
     TastyTradeClient,
     TASTYTRADE_AVAILABLE,
 )
 from backend.services.portfolio.account_config_service import account_config_service
+from backend.api.routes.auth import get_password_hash
 
 logger = logging.getLogger(__name__)
 
@@ -98,6 +100,38 @@ async def startup_event():
 
         # Initialize services
         logger.info("🚀 QuantMatrix V1 API starting up...")
+        # Seed admin user if configured (dev only)
+        try:
+            if getattr(settings, "DEBUG", True):
+                admin_user = getattr(settings, "ADMIN_USERNAME", None)
+                admin_email = getattr(settings, "ADMIN_EMAIL", None)
+                admin_password = getattr(settings, "ADMIN_PASSWORD", None)
+                if admin_user and admin_email and admin_password:
+                    db = SessionLocal()
+                    existing = (
+                        db.query(User)
+                        .filter((User.username == admin_user) | (User.email == admin_email))
+                        .first()
+                    )
+                    if not existing:
+                        u = User(
+                            username=admin_user,
+                            email=admin_email,
+                            password_hash=get_password_hash(admin_password),
+                            role=UserRole.ADMIN,
+                            is_active=True,
+                            is_verified=True,
+                        )
+                        db.add(u)
+                        db.commit()
+                        logger.info(f"👑 Seeded admin user '{admin_user}' (dev)")
+                    db.close()
+                else:
+                    logger.info("Admin seeding skipped (ADMIN_* not set)")
+            else:
+                logger.info("Admin seeding disabled in non-dev environment")
+        except Exception as se:
+            logger.warning(f"Admin seeding skipped/failed: {se}")
         # Optional price bootstrap temporarily disabled until MarketDataService is stabilized
         # Seed default user and broker accounts from .env for dev convenience
         try:
@@ -234,11 +268,12 @@ app.include_router(
 # app.include_router(strategies.router, prefix="/api/v1/strategies", tags=["Strategies"])  # DISABLED: Import errors
 # ATR endpoints remain disabled
 # app.include_router(notifications.router, prefix="/api/v1/notifications", tags=["Notifications"])  # DISABLED: Non-essential
-# app.include_router(admin.router, prefix="/api/v1/admin", tags=["Admin"])  # DISABLED: Non-essential
+from backend.api.routes import admin
 app.include_router(account_management.router)
 app.include_router(market_data.router, prefix="/api/v1/market-data", tags=["Market Data & Technicals"])
 app.include_router(activity_routes.router, prefix="/api/v1/portfolio", tags=["Activity"])
 app.include_router(aggregator_routes.router, prefix="/api/v1/aggregator", tags=["Aggregator"])
+app.include_router(admin.router, prefix="/api/v1/admin", tags=["Admin"])
 
 
 # Global error handler

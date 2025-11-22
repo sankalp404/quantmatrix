@@ -1,5 +1,6 @@
 import React, { createContext, useContext, useEffect, useMemo, useState } from 'react';
 import api from '../services/api';
+import { useAuth } from './AuthContext';
 
 type SelectedAccount = 'all' | 'taxable' | 'ira' | string; // string = concrete account id like U12345678
 
@@ -30,6 +31,7 @@ export const AccountProvider: React.FC<{ children: React.ReactNode }> = ({ child
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [selected, setSelected] = useState<SelectedAccount>('all');
+  const { token, ready, logout } = useAuth();
 
   // Bootstrap selected from URL or localStorage
   useEffect(() => {
@@ -56,9 +58,13 @@ export const AccountProvider: React.FC<{ children: React.ReactNode }> = ({ child
     localStorage.setItem(STORAGE_KEY, selected);
   }, [selected]);
 
-  // Load accounts list
+  // Load accounts list (only when authenticated)
   useEffect(() => {
     const load = async () => {
+      if (!ready || !token) {
+        setAccounts([]);
+        return;
+      }
       setLoading(true);
       setError(null);
       try {
@@ -77,12 +83,16 @@ export const AccountProvider: React.FC<{ children: React.ReactNode }> = ({ child
         setAccounts(normalized);
       } catch (e: any) {
         setError(e?.message || 'Failed to load accounts');
+        // If unauthorized, clear accounts
+        if (e?.status === 401 || e?.response?.status === 401) {
+          setAccounts([]);
+        }
       } finally {
         setLoading(false);
       }
     };
     load();
-  }, []);
+  }, [token, ready]);
 
   const value = useMemo<AccountContextValue>(() => {
     return { accounts, loading, error, selected, setSelected };

@@ -1,0 +1,59 @@
+import React from 'react';
+import { describe, it, expect, vi } from 'vitest';
+import { MemoryRouter } from 'react-router-dom';
+import { ChakraProvider } from '@chakra-ui/react';
+import { render, screen, fireEvent, waitFor } from '@testing-library/react';
+import Settings from '../../pages/Settings';
+
+vi.mock('../../services/api', () => {
+  return {
+    accountsApi: {
+      list: vi.fn().mockResolvedValue([]),
+      add: vi.fn().mockResolvedValue({ id: 1 }),
+      sync: vi.fn().mockResolvedValue({ status: 'queued', task_id: 't1' }),
+      syncStatus: vi.fn().mockResolvedValue({ sync_status: 'completed' }),
+      remove: vi.fn().mockResolvedValue({ message: 'ok' }),
+    },
+    aggregatorApi: {
+      config: vi.fn().mockResolvedValue({ schwab: { configured: true, redirect_uri: 'https://example.com/cb' } }),
+      tastytradeStatus: vi.fn().mockResolvedValue({ available: true, connected: false }),
+      tastytradeConnect: vi.fn().mockResolvedValue({ job_id: 'job1' }),
+      tastytradeDisconnect: vi.fn().mockResolvedValue({}),
+      tastytradeStatus: vi.fn().mockResolvedValue({ job_state: 'success', connected: true }),
+      ibkrFlexConnect: vi.fn().mockResolvedValue({ job_id: 'job2' }),
+      ibkrFlexStatus: vi.fn().mockResolvedValue({ connected: true, accounts: [{ id: 99, account_number: 'IBKR_FLEX' }] }),
+      schwabLink: vi.fn().mockResolvedValue({ url: 'https://auth.example/authorize' }),
+      schwabProbe: vi.fn().mockResolvedValue({}),
+    },
+    handleApiError: (e: any) => String(e?.message || 'error'),
+  };
+});
+
+vi.mock('../../context/AuthContext', async () => {
+  const React = await import('react');
+  return {
+    useAuth: () => ({ user: { id: 1, username: 'u', email: 'e', is_active: true } }),
+  };
+});
+
+describe('Brokerages wizard', () => {
+  it('opens modal and shows broker logos', async () => {
+    render(
+      <ChakraProvider>
+        <MemoryRouter>
+          <Settings />
+        </MemoryRouter>
+      </ChakraProvider>
+    );
+    const btn = screen.getByRole('button', { name: /\+ New connection/i });
+    fireEvent.click(btn);
+    expect(await screen.findByText(/Choose a broker to connect/i)).toBeInTheDocument();
+    // Logos are images, ensure they're present
+    const imgs = await screen.findAllByRole('img');
+    expect(imgs.length).toBeGreaterThan(0);
+  });
+});
+
+
+
+

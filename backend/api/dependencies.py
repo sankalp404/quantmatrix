@@ -10,6 +10,8 @@ import logging
 
 from backend.database import get_db
 from backend.models.user import User
+from backend.models.user import UserRole
+from backend.api.security import decode_token
 
 logger = logging.getLogger(__name__)
 
@@ -26,22 +28,12 @@ async def get_current_user(
     Used by all protected endpoints.
     """
     try:
-        _token = credentials.credentials
-
-        # TODO: Implement proper JWT token validation
-        # For now, using a placeholder implementation
-
-        # In production, this would:
-        # 1. Decode JWT token
-        # 2. Verify signature
-        # 3. Check expiration
-        # 4. Extract user ID
-
-        # Placeholder: assume token contains user ID for testing
-        # Replace with proper JWT implementation
-        user_id = 1  # This should come from JWT token
-
-        user = db.query(User).filter(User.id == user_id).first()
+        token = credentials.credentials
+        payload = decode_token(token)
+        username = payload.get("sub")
+        if not username:
+            raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid token subject")
+        user = db.query(User).filter(User.username == username).first()
 
         if not user:
             raise HTTPException(
@@ -81,6 +73,21 @@ async def get_admin_user(current_user: User = Depends(get_current_user)) -> User
     return current_user
 
 
+def require_roles(roles: list[UserRole]):
+    """
+    Factory dependency to enforce one of the allowed roles on an endpoint/router.
+    Usage:
+      router = APIRouter(dependencies=[Depends(require_roles([UserRole.ADMIN]))])
+    """
+    async def _dep(current_user: User = Depends(get_current_user)) -> User:
+        if current_user.role not in roles:
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN, detail="Insufficient role"
+            )
+        return current_user
+    return _dep
+
+
 async def get_optional_user(
     credentials: HTTPAuthorizationCredentials | None = Security(optional_security),
     db: Session = Depends(get_db),
@@ -89,9 +96,12 @@ async def get_optional_user(
     if not credentials:
         return None
     try:
-        _token = credentials.credentials
-        user_id = 1  # TODO: decode from JWT when implemented
-        user = db.query(User).filter(User.id == user_id).first()
+        token = credentials.credentials
+        payload = decode_token(token)
+        username = payload.get("sub")
+        if not username:
+            raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid token subject")
+        user = db.query(User).filter(User.username == username).first()
         if not user or not user.is_active:
             raise HTTPException(
                 status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid user"
