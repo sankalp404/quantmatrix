@@ -216,7 +216,8 @@ async def login_user(user_data: UserLogin, db: Session = Depends(get_db)) -> Tok
     # Create access token
     access_token_expires = timedelta(minutes=ACCESS_TOKEN_EXPIRE_MINUTES)
     access_token = create_access_token(
-        data={"sub": user.username, "role": getattr(user.role, "value", None)}, expires_delta=access_token_expires
+        claims={"sub": user.username, "role": getattr(user.role, "value", None)},
+        expires=access_token_expires,
     )
 
     logger.info(f"User logged in: {user.username}")

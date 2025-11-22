@@ -1,6 +1,6 @@
 import React from 'react';
 import { Box, Flex, VStack, Button, Text } from '@chakra-ui/react';
-import { NavLink, Outlet, useNavigate } from 'react-router-dom';
+import { NavLink, Outlet, useNavigate, useLocation } from 'react-router-dom';
 
 const MenuLink: React.FC<{ to: string; children: React.ReactNode }> = ({ to, children }) => {
   return (
@@ -16,6 +16,7 @@ const MenuLink: React.FC<{ to: string; children: React.ReactNode }> = ({ to, chi
 
 const SettingsShell: React.FC = () => {
   const navigate = useNavigate();
+  const location = useLocation();
   React.useEffect(() => {
     // Default to brokerages if hitting /settings without child
     if (location.pathname.endsWith('/settings')) {
