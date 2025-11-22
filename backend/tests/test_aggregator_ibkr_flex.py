@@ -26,7 +26,7 @@ def _login(client):
         pytest.skip("auth endpoint not available in test env")
     r2 = client.post("/api/v1/auth/login", json={"username": username, "password": password})
     assert r2.status_code == 200
-    return r2.json().get("id"), r2.json()["access_token"]
+    return r.json().get("id"), r2.json()["access_token"]
 
 
 def test_ibkr_flex_connect_and_status(client, monkeypatch):

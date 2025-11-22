@@ -16,10 +16,13 @@ vi.mock('../../services/api', () => {
     },
     aggregatorApi: {
       config: vi.fn().mockResolvedValue({ schwab: { configured: true, redirect_uri: 'https://example.com/cb' } }),
-      tastytradeStatus: vi.fn().mockResolvedValue({ available: true, connected: false }),
+      // First status call → disconnected; subsequent calls → job success/connected
+      tastytradeStatus: vi
+        .fn()
+        .mockResolvedValueOnce({ available: true, connected: false })
+        .mockResolvedValue({ job_state: 'success', connected: true }),
       tastytradeConnect: vi.fn().mockResolvedValue({ job_id: 'job1' }),
       tastytradeDisconnect: vi.fn().mockResolvedValue({}),
-      tastytradeStatus: vi.fn().mockResolvedValue({ job_state: 'success', connected: true }),
       ibkrFlexConnect: vi.fn().mockResolvedValue({ job_id: 'job2' }),
       ibkrFlexStatus: vi.fn().mockResolvedValue({ connected: true, accounts: [{ id: 99, account_number: 'IBKR_FLEX' }] }),
       schwabLink: vi.fn().mockResolvedValue({ url: 'https://auth.example/authorize' }),

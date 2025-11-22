@@ -86,6 +86,10 @@ def db_session(test_db, request):
     if request.node.get_closest_marker("no_db"):
         yield None
         return
+    if test_db is None:
+        # Session-scoped fixture opted out of DB; provide None for this test
+        yield None
+        return
     from sqlalchemy.orm import sessionmaker
     from sqlalchemy import event
     connection = test_db.connect()
