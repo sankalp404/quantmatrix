@@ -48,14 +48,13 @@ def create_session():
 
 # Database initialization
 def init_db():
-    """Initialize database (create tables)."""
-    # Only drop tables automatically when running under pytest or explicit test env
-    if (
-        os.environ.get("PYTEST_CURRENT_TEST")
-        or os.environ.get("QUANTMATRIX_TESTING") == "1"
-    ):
-        Base.metadata.drop_all(bind=engine)
-    Base.metadata.create_all(bind=engine)
+    """Initialize database.
+
+    Production/dev: rely on Alembic migrations exclusively.
+    Tests: table lifecycle is handled in backend/tests/conftest.py against TEST_DATABASE_URL.
+    """
+    # No-op intentionally to avoid schema drift; migrations run on startup.
+    return
 
 
 # Health check

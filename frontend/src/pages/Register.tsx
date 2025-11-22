@@ -1,7 +1,8 @@
 import React, { useState } from 'react';
-import { Box, Button, Card, CardBody, FormControl, FormLabel, Input, VStack, Heading, Text, useToast } from '@chakra-ui/react';
+import { Box, Button, Card, CardBody, FormControl, FormLabel, Input, VStack, Heading, Text, useToast, InputGroup, InputRightElement, IconButton } from '@chakra-ui/react';
 import { useNavigate, Link } from 'react-router-dom';
 import { useAuth } from '../context/AuthContext';
+import { ViewIcon, ViewOffIcon } from '@chakra-ui/icons';
 
 const Register: React.FC = () => {
   const { register } = useAuth();
@@ -9,6 +10,7 @@ const Register: React.FC = () => {
   const [email, setEmail] = useState('');
   const [fullName, setFullName] = useState('');
   const [password, setPassword] = useState('');
+  const [showPw, setShowPw] = useState(false);
   const [loading, setLoading] = useState(false);
   const toast = useToast();
   const navigate = useNavigate();
@@ -46,7 +48,12 @@ const Register: React.FC = () => {
             </FormControl>
             <FormControl isRequired>
               <FormLabel>Password</FormLabel>
-              <Input type="password" value={password} onChange={(e) => setPassword(e.target.value)} placeholder="••••••••" />
+              <InputGroup>
+                <Input type={showPw ? 'text' : 'password'} value={password} onChange={(e) => setPassword(e.target.value)} placeholder="••••••••" />
+                <InputRightElement>
+                  <IconButton aria-label={showPw ? 'Hide password' : 'Show password'} icon={showPw ? <ViewOffIcon /> : <ViewIcon />} size="sm" variant="ghost" onClick={() => setShowPw(!showPw)} />
+                </InputRightElement>
+              </InputGroup>
             </FormControl>
             <Button type="submit" isLoading={loading}>Register</Button>
             <Text fontSize="sm" color="gray.400">Already have an account? <Link to="/login">Log in</Link></Text>

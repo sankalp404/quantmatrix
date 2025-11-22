@@ -13,7 +13,7 @@ Tests for account_config_service.py functionality:
 import pytest
 from unittest.mock import Mock, patch
 
-from backend.database import SessionLocal, init_db
+from backend.database import SessionLocal
 from backend.models import User, BrokerAccount
 from backend.models.broker_account import BrokerType, AccountType, SyncStatus
 from backend.services.portfolio.account_config_service import AccountConfigService
@@ -22,14 +22,7 @@ from backend.services.portfolio.account_config_service import AccountConfigServi
 class TestAccountConfigService:
     """Test account configuration service functionality."""
 
-    @pytest.fixture(scope="function")
-    def db_session(self):
-        """Create a fresh database session for each test."""
-        # Initialize clean database
-        init_db()
-        session = SessionLocal()
-        yield session
-        session.close()
+    # Use global db_session fixture from tests/conftest.py (Alembic + transaction rollback)
 
     @pytest.fixture
     def account_service(self):

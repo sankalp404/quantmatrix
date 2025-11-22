@@ -62,6 +62,11 @@ class Settings(BaseSettings):
     ENABLE_TRADING: bool = False
     SEED_ACCOUNTS_ON_STARTUP: bool = False
 
+    # Admin seeding (development convenience)
+    ADMIN_USERNAME: Optional[str] = None
+    ADMIN_EMAIL: Optional[str] = None
+    ADMIN_PASSWORD: Optional[str] = None
+
     # Application Settings
     PORT: int = 8000
     HOST: str = "0.0.0.0"

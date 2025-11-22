@@ -13,7 +13,7 @@ Tests for broker_sync_service.py functionality:
 import pytest
 from unittest.mock import Mock, patch
 
-from backend.database import SessionLocal, init_db
+from backend.database import SessionLocal
 from backend.models import User, BrokerAccount
 from backend.models.broker_account import BrokerType, AccountType, SyncStatus
 from backend.services.portfolio.broker_sync_service import BrokerSyncService
@@ -22,14 +22,7 @@ from backend.services.portfolio.broker_sync_service import BrokerSyncService
 class TestBrokerSyncService:
     """Test broker sync service coordination functionality."""
 
-    @pytest.fixture(scope="function")
-    def db_session(self):
-        """Create a fresh database session for each test."""
-        # Initialize clean database
-        init_db()
-        session = SessionLocal()
-        yield session
-        session.close()
+    # Use global db_session fixture from tests/conftest.py (Alembic + transaction rollback)
 
     @pytest.fixture
     def broker_sync_service(self):

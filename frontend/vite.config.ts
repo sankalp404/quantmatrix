@@ -9,11 +9,15 @@ export default defineConfig({
     host: true,
     proxy: {
       '/api': {
-        target: 'http://quantmatrix_backend:8000',
+        target: 'http://backend:8000',
         changeOrigin: true,
         secure: false,
       },
     },
+  },
+  test: {
+    environment: 'jsdom',
+    setupFiles: './src/test/setup.ts',
   },
   resolve: {
     alias: {

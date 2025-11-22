@@ -42,7 +42,7 @@ def _create_account() -> BrokerAccount:
 
         user = session.query(User).filter(User.username == "sync_tester").first()
         if not user:
-            user = User(username="sync_tester", email="sync_tester@example.com", hashed_password="x", is_active=True)
+            user = User(username="sync_tester", email="sync_tester@example.com", password_hash="x", is_active=True)
             session.add(user)
             session.commit()
             session.refresh(user)

@@ -241,6 +241,16 @@ class AccountCredentials(Base):
     # Encrypted credentials (implementation specific)
     encrypted_credentials = Column(Text)  # JSON blob with broker-specific fields
     credential_hash = Column(String(255))  # For validation
+    # Provider and metadata (non-secret)
+    provider = Column(SQLEnum(BrokerType), nullable=True)
+    credential_type = Column(
+        String(32), nullable=True
+    )  # oauth|basic|api_key|ibkr_flex|tws
+    username_hint = Column(String(255))  # masked username/email if applicable
+    last_refreshed_at = Column(DateTime)
+    refresh_token_expires_at = Column(DateTime)
+    last_error = Column(Text)
+    rotation_count = Column(Integer)
 
     # Metadata
     last_updated = Column(DateTime, default=func.now())

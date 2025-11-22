@@ -30,9 +30,7 @@ setup_env() {
     if [ ! -f .env ]; then
         echo "📝 Creating .env file from template..."
         cp env.example .env
-        echo "⚠️  Please edit .env file with your configuration before proceeding."
-        echo "   At minimum, you should change the SECRET_KEY."
-        read -p "Press Enter to continue once you've configured .env..."
+        echo "⚠️  Please edit .env with your configuration (change SECRET_KEY, etc.)."
     else
         echo "✅ .env file exists"
     fi
@@ -49,6 +47,12 @@ start_services() {
     echo "🔧 Starting backend services..."
     $COMPOSE_CMD up -d backend celery_worker celery_beat flower
     
+    echo "🖥️  Starting frontend..."
+    $COMPOSE_CMD up -d frontend
+    
+    echo "☁️  Starting cloudflared (if configured)..."
+    $COMPOSE_CMD up -d cloudflared || true
+    
     echo "✅ All services started!"
 }
 
@@ -62,6 +66,7 @@ show_status() {
     echo "🌐 Access URLs:"
     echo "   • API Documentation: http://localhost:8000/docs"
     echo "   • API Health Check: http://localhost:8000/health"
+    echo "   • Frontend: http://localhost:3000"
     echo "   • Celery Monitor (Flower): http://localhost:5555"
     echo "   • PostgreSQL: localhost:5432"
     echo "   • Redis: localhost:6379"
@@ -87,6 +92,37 @@ stop_services() {
     echo "✅ All services stopped"
 }
 
+# Function to run alembic migrations
+migrate_db() {
+    echo "📦 Applying database migrations..."
+    $COMPOSE_CMD exec backend alembic -c backend/alembic.ini upgrade head
+}
+
+makemigration() {
+    MSG="$1"
+    if [ -z "$MSG" ]; then
+        echo "Usage: $0 makemigration \"message\""
+        exit 1
+    fi
+    echo "🧱 Creating Alembic revision: $MSG"
+    $COMPOSE_CMD exec backend alembic -c backend/alembic.ini revision --autogenerate -m "$MSG"
+}
+
+downgrade() {
+    REV="$1"
+    if [ -z "$REV" ]; then
+        echo "Usage: $0 downgrade <revision>"
+        exit 1
+    fi
+    echo "↩️  Downgrading to $REV"
+    $COMPOSE_CMD exec backend alembic -c backend/alembic.ini downgrade "$REV"
+}
+
+stamp_head() {
+    echo "🏷️  Stamping head"
+    $COMPOSE_CMD exec backend alembic -c backend/alembic.ini stamp head
+}
+
 # Main menu
 case "$1" in
     start)
@@ -95,6 +131,23 @@ case "$1" in
         setup_env
         start_services
         show_status
+        ;;
+    migrate)
+        check_docker_compose
+        migrate_db
+        ;;
+    makemigration)
+        check_docker_compose
+        shift
+        makemigration "$*"
+        ;;
+    downgrade)
+        check_docker_compose
+        downgrade "$2"
+        ;;
+    stamp)
+        check_docker_compose
+        stamp_head
         ;;
     stop)
         check_docker_compose
@@ -129,6 +182,10 @@ case "$1" in
         echo "  status  - Show service status and URLs"
         echo "  logs    - Show recent backend logs"
         echo "  test    - Run tests"
+        echo "  migrate - Run Alembic migrations"
+        echo "  makemigration \"msg\" - Create Alembic autogen revision"
+        echo "  downgrade <rev> - Downgrade database to revision"
+        echo "  stamp   - Stamp Alembic to head (no migration)"
         exit 1
         ;;
 esac 
