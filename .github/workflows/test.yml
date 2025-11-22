@@ -70,24 +70,15 @@ jobs:
       run: |
         cp ../env.example .env.test
         sed -i 's/localhost/postgres/g' .env.test
-        
-    - name: Run simple tests
+    
+    - name: Run backend test suite
       run: |
-        chmod +x test_simple.py
-        python test_simple.py
+        pytest -q
       env:
+        TEST_DATABASE_URL: postgresql://postgres:postgres@localhost:5432/quantmatrix_test
         DATABASE_URL: postgresql://postgres:postgres@localhost:5432/quantmatrix_test
-        REDIS_URL: redis://localhost:6379
-        TESTING: true
-
-    - name: Run API tests (if server available)
-      run: |
-        # Start a test server in the background
-        python -m uvicorn api.main:app --host 0.0.0.0 --port 8000 &
-        sleep 10
-        # Run API tests
-        python test_simple.py || echo "API tests failed - server might not be running"
-      continue-on-error: true
+        REDIS_URL: redis://localhost:6379/0
+        SECRET_KEY: test_secret_key_for_ci
 
   frontend-tests:
     runs-on: ubuntu-latest
