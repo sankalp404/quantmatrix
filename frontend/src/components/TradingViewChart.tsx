@@ -77,7 +77,6 @@ const TradingViewChart: React.FC<TradingViewChartProps> = ({
       // Professional features (lean default - no indicators on load)
       details: false,
       hotlist: false,
-      calendar: false,
       studies: [],
       // Enhanced toolbar
       toolbar_bg: "#f1f3f6",

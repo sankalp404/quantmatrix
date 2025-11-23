@@ -108,6 +108,10 @@ const renderCustomizedLabel = (entry: any) => {
   return null;
 };
 
+const CustomContent: React.FC<any> = (props) => {
+  return renderCustomizedLabel(props) as any;
+};
+
 const FinvizHeatMap: React.FC<FinvizHeatMapProps> = ({
   data,
   height = 300,
@@ -133,7 +137,7 @@ const FinvizHeatMap: React.FC<FinvizHeatMapProps> = ({
             dataKey="size"
             stroke="#fff"
             strokeWidth={1}
-            content={renderCustomizedLabel}
+            content={<CustomContent />}
           >
             {heatMapData.map((entry, index) => (
               <Cell key={`cell-${index}`} fill={entry.color} />

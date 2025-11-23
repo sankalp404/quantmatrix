@@ -186,7 +186,7 @@ const fetchDividendData = async (days: number = 365, accountId?: string) => {
     } else {
       throw new Error(result.error || 'Failed to fetch dividend data');
     }
-  } catch (error) {
+  } catch (error: any) {
     console.error('Error fetching real dividend data:', error);
     return {
       dividends: [],
@@ -194,7 +194,7 @@ const fetchDividendData = async (days: number = 365, accountId?: string) => {
       projections: [],
       upcomingDividends: [],
       analysis: {},
-      error: error.message
+      error: (error && (error as any).message) || 'Unknown error'
     };
   }
 };

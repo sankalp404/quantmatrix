@@ -71,7 +71,7 @@ def test_brokers_list(client):
 
 
 def test_link_and_callback_flow(client, monkeypatch):
-    token, username = _login_tuple := _login_token(client)
+    _login_tuple = _login_token(client)
     token, username = _login_tuple
     account_id = _create_schwab_account_for_user(username)
 

@@ -7,6 +7,7 @@ from fastapi import Depends, HTTPException, status, Security
 from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
 from sqlalchemy.orm import Session
 import logging
+from typing import Optional, List
 
 from backend.database import get_db
 from backend.models.user import User
@@ -73,7 +74,7 @@ async def get_admin_user(current_user: User = Depends(get_current_user)) -> User
     return current_user
 
 
-def require_roles(roles: list[UserRole]):
+def require_roles(roles: List[UserRole]):
     """
     Factory dependency to enforce one of the allowed roles on an endpoint/router.
     Usage:
@@ -89,7 +90,7 @@ def require_roles(roles: list[UserRole]):
 
 
 async def get_optional_user(
-    credentials: HTTPAuthorizationCredentials | None = Security(optional_security),
+    credentials: Optional[HTTPAuthorizationCredentials] = Security(optional_security),
     db: Session = Depends(get_db),
 ):
     """Return None if no credentials provided; otherwise validate like get_current_user."""
