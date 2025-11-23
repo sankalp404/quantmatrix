@@ -24,7 +24,7 @@ jobs:
     
     steps:
     - name: 📥 Checkout Code
-      uses: actions/checkout@v4
+      uses: actions/checkout@v6
       
     - name: 🐍 Set up Python
       uses: actions/setup-python@v4
@@ -77,7 +77,7 @@ jobs:
     
     steps:
     - name: 📥 Checkout Code
-      uses: actions/checkout@v4
+      uses: actions/checkout@v6
       
     - name: 🐍 Set up Python
       uses: actions/setup-python@v4
@@ -108,7 +108,7 @@ jobs:
     
     steps:
     - name: 📥 Checkout Code
-      uses: actions/checkout@v4
+      uses: actions/checkout@v6
       with:
         fetch-depth: 0  # Full history for secret scanning
         
@@ -134,7 +134,7 @@ jobs:
     
     steps:
     - name: 📥 Checkout Code
-      uses: actions/checkout@v4
+      uses: actions/checkout@v6
       
     - name: 🐳 Set up Docker Buildx
       uses: docker/setup-buildx-action@v3
@@ -171,7 +171,7 @@ jobs:
     
     steps:
     - name: 📥 Checkout Code
-      uses: actions/checkout@v4
+      uses: actions/checkout@v6
       
     - name: 🐍 Set up Python
       uses: actions/setup-python@v4
@@ -249,7 +249,7 @@ jobs:
     
     steps:
     - name: 📥 Checkout Code
-      uses: actions/checkout@v4
+      uses: actions/checkout@v6
       
     - name: 📋 Financial Regulations Compliance
       run: |
