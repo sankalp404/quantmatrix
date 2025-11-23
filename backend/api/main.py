@@ -102,7 +102,7 @@ async def startup_event():
         logger.info("🚀 QuantMatrix V1 API starting up...")
         # Seed admin user if configured (dev only)
         try:
-            if getattr(settings, "DEBUG", True):
+            if settings.DEBUG:
                 admin_user = getattr(settings, "ADMIN_USERNAME", None)
                 admin_email = getattr(settings, "ADMIN_EMAIL", None)
                 admin_password = getattr(settings, "ADMIN_PASSWORD", None)

@@ -80,7 +80,7 @@ class TastyTradeClient:
                     )
 
                     # Use configured environment
-                    is_test_env = getattr(settings, "TASTYTRADE_IS_TEST", True)
+                    is_test_env = settings.TASTYTRADE_IS_TEST
                     username = getattr(settings, "TASTYTRADE_USERNAME", None)
                     password = getattr(settings, "TASTYTRADE_PASSWORD", None)
 
@@ -176,7 +176,7 @@ class TastyTradeClient:
         if not TASTYTRADE_AVAILABLE:
             return False
         try:
-            is_test = is_test_env if is_test_env is not None else getattr(settings, "TASTYTRADE_IS_TEST", True)
+            is_test = is_test_env if is_test_env is not None else settings.TASTYTRADE_IS_TEST
             # The SDK may require MFA; if supported by Session, pass it; otherwise handle error text
             try:
                 self.session = Session(username, password, is_test=is_test) if mfa_code is None else Session(username, password, is_test=is_test, mfa_code=mfa_code)  # type: ignore[arg-type]

@@ -54,6 +54,11 @@ jobs:
     name: 🧪 Backend Tests
     runs-on: ubuntu-latest
     needs: quality
+    env:
+      TEST_DATABASE_URL: postgresql://test_user:test_password@localhost:5432/test_quantmatrix
+      DATABASE_URL: postgresql://test_user:test_password@localhost:5432/app_quantmatrix
+      REDIS_URL: redis://localhost:6379/0
+      SECRET_KEY: test_secret_key_for_ci
     
     services:
       redis:
@@ -98,9 +103,10 @@ jobs:
       - name: 🔧 Set up test environment
         run: |
           cp env.example .env
-          echo "DATABASE_URL=postgresql://test_user:test_password@localhost:5432/test_quantmatrix" >> .env
+          echo "DATABASE_URL=postgresql://test_user:test_password@localhost:5432/app_quantmatrix" >> .env
           echo "REDIS_URL=redis://localhost:6379/0" >> .env
           echo "SECRET_KEY=test_secret_key_for_ci" >> .env
+          echo "TEST_DATABASE_URL=postgresql://test_user:test_password@localhost:5432/test_quantmatrix" >> .env
       
       - name: ⚡ Run quick tests
         run: python3 backend/run_tests.py --quick

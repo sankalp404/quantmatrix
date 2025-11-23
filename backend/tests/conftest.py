@@ -43,11 +43,6 @@ def test_db(request):
             f"Models not available: {IMPORT_ERROR if not MODELS_AVAILABLE else ''}"
         )
 
-    # Skip DB setup entirely for no_db-marked test sessions
-    if request.node.get_closest_marker("no_db"):
-        yield None
-        return
-
     import os
     from sqlalchemy import create_engine
     from backend.database import DATABASE_URL as APP_DATABASE_URL
