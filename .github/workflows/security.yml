@@ -60,7 +60,7 @@ jobs:
         fi
         
     - name: 📊 Upload Security Report
-      uses: actions/upload-artifact@v3
+      uses: actions/upload-artifact@v4
       if: always()
       with:
         name: security-reports
@@ -92,7 +92,7 @@ jobs:
         bandit -r backend/ -f txt -x backend/migrations/,backend/tests_v2/
         
     - name: 📊 Upload Bandit Report
-      uses: actions/upload-artifact@v3
+      uses: actions/upload-artifact@v4
       if: always()
       with:
         name: bandit-report
