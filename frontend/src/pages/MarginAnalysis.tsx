@@ -66,8 +66,6 @@ import {
   InfoIcon,
   ArrowUpIcon,
   ArrowDownIcon,
-  TrendingUpIcon,
-  TrendingDownIcon
 } from '@chakra-ui/icons';
 import { usePortfolio } from '../hooks/usePortfolio';
 

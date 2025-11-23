@@ -1,5 +1,5 @@
 import React from 'react';
-import { BrowserRouter as Router, Routes, Route } from 'react-router-dom';
+import { BrowserRouter as Router, Routes, Route, Navigate } from 'react-router-dom';
 import { ChakraProvider, extendTheme } from '@chakra-ui/react';
 import { QueryClient, QueryClientProvider } from 'react-query';
 import { Toaster } from 'react-hot-toast';
@@ -23,11 +23,13 @@ import Analytics from './pages/Analytics';
 import Strategies from './pages/Strategies';
 import StrategiesManager from './pages/StrategiesManager';
 import Notifications from './pages/Notifications';
+import SettingsShell from './pages/SettingsShell';
 import Settings from './pages/Settings';
 import PortfolioWorkspace from './pages/PortfolioWorkspace';
 import Login from './pages/Login';
 import Register from './pages/Register';
 import RequireAuth from './components/auth/RequireAuth';
+import { Box, Heading, Text } from '@chakra-ui/react';
 
 // Theme configuration inspired by Snowball Analytics
 const theme = extendTheme({
@@ -48,6 +50,20 @@ const theme = extendTheme({
       800: '#01337D',
       900: '#002159',
     },
+    accent: {
+      yellow: {
+        50: '#FFF9E6',
+        100: '#FFEEB3',
+        200: '#FFE180',
+        300: '#FFD24D',
+        400: '#FFC21A',
+        500: '#E0A800',
+        600: '#B38300',
+        700: '#856100',
+        800: '#594200',
+        900: '#2E2200'
+      }
+    },
     gray: {
       50: '#F7FAFC',
       100: '#EDF2F7',
@@ -62,8 +78,8 @@ const theme = extendTheme({
     }
   },
   fonts: {
-    heading: `-apple-system, BlinkMacSystemFont, "Segoe UI", Helvetica, Arial, sans-serif, "Apple Color Emoji", "Segoe UI Emoji", "Segoe UI Symbol"`,
-    body: `-apple-system, BlinkMacSystemFont, "Segoe UI", Helvetica, Arial, sans-serif, "Apple Color Emoji", "Segoe UI Emoji", "Segoe UI Symbol"`,
+    heading: `'Inter', ui-sans-serif, system-ui, -apple-system, Segoe UI, Roboto, Helvetica, Arial, 'Apple Color Emoji', 'Segoe UI Emoji'`,
+    body: `'Inter', ui-sans-serif, system-ui, -apple-system, Segoe UI, Roboto, Helvetica, Arial, 'Apple Color Emoji', 'Segoe UI Emoji'`,
   },
   styles: {
     global: (props: any) => ({
@@ -104,6 +120,13 @@ const queryClient = new QueryClient({
   },
 });
 
+const BoxPlaceholder: React.FC<{ title: string }> = ({ title }) => (
+  <Box p={6}>
+    <Heading size="md" mb={2}>{title}</Heading>
+    <Text color="gray.500">This section is coming soon.</Text>
+  </Box>
+);
+
 function App() {
   return (
     <QueryClientProvider client={queryClient}>
@@ -126,7 +149,14 @@ function App() {
                   <Route path="strategies" element={<Strategies />} />
                   <Route path="strategies-manager" element={<StrategiesManager />} />
                   <Route path="notifications" element={<Notifications />} />
-                  <Route path="settings" element={<Settings />} />
+                  <Route path="settings" element={<SettingsShell />}>
+                    <Route index element={<Settings />} />
+                    <Route path="profile" element={<BoxPlaceholder title="Profile" />} />
+                    <Route path="preferences" element={<BoxPlaceholder title="Preferences" />} />
+                    <Route path="notifications" element={<BoxPlaceholder title="Notifications" />} />
+                    <Route path="security" element={<BoxPlaceholder title="Security" />} />
+                    <Route path="brokerages" element={<Settings />} />
+                  </Route>
                   <Route path="workspace" element={<PortfolioWorkspace />} />
                 </Route>
               </Routes>

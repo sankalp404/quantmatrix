@@ -6,7 +6,7 @@ class Settings(BaseSettings):
     # Application Configuration
     APP_NAME: str = "QuantMatrix Trading Platform"
     APP_VERSION: str = "2.0.0"
-    DEBUG: bool = True
+    DEBUG: bool = False
 
     # Database Configuration - using SQLite for development
     DATABASE_URL: str = "sqlite:///./quantmatrix.db"
@@ -25,7 +25,7 @@ class Settings(BaseSettings):
     # TastyTrade Configuration
     TASTYTRADE_USERNAME: Optional[str] = None
     TASTYTRADE_PASSWORD: Optional[str] = None
-    TASTYTRADE_IS_TEST: bool = True
+    TASTYTRADE_IS_TEST: bool = False
     TASTYTRADE_DISCOVER_ON_STARTUP: bool = False
 
     # IBKR Configuration
@@ -61,6 +61,11 @@ class Settings(BaseSettings):
     ENCRYPTION_KEY: Optional[str] = None
     ENABLE_TRADING: bool = False
     SEED_ACCOUNTS_ON_STARTUP: bool = False
+
+    # Admin seeding (development convenience)
+    ADMIN_USERNAME: Optional[str] = None
+    ADMIN_EMAIL: Optional[str] = None
+    ADMIN_PASSWORD: Optional[str] = None
 
     # Application Settings
     PORT: int = 8000

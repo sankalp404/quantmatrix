@@ -1,6 +1,18 @@
 Roadmap
 =======
 
+Helpful Commands
+----------------
+- Start stack: `./run.sh start`
+- Restart stack: `./run.sh restart`
+- Status: `./run.sh status`
+- Logs (backend): `./run.sh logs`
+- Tests: `./run.sh test` (requires `TEST_DATABASE_URL`)
+- Migrations: `./run.sh migrate`
+- Create migration: `./run.sh makemigration "message"`
+- Downgrade: `./run.sh downgrade <rev>`
+- Stamp head: `./run.sh stamp`
+
 Milestones
 ----------
 1) Data sync (IBKR + TastyTrade) – current

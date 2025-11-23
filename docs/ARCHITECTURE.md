@@ -1,6 +1,27 @@
 Architecture Overview
 =====================
 
+RBAC (Role-Based Access Control)
+--------------------------------
+- JWT includes `sub` (username) and `role` claim.
+- `/api/v1/auth/me` returns `{ id, username, email, role }`.
+- Use `require_roles([UserRole.ADMIN])` to guard routes. Admin router is mounted at `/api/v1/admin`.
+- Non-admins receive HTTP 403 on admin routes.
+
+Auth & Security Module
+----------------------
+- JWT helpers live in `backend/api/security.py`:
+  - `JWT_ALGORITHM = "HS256"`
+  - `create_access_token(claims, expires)` and `decode_token(token)`
+- All routes resolve the current user via `backend/api/dependencies.py` (`get_current_user`, `get_optional_user`, `require_roles`).
+- Encoding and decoding share one algorithm/secret source to avoid divergence.
+
+Admin Seeding Policy
+--------------------
+- Dev-only convenience: when `DEBUG=True` and `ADMIN_*` are set, an admin user is auto-seeded (verified and active).
+- In non-dev environments, admin seeding is disabled by default.
+- Configure in `.env`: `ADMIN_USERNAME`, `ADMIN_EMAIL`, `ADMIN_PASSWORD`, and `DEBUG`.
+
 Components
 ----------
 - Backend: FastAPI service exposing REST endpoints

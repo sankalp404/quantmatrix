@@ -71,52 +71,50 @@ def test_brokers_list(client):
 
 
 def test_link_and_callback_flow(client, monkeypatch):
-    token, username = _login_token(client)
+    _login_tuple = _login_token(client)
+    token, username = _login_tuple
     account_id = _create_schwab_account_for_user(username)
 
-    # Link -> get URL
-    r_link = client.post(
-        "/api/v1/aggregator/schwab/link",
-        json={"account_id": account_id, "trading": False},
-        headers={"Authorization": f"Bearer {token}"},
-    )
-    assert r_link.status_code == 200
-    url = r_link.json()["url"]
-    # Extract state query param from URL for callback
-    import urllib.parse as _up
-
-    qs = _up.urlparse(url).query
-    params = dict(_up.parse_qsl(qs))
-    assert "state" in params
-    state = params["state"]
-
-    # Mock httpx token exchange
+    # Stub httpx.AsyncClient used by /schwab/link (probe GET) and /schwab/callback (token POST)
     class DummyResponse:
-        def __init__(self, status_code, payload):
+        def __init__(self, status_code, payload=None):
             self.status_code = status_code
-            self._payload = payload
-
+            self._payload = payload or {}
+            self.headers = {}
         def json(self):
             return self._payload
-
     class DummyClient:
         async def __aenter__(self):
             return self
-
         async def __aexit__(self, exc_type, exc, tb):
             return False
-
+        async def get(self, url, params=None, timeout=None):
+            return DummyResponse(200)
         async def post(self, url, data=None):
-            return DummyResponse(200, {"access_token": "AT", "refresh_token": "RT"})
+            return DummyResponse(200, {\"access_token\": \"AT\", \"refresh_token\": \"RT\"})
 
     import httpx
+    monkeypatch.setattr(httpx, \"AsyncClient\", DummyClient)
 
-    monkeypatch.setattr(httpx, "AsyncClient", DummyClient)
+    # Link -> get URL (probe runs inside)
+    r_link = client.post(
+        \"/api/v1/aggregator/schwab/link\",
+        json={\"account_id\": account_id, \"trading\": False},
+        headers={\"Authorization\": f\"Bearer {token}\"},
+    )
+    assert r_link.status_code == 200
+    url = r_link.json()[\"url\"]
+    # Extract state query param from URL for callback
+    import urllib.parse as _up
+    qs = _up.urlparse(url).query
+    params = dict(_up.parse_qsl(qs))
+    assert \"state\" in params
+    state = params[\"state\"]
 
     r_cb = client.get(
-        "/api/v1/aggregator/schwab/callback", params={"code": "abc", "state": state}
+        \"/api/v1/aggregator/schwab/callback\", params={\"code\": \"abc\", \"state\": state}
     )
     assert r_cb.status_code == 200
-    assert r_cb.json().get("status") == "linked"
+    assert r_cb.json().get(\"status\") == \"linked\"
 
 

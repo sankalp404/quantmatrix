@@ -1,8 +1,8 @@
 /// <reference types="vite/client" />
 import axios, { AxiosResponse, AxiosError } from 'axios';
 
-// Use import.meta.env for Vite compatibility
-const API_BASE_URL = import.meta.env.MODE === 'production' ? '/api/v1' : 'http://localhost:8000/api/v1';
+// All environments use relative API path; Vite dev proxy handles routing in development
+const API_BASE_URL = '/api/v1';
 
 // Enhanced request queue for connection optimization
 class RequestQueue {
@@ -98,8 +98,8 @@ api.interceptors.response.use(
       data: error.response?.data
     });
 
-    // Retry logic for network errors
-    if ((error.code === 'ECONNABORTED' || error.code === 'ERR_NETWORK') && originalRequest) {
+    // Retry logic for network errors (skip when _noRetry is set)
+    if ((error.code === 'ECONNABORTED' || error.code === 'ERR_NETWORK') && originalRequest && !(originalRequest as any)._noRetry) {
       if (!(originalRequest as any)._retry) {
         (originalRequest as any)._retry = true;
         console.log('🔄 Retrying request:', originalRequest.url);
@@ -349,6 +349,8 @@ export const handleApiError = (error: any): string => {
     const message = error.response.data?.detail || error.response.data?.message || 'Unknown error';
 
     switch (status) {
+      case 401:
+        return 'Unauthorized - please log in again';
       case 503:
         return 'Service unavailable - IBKR connection required';
       case 500:
@@ -431,4 +433,14 @@ export const aggregatorApi = {
   schwabLink: async (account_id: number, trading: boolean = false) =>
     makeOptimizedRequest(() => api.post('/aggregator/schwab/link', { account_id, trading })),
   config: async () => makeOptimizedRequest(() => api.get('/aggregator/config')),
+  schwabProbe: async () => makeOptimizedRequest(() => api.get('/aggregator/schwab/probe')),
+  tastytradeConnect: async (payload: { username: string; password: string; mfa_code?: string }) =>
+    makeOptimizedRequest(() => api.post('/aggregator/tastytrade/connect', payload, { timeout: 60000, _noRetry: true } as any)),
+  tastytradeDisconnect: async () => makeOptimizedRequest(() => api.post('/aggregator/tastytrade/disconnect')),
+  tastytradeStatus: async (jobId?: string) =>
+    makeOptimizedRequest(() => api.get('/aggregator/tastytrade/status', { params: jobId ? { job_id: jobId } : {} })),
+  ibkrFlexConnect: async (payload: { flex_token: string; query_id: string }) =>
+    makeOptimizedRequest(() => api.post('/aggregator/ibkr/connect', payload, { timeout: 60000, _noRetry: true } as any)),
+  ibkrFlexStatus: async () => makeOptimizedRequest(() => api.get('/aggregator/ibkr/status')),
+  ibkrFlexDisconnect: async () => makeOptimizedRequest(() => api.post('/aggregator/ibkr/disconnect')),
 };

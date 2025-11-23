@@ -179,7 +179,7 @@ class IBKRFlexQueryClient:
             logger.error(f"❌ Error getting historical option exercises: {e}")
             return []
 
-    async def _request_report(self, account_id: str | None = None) -> Optional[str]:
+    async def _request_report(self, account_id: Optional[str] = None) -> Optional[str]:
         """Request FlexQuery report generation with exponential back-off (40→80→160 s)."""
         url = f"{self.base_url}/SendRequest"
         params = {"t": self.token, "q": self.query_id, "v": "3"}
@@ -272,7 +272,7 @@ class IBKRFlexQueryClient:
         return None
 
     async def _get_report(
-        self, reference_code: str, account_id: str | None = None
+        self, reference_code: str, account_id: Optional[str] = None
     ) -> Optional[str]:
         """Retrieve generated FlexQuery report."""
         url = f"{self.base_url}/GetStatement"

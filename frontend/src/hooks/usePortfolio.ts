@@ -1,5 +1,5 @@
 import { useQuery, useMutation, useQueryClient } from 'react-query';
-import { portfolioApi, tasksApi, handleApiError, PortfolioSummary } from '../services/api';
+import { portfolioApi, tasksApi, handleApiError, PortfolioSummary, accountsApi } from '../services/api';
 import toast from 'react-hot-toast';
 
 // Main hook for live portfolio data (used by most components)
@@ -26,7 +26,7 @@ export const usePortfolio = () => {
 export const usePortfolioSummary = (accountId?: string) => {
   return useQuery(
     ['portfolioSummary', accountId],
-    () => portfolioApi.getSummary(accountId),
+    () => portfolioApi.getDashboard(accountId),
     {
       refetchInterval: 30000, // Refetch every 30 seconds
       staleTime: 20000, // Consider data stale after 20 seconds
@@ -42,7 +42,7 @@ export const usePortfolioSummary = (accountId?: string) => {
 export const usePortfolioHealth = () => {
   return useQuery(
     'portfolioHealth',
-    portfolioApi.getHealth,
+    () => portfolioApi.getDashboard(),
     {
       refetchInterval: 60000, // Check every minute
       staleTime: 30000,
@@ -58,7 +58,7 @@ export const usePortfolioHealth = () => {
 export const usePortfolioAccounts = () => {
   return useQuery(
     'portfolioAccounts',
-    portfolioApi.getAccounts,
+    accountsApi.list,
     {
       staleTime: 300000, // 5 minutes
       onError: (error) => {
@@ -74,7 +74,7 @@ export const usePortfolioSync = () => {
   const queryClient = useQueryClient();
 
   return useMutation(
-    portfolioApi.syncData,
+    portfolioApi.sync,
     {
       onMutate: () => {
         toast.loading('Syncing portfolio data...', { id: 'portfolio-sync' });
@@ -206,13 +206,13 @@ export const useDashboardData = () => {
 
 // Helper function to transform API data for charts
 export const transformPortfolioDataForCharts = (data: PortfolioSummary) => {
-  if (!data?.all_positions) return [];
-
-  return data.all_positions.map(position => ({
+  const anyData: any = data as any;
+  const positions = anyData?.all_positions || anyData?.positions || [];
+  return positions.map((position: any) => ({
     symbol: position.symbol,
-    value: position.market_value,
-    gainLoss: position.unrealized_pnl,
-    gainLossPct: position.unrealized_pnl_pct,
+    value: position.market_value ?? position.value ?? 0,
+    gainLoss: position.unrealized_pnl ?? 0,
+    gainLossPct: position.unrealized_pnl_pct ?? 0,
     account: position.account,
   }));
 }; 
