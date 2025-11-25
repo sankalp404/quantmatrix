@@ -20,6 +20,7 @@ from sqlalchemy import (
 from sqlalchemy.orm import relationship
 from sqlalchemy.sql import func
 from datetime import datetime
+from sqlalchemy import Text
 
 from . import Base
 
@@ -60,6 +61,7 @@ class PriceData(Base):
         UniqueConstraint("symbol", "date", "interval", name="uq_symbol_date_interval"),
         Index("idx_symbol_date", "symbol", "date"),
         Index("idx_date_range", "date"),
+        Index("idx_symbol_interval_date", "symbol", "interval", "date"),
     )
 
 
@@ -200,5 +202,29 @@ class MarketSnapshotHistory(Base):
             "symbol", "analysis_type", "as_of_date", name="uq_symbol_type_asof"
         ),
         Index("idx_hist_symbol_date", "symbol", "as_of_date"),
+    )
+
+
+class JobRun(Base):
+    """Persistent job run registry for task observability and auditing.
+
+    Table name: job_run
+    """
+
+    __tablename__ = "job_run"
+
+    id = Column(Integer, primary_key=True, index=True)
+    task_name = Column(String(100), nullable=False, index=True)
+    params = Column(JSON)  # parameters provided to the task
+    status = Column(String(20), nullable=False, index=True)  # running|ok|error|cancelled
+    counters = Column(JSON)  # arbitrary counters (e.g., processed, errors)
+    error = Column(Text)  # error message/traceback if any
+    started_at = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)
+    finished_at = Column(DateTime(timezone=True))
+    created_at = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)
+
+    __table_args__ = (
+        Index("idx_jobrun_task_time", "task_name", "started_at"),
+        Index("idx_jobrun_status_time", "status", "started_at"),
     )
 

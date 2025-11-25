@@ -70,11 +70,11 @@ interface NavItemProps {
 }
 
 const NavItem: React.FC<NavItemProps> = ({ icon: Icon, label, isActive, onClick, badge }) => {
-  const bg = useColorModeValue('gray.100', 'gray.700');
-  const activeBg = useColorModeValue('brand.50', 'brand.900');
-  const activeColor = useColorModeValue('brand.600', 'brand.200');
+  const bg = useColorModeValue('gray.100', 'rgba(255,255,255,0.05)');
+  const activeBg = useColorModeValue('rgba(59,130,246,0.15)', 'brand.500');
+  const activeColor = useColorModeValue('brand.600', 'white');
   const color = useColorModeValue('gray.600', 'gray.300');
-  const hoverColor = useColorModeValue('gray.800', 'white');
+  const hoverColor = useColorModeValue('gray.900', 'white');
 
   return (
     <Flex
@@ -123,8 +123,10 @@ const NavItem: React.FC<NavItemProps> = ({ icon: Icon, label, isActive, onClick,
 const DashboardLayout: React.FC = () => {
   const location = useLocation();
   const navigate = useNavigate();
-  const sidebarBg = useColorModeValue('white', 'gray.800');
-  const borderColor = useColorModeValue('gray.200', 'gray.700');
+  const sidebarBg = useColorModeValue('white', '#05070F');
+  const headerBg = useColorModeValue('white', '#0B1424');
+  const borderColor = useColorModeValue('gray.200', 'rgba(255,255,255,0.08)');
+  const appBg = useColorModeValue('surface.base', '#0F172A');
   const { colorMode, toggleColorMode } = useColorMode();
   const { accounts, loading: accountsLoading, selected, setSelected } = useAccountContext();
   const { user, logout } = useAuth();
@@ -160,7 +162,7 @@ const DashboardLayout: React.FC = () => {
   };
 
   return (
-    <Flex h="100vh" bg={useColorModeValue('gray.50', 'gray.900')}>
+    <Flex h="100vh" bg={appBg}>
       {/* Sidebar */}
       <Box
         w={64}
@@ -262,7 +264,7 @@ const DashboardLayout: React.FC = () => {
           alignItems="center"
           justifyContent="space-between"
           px={6}
-          bg={sidebarBg}
+          bg={headerBg}
           borderBottom="1px"
           borderColor={borderColor}
         >

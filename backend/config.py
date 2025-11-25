@@ -87,6 +87,8 @@ class Settings(BaseSettings):
     MARKET_PROVIDER_POLICY: str = "paid"
     # Default cache TTL for market-data service (seconds)
     MARKET_DATA_CACHE_TTL: int = 300
+    # Toggle whether Coverage/Tracked sections are visible to all authenticated users
+    MARKET_DATA_SECTION_PUBLIC: bool = False
 
     model_config = {
         "env_file": ".env",

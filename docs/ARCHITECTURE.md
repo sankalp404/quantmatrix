@@ -29,6 +29,18 @@ Components
 - Frontend: React SPA consuming backend APIs
 - Brokers: IBKR (FlexQuery + TWS) and TastyTrade (SDK)
 
+Scheduling Architecture
+-----------------------
+- Celery provides the workers (execution) and Beat provides periodic scheduling.
+- RedBeat is a Redis-backed scheduler for Celery Beat – it does not replace Celery. It replaces the static, code-defined Beat schedule with a dynamic schedule persisted in Redis.
+- We keep a small bootstrap `beat_schedule` in code (defaults) so a new environment has a sensible starting schedule; on startup the system can seed RedBeat from a job catalog when the store is empty.
+- Admin UI (Settings → Admin → Schedules) interacts with an admin API to list/create/delete schedules in RedBeat with timezone-aware cron strings.
+- Execution path:
+  1. A schedule entry (RedBeat) triggers a task at the specified cron time (in its timezone).
+  2. Celery routes the task to the appropriate worker queue.
+  3. Tasks write a `JobRun` row and Redis last-run status; failures/slow runs can notify Discord and surface in KPIs.
+- Market data jobs are universal (update tracked, backfills, indicators, history); account jobs (IBKR/TastyTrade syncs) are separate. Code defaults are grouped for clarity and UI displays them by group.
+
 Broker Data Strategy
 --------------------
 - IBKR FlexQuery (system of record): trades, cash transactions (dividends/fees/taxes), tax lots (cost basis), account balances, margin interest, transfers, options (open + historical exercises). Persist into `trades`, `transactions`, `dividends`, `tax_lots`, `account_balances`, `margin_interest`, `transfers`, `options`.

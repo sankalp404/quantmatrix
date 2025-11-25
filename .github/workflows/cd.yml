@@ -1,8 +1,8 @@
-name: 🚀 QuantMatrix V2 - Continuous Deployment
+name: 🚀 QuantMatrix V1 - Continuous Deployment
 
 on:
   workflow_run:
-    workflows: ["🧪 QuantMatrix V2 - Continuous Integration"]
+    workflows: ["🧪 QuantMatrix V1 - Continuous Integration"]
     types:
       - completed
     branches: [main]
