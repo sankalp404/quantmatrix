@@ -1,0 +1,15 @@
+from fastapi.testclient import TestClient
+from backend.api.main import app
+
+client = TestClient(app)
+
+
+def test_db_history_empty_ok():
+    # Should return 200 with empty bars for unknown symbol
+    resp = client.get("/api/v1/market-data/db/history", params={"symbol": "ZZZZ", "interval": "1d"})
+    assert resp.status_code == 200
+    data = resp.json()
+    assert data["symbol"] == "ZZZZ"
+    assert isinstance(data["bars"], list)
+
+

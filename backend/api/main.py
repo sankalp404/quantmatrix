@@ -269,11 +269,13 @@ app.include_router(
 # ATR endpoints remain disabled
 # app.include_router(notifications.router, prefix="/api/v1/notifications", tags=["Notifications"])  # DISABLED: Non-essential
 from backend.api.routes import admin
+from backend.api.routes import admin_scheduler
 app.include_router(account_management.router)
 app.include_router(market_data.router, prefix="/api/v1/market-data", tags=["Market Data & Technicals"])
 app.include_router(activity_routes.router, prefix="/api/v1/portfolio", tags=["Activity"])
 app.include_router(aggregator_routes.router, prefix="/api/v1/aggregator", tags=["Aggregator"])
 app.include_router(admin.router, prefix="/api/v1/admin", tags=["Admin"])
+app.include_router(admin_scheduler.router, prefix="/api/v1/admin", tags=["Admin"])
 
 
 # Global error handler

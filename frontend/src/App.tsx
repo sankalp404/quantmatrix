@@ -30,80 +30,171 @@ import Login from './pages/Login';
 import Register from './pages/Register';
 import RequireAuth from './components/auth/RequireAuth';
 import { Box, Heading, Text } from '@chakra-ui/react';
+import AdminDashboard from './pages/AdminDashboard';
+import AdminJobs from './pages/AdminJobs';
+import AdminSchedules from './pages/AdminSchedules';
+import AdminCoverage from './pages/AdminCoverage';
+import AdminTracked from './pages/AdminTracked';
+import AdminRunbook from './pages/AdminRunbook';
 
-// Theme configuration inspired by Snowball Analytics
+const surfacePalette = {
+  dark: {
+    base: '#111B2B',
+    panel: '#182233',
+    card: '#1C2737',
+    raised: '#24344B',
+    border: '#2F4461',
+    muted: '#A2B9D6',
+  },
+  light: {
+    base: '#F4F6FB',
+    panel: '#ECF1FA',
+    card: '#E2E9F6',
+    raised: '#D6E0F2',
+    border: '#C5D2E7',
+    muted: '#4A5B74',
+  },
+};
+
+const surfaceTokens = {
+  'surface.base': { default: surfacePalette.light.base, _dark: surfacePalette.dark.base },
+  'surface.panel': { default: surfacePalette.light.panel, _dark: surfacePalette.dark.panel },
+  'surface.card': { default: surfacePalette.light.card, _dark: surfacePalette.dark.card },
+  'surface.raised': { default: surfacePalette.light.raised, _dark: surfacePalette.dark.raised },
+  'surface.border': { default: surfacePalette.light.border, _dark: surfacePalette.dark.border },
+  'text.muted': { default: surfacePalette.light.muted, _dark: surfacePalette.dark.muted },
+};
+
 const theme = extendTheme({
   config: {
     initialColorMode: 'dark',
-    useSystemColorMode: false,
+    useSystemColorMode: true,
   },
   colors: {
     brand: {
-      50: '#E6F3FF',
-      100: '#BAE3FF',
-      200: '#7CC4FA',
-      300: '#47A3F3',
-      400: '#2186EB',
-      500: '#0967D2',
-      600: '#0552B5',
-      700: '#03449E',
-      800: '#01337D',
-      900: '#002159',
+      50: '#E6F1FF',
+      100: '#C2DBFF',
+      200: '#9AC4FF',
+      300: '#73AAFF',
+      400: '#4F91FF',
+      500: '#2A79F0',
+      600: '#1B5DC3',
+      700: '#124397',
+      800: '#0A2B6A',
+      900: '#041840',
     },
     accent: {
-      yellow: {
-        50: '#FFF9E6',
-        100: '#FFEEB3',
-        200: '#FFE180',
-        300: '#FFD24D',
-        400: '#FFC21A',
-        500: '#E0A800',
-        600: '#B38300',
-        700: '#856100',
-        800: '#594200',
-        900: '#2E2200'
-      }
+      teal: '#5FD4F5',
+      sand: '#EDBA72',
     },
     gray: {
-      50: '#F7FAFC',
-      100: '#EDF2F7',
-      200: '#E2E8F0',
-      300: '#CBD5E0',
-      400: '#A0AEC0',
-      500: '#718096',
-      600: '#4A5568',
-      700: '#2D3748',
-      800: '#1A202C',
-      900: '#171923',
-    }
+      50: '#EAF0F8',
+      100: '#D2DDEB',
+      200: '#BAC9DD',
+      300: '#A2B4CC',
+      400: '#8A9FBA',
+      500: '#7389A5',
+      600: '#5C6E85',
+      700: '#455165',
+      800: '#2D3443',
+      900: '#1A1E28',
+    },
+  },
+  semanticTokens: {
+    colors: surfaceTokens,
   },
   fonts: {
     heading: `'Inter', ui-sans-serif, system-ui, -apple-system, Segoe UI, Roboto, Helvetica, Arial, 'Apple Color Emoji', 'Segoe UI Emoji'`,
     body: `'Inter', ui-sans-serif, system-ui, -apple-system, Segoe UI, Roboto, Helvetica, Arial, 'Apple Color Emoji', 'Segoe UI Emoji'`,
   },
   styles: {
-    global: (props: any) => ({
+    global: {
       body: {
-        bg: props.colorMode === 'dark' ? 'gray.900' : 'gray.50',
-        color: props.colorMode === 'dark' ? 'white' : 'gray.800',
+        bg: 'surface.base',
+        color: 'gray.900',
+        _dark: { color: 'gray.50' },
       },
-    }),
+      '*::selection': {
+        background: 'rgba(79, 145, 255, 0.35)',
+      },
+    },
   },
   components: {
     Card: {
       baseStyle: {
         container: {
-          borderRadius: 'lg',
-          boxShadow: 'sm',
-          bg: 'gray.800',
+          borderRadius: 'xl',
           border: '1px solid',
-          borderColor: 'gray.700',
-        }
-      }
+          borderColor: 'surface.border',
+          bg: 'surface.card',
+          boxShadow: 'md',
+          padding: 4,
+        },
+      },
+    },
+    Heading: {
+      baseStyle: {
+        color: 'gray.900',
+        letterSpacing: '-0.01em',
+        _dark: {
+          color: 'gray.50',
+        },
+      },
     },
     Button: {
+      baseStyle: {
+        borderRadius: 'lg',
+        fontWeight: 600,
+      },
+      variants: {
+        solid: {
+          bg: 'brand.500',
+          color: 'white',
+          _hover: {
+            bg: 'brand.400',
+          },
+          _active: {
+            bg: 'brand.600',
+          },
+        },
+        outline: {
+          borderColor: 'surface.border',
+          color: 'gray.100',
+          _hover: {
+            bg: 'surface.panel',
+          },
+        },
+      },
       defaultProps: {
         colorScheme: 'brand',
+      },
+    },
+    Tabs: {
+      baseStyle: {
+        tab: {
+          fontWeight: 500,
+        },
+      },
+      variants: {
+        enclosed: {
+          tab: {
+            bg: 'transparent',
+            borderBottom: '2px solid',
+            borderColor: 'transparent',
+            _selected: {
+              color: 'brand.200',
+              borderColor: 'brand.400',
+            },
+          },
+          tabpanel: {
+            bg: 'surface.panel',
+            borderRadius: 'lg',
+            border: '1px solid',
+            borderColor: 'surface.border',
+            marginTop: 2,
+            padding: 4,
+          },
+        },
       },
     },
   },
@@ -156,6 +247,14 @@ function App() {
                     <Route path="notifications" element={<BoxPlaceholder title="Notifications" />} />
                     <Route path="security" element={<BoxPlaceholder title="Security" />} />
                     <Route path="brokerages" element={<Settings />} />
+                    {/* Market Data (read-only) */}
+                    <Route path="market/coverage" element={<AdminCoverage />} />
+                    <Route path="market/tracked" element={<AdminTracked />} />
+                    {/* Admin under Settings */}
+                    <Route path="admin/dashboard" element={<AdminDashboard />} />
+                    <Route path="admin/jobs" element={<AdminJobs />} />
+                    <Route path="admin/schedules" element={<AdminSchedules />} />
+                    <Route path="admin/runbook" element={<AdminRunbook />} />
                   </Route>
                   <Route path="workspace" element={<PortfolioWorkspace />} />
                 </Route>
@@ -168,9 +267,9 @@ function App() {
                 position="top-right"
                 toastOptions={{
                   style: {
-                    background: '#2D3748',
-                    color: '#fff',
-                    border: '1px solid #4A5568',
+                    background: surfacePalette.dark.panel,
+                    color: '#F7F9FC',
+                    border: `1px solid ${surfacePalette.dark.border}`,
                   },
                 }}
               />

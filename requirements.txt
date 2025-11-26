@@ -37,6 +37,7 @@ schedule==1.2.1
 celery==5.4.0
 flower==2.0.1
 redis==5.1.0
+celery-redbeat==2.2.0
 
 # Linters & Dev
 black==24.10.0
@@ -56,3 +57,4 @@ PyJWT==2.10.1
 email-validator==2.2.0
 cryptography==43.0.3
 httpx==0.27.2
+croniter==1.4.1
