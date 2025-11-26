@@ -17,7 +17,10 @@ from datetime import datetime
 # dependencies
 from backend.database import get_db
 from backend.models.user import User
-from backend.services.market.market_data_service import MarketDataService
+from backend.services.market.market_data_service import (
+    MarketDataService,
+    compute_coverage_status,
+)
 from backend.models.market_data import MarketSnapshot
 from backend.tasks.market_data_tasks import (
     backfill_index_universe,
@@ -523,12 +526,77 @@ async def get_coverage(
     """Return coverage summary across intervals with last bar timestamps and freshness buckets."""
     try:
         svc = MarketDataService()
-        snapshot = svc.coverage_snapshot(db)
+        snapshot: Dict[str, Any] | None = None
+        updated_at: str | None = None
+        source = "cache"
+        history_entries: List[Dict[str, Any]] = []
+
+        def _ensure_status(snap: Dict[str, Any]) -> Dict[str, Any]:
+            if "status" not in snap or not snap["status"]:
+                snap["status"] = compute_coverage_status(snap)
+            return snap["status"]
+
+        try:
+            raw = svc.redis_client.get("coverage:health:last")
+            if raw:
+                cached = json.loads(raw.decode() if isinstance(raw, (bytes, bytearray)) else raw)
+                snapshot = cached.get("snapshot")
+                updated_at = cached.get("updated_at")
+                if snapshot is not None and cached.get("status"):
+                    snapshot.setdefault("status", cached["status"])
+        except Exception:
+            snapshot = None
+
+        if snapshot is None:
+            snapshot = svc.coverage_snapshot(db)
+            updated_at = snapshot.get("generated_at")
+            source = "db"
+
+        status_info = _ensure_status(snapshot)
+
+        try:
+            raw_history = svc.redis_client.lrange("coverage:health:history", 0, 47)
+            for entry in raw_history or []:
+                try:
+                    payload = json.loads(entry.decode() if isinstance(entry, (bytes, bytearray)) else entry)
+                    history_entries.append(payload)
+                except Exception:
+                    continue
+            if history_entries:
+                history_entries = list(reversed(history_entries))
+        except Exception:
+            history_entries = []
+
+        if not history_entries and updated_at:
+            history_entries = [
+                {
+                    "ts": updated_at,
+                    "daily_pct": status_info.get("daily_pct"),
+                    "m5_pct": status_info.get("m5_pct"),
+                    "stale_daily": status_info.get("stale_daily"),
+                    "stale_m5": status_info.get("stale_m5"),
+                    "label": status_info.get("label"),
+                }
+            ]
+
+        snapshot["history"] = history_entries
+
+        age_seconds = None
+        if updated_at:
+            try:
+                age_seconds = (datetime.utcnow() - datetime.fromisoformat(updated_at)).total_seconds()
+            except Exception:
+                age_seconds = None
+
         snapshot["meta"] = {
             "visibility": _visibility_scope(),
             "exposed_to_all": settings.MARKET_DATA_SECTION_PUBLIC,
             "education": _coverage_education(),
             "actions": _coverage_actions(),
+            "updated_at": updated_at,
+            "snapshot_age_seconds": age_seconds,
+            "source": source,
+            "history": history_entries,
         }
         return snapshot
     except Exception as e:

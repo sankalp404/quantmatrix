@@ -1,8 +1,9 @@
 import React from 'react';
-import { Box, Heading, Table, Thead, Tbody, Tr, Th, Td, Button, HStack, Text, SimpleGrid, Stack, useToast, Badge } from '@chakra-ui/react';
+import { Box, Heading, Table, Thead, Tbody, Tr, Th, Td, Button, HStack, Text, SimpleGrid, Stack, useToast, Badge, Divider } from '@chakra-ui/react';
 import api from '../services/api';
 import { useAuth } from '../context/AuthContext';
 import { triggerTaskByName } from '../utils/taskActions';
+import Sparkline from '../components/charts/Sparkline';
 
 const AdminCoverage: React.FC = () => {
   const [data, setData] = React.useState<any>(null);
@@ -37,6 +38,18 @@ const AdminCoverage: React.FC = () => {
     }
     return [];
   }, [data]);
+
+  const coverageHistory = React.useMemo(() => data?.history || data?.meta?.history || [], [data]);
+  const recentHistory = React.useMemo(() => [...coverageHistory].slice(-20).reverse(), [coverageHistory]);
+  const statusInfo = data?.status || {};
+  const statusColor =
+    statusInfo.label === 'ok'
+      ? 'green'
+      : statusInfo.label === 'warning'
+        ? 'yellow'
+        : statusInfo.label === 'idle'
+          ? 'gray'
+          : 'orange';
 
   const scheduleMonitor = async () => {
     if (scheduling) return;
@@ -79,22 +92,55 @@ const AdminCoverage: React.FC = () => {
           ))}
         </Box>
       )}
-      <SimpleGrid columns={[1, 2, 3]} spacing={4} mb={6}>
-        <Box border="1px solid" borderColor="gray.700" borderRadius="md" p={3}>
-          <Text fontSize="sm" color="gray.400">Tracked Symbols</Text>
-          <Text fontSize="2xl" fontWeight="bold">{data?.tracked_count ?? '—'}</Text>
+      {data && (
+        <Box border="1px solid" borderColor="surface.border" bg="surface.card" borderRadius="lg" p={4} mb={6}>
+          <HStack justify="space-between" align="flex-start" flexWrap="wrap" gap={3}>
+            <Stack spacing={1}>
+              <Heading size="sm">Coverage status</Heading>
+              <Text fontSize="sm" color="gray.400">{statusInfo.summary || 'No summary yet.'}</Text>
+              <Text fontSize="xs" color="gray.500">
+                Updated {data.meta?.updated_at ? new Date(data.meta.updated_at).toLocaleString() : '—'} ({data.meta?.source || 'db'})
+              </Text>
+            </Stack>
+            <Badge colorScheme={statusColor} fontSize="sm" px={3} py={1} borderRadius="md">
+              {(statusInfo.label || 'unknown').toUpperCase()}
+            </Badge>
+          </HStack>
+          <Divider my={4} borderColor="surface.border" />
+          <SimpleGrid columns={[1, 2, 4]} spacing={4}>
+            <Box>
+              <Text fontSize="sm" color="gray.400">Tracked Symbols</Text>
+              <Text fontSize="2xl" fontWeight="bold">{data?.tracked_count ?? '—'}</Text>
+              <Text fontSize="xs" color="gray.500">Universe size</Text>
+            </Box>
+            <Box>
+              <Text fontSize="sm" color="gray.400">Daily Coverage %</Text>
+              <Text fontSize="2xl" fontWeight="bold">{statusInfo.daily_pct ?? 0}%</Text>
+              <Text fontSize="xs" color="gray.500">{data?.daily?.count ?? 0} bars</Text>
+            </Box>
+            <Box>
+              <Text fontSize="sm" color="gray.400">5m Coverage %</Text>
+              <Text fontSize="2xl" fontWeight="bold">{statusInfo.m5_pct ?? 0}%</Text>
+              <Text fontSize="xs" color="gray.500">{data?.m5?.count ?? 0} bars</Text>
+            </Box>
+            <Box>
+              <Text fontSize="sm" color="gray.400">Stale Symbols</Text>
+              <Text fontSize="2xl" fontWeight="bold">{statusInfo.stale_daily ?? 0}</Text>
+              <Text fontSize="xs" color="gray.500">{statusInfo.stale_m5 ?? 0} missing 5m</Text>
+            </Box>
+          </SimpleGrid>
+          <SimpleGrid columns={[1, 2]} spacing={4} mt={4}>
+            <Box>
+              <Text fontSize="sm" color="gray.400" mb={1}>Daily coverage trend</Text>
+              <Sparkline values={coverageHistory.map((entry: any) => Number(entry?.daily_pct ?? 0)).slice(-24)} color="green.400" />
+            </Box>
+            <Box>
+              <Text fontSize="sm" color="gray.400" mb={1}>5m coverage trend</Text>
+              <Sparkline values={coverageHistory.map((entry: any) => Number(entry?.m5_pct ?? 0)).slice(-24)} color="blue.300" />
+            </Box>
+          </SimpleGrid>
         </Box>
-        <Box border="1px solid" borderColor="gray.700" borderRadius="md" p={3}>
-          <Text fontSize="sm" color="gray.400">Daily Coverage</Text>
-          <Text fontSize="2xl" fontWeight="bold">{data?.daily?.count ?? '—'}</Text>
-          {data?.symbols ? <Text fontSize="xs" color="gray.500">{Math.round((data.daily.count / data.symbols) * 100)}%</Text> : null}
-        </Box>
-        <Box border="1px solid" borderColor="gray.700" borderRadius="md" p={3}>
-          <Text fontSize="sm" color="gray.400">5m Coverage</Text>
-          <Text fontSize="2xl" fontWeight="bold">{data?.m5?.count ?? '—'}</Text>
-          {data?.symbols ? <Text fontSize="xs" color="gray.500">{Math.round((data.m5.count / data.symbols) * 100)}%</Text> : null}
-        </Box>
-      </SimpleGrid>
+      )}
       {canTrigger && (
         <>
           <Heading size="sm" mb={2}>Quick Actions</Heading>
@@ -117,6 +163,35 @@ const AdminCoverage: React.FC = () => {
       <Text color="gray.500" fontSize="xs" mb={4}>
         Refreshed at {data?.generated_at ? new Date(data.generated_at).toLocaleString() : '—'}
       </Text>
+      {recentHistory.length > 0 && (
+        <>
+          <Heading size="sm" mb={2}>Recent Coverage Trend</Heading>
+          <Table size="sm" mb={6}>
+            <Thead>
+              <Tr>
+                <Th>Sampled</Th>
+                <Th>Daily %</Th>
+                <Th>5m %</Th>
+                <Th>Stale Daily</Th>
+                <Th>Stale 5m</Th>
+                <Th>Status</Th>
+              </Tr>
+            </Thead>
+            <Tbody>
+              {recentHistory.map((entry: any, idx: number) => (
+                <Tr key={`${entry.ts}-${idx}`}>
+                  <Td>{entry.ts ? new Date(entry.ts).toLocaleString() : '—'}</Td>
+                  <Td>{entry.daily_pct ?? '—'}</Td>
+                  <Td>{entry.m5_pct ?? '—'}</Td>
+                  <Td>{entry.stale_daily ?? 0}</Td>
+                  <Td>{entry.stale_m5 ?? 0}</Td>
+                  <Td><Badge colorScheme={entry.label === 'ok' ? 'green' : entry.label === 'warning' ? 'yellow' : 'orange'}>{(entry.label || '—').toUpperCase()}</Badge></Td>
+                </Tr>
+              ))}
+            </Tbody>
+          </Table>
+        </>
+      )}
       <Heading size="sm" mb={2}>Stale (&gt;48h) Daily Bars</Heading>
       <Table size="sm" mb={6}>
         <Thead>

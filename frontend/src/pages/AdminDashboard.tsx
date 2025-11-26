@@ -1,7 +1,8 @@
 import React from 'react';
-import { Box, Heading, SimpleGrid, Stat, StatLabel, StatNumber, StatHelpText, Button, HStack, Text, Stack, useToast } from '@chakra-ui/react';
+import { Box, Heading, SimpleGrid, Stat, StatLabel, StatNumber, StatHelpText, Button, HStack, Text, Stack, useToast, Badge, Divider } from '@chakra-ui/react';
 import api from '../services/api';
 import { triggerTaskByName } from '../utils/taskActions';
+import Sparkline from '../components/charts/Sparkline';
 
 const AdminDashboard: React.FC = () => {
   const [statuses, setStatuses] = React.useState<any>({});
@@ -25,8 +26,29 @@ const AdminDashboard: React.FC = () => {
 
   const k = (key: string) => statuses?.[`taskstatus:${key}:last`];
 
+  const coverageHistory = React.useMemo(() => {
+    const list = coverage?.history || coverage?.meta?.history || [];
+    return {
+      daily: list.map((entry: any) => Number(entry?.daily_pct ?? 0)).slice(-24),
+      m5: list.map((entry: any) => Number(entry?.m5_pct ?? 0)).slice(-24),
+      labels: list.map((entry: any) => entry?.ts),
+    };
+  }, [coverage]);
+
+  const coverageStatus = coverage?.status || {};
+  const statusLabel = (coverageStatus.label || 'unknown').toUpperCase();
+  const statusColor =
+    coverageStatus.label === 'ok'
+      ? 'green'
+      : coverageStatus.label === 'warning'
+        ? 'yellow'
+        : coverageStatus.label === 'idle'
+          ? 'gray'
+          : 'orange';
+  const updatedAt = coverage?.meta?.updated_at;
+
   const tile = (title: string, val: string | number | undefined, help?: string) => (
-    <Stat p={4} border="1px solid" borderColor="gray.700" borderRadius="lg">
+    <Stat p={4} border="1px solid" borderColor="surface.border" borderRadius="lg" bg="surface.card">
       <StatLabel>{title}</StatLabel>
       <StatNumber>{val ?? '—'}</StatNumber>
       {help ? <StatHelpText>{help}</StatHelpText> : null}
@@ -57,54 +79,39 @@ const AdminDashboard: React.FC = () => {
     <Box p={4}>
       <Heading size="md" mb={4}>Admin Dashboard</Heading>
 
-      {/* SLA banners */}
       {coverage && (
-        <Box mb={4}>
-          {(() => {
-            const symCount = coverage.symbols || 0;
-            const dailyCount = coverage.daily?.count || 0;
-            const m5Count = coverage.m5?.count || 0;
-            const dailyPct = symCount ? Math.round((dailyCount / symCount) * 100) : 0;
-            const m5Pct = symCount ? Math.round((m5Count / symCount) * 100) : 0;
-            const dailyOld = coverage.daily?.freshness?.['>48h'] || 0;
-            const needsFix = symCount > 0 && (dailyPct < 90 || dailyOld > 0 || m5Pct === 0);
-            if (!needsFix) return null;
-            return (
-              <Box p={3} border="1px solid" borderColor="yellow.700" borderRadius="md" bg="yellow.900" color="yellow.200">
-                <HStack justify="space-between">
-                  <Box>
-                    <Heading size="sm">Action needed</Heading>
-                    <Text fontSize="sm">Coverage/freshness below SLA. Daily {dailyPct}%, 5m {m5Pct}%. {dailyOld > 0 ? `${dailyOld} symbols >48h stale.` : ''}</Text>
-                  </Box>
-                  <HStack spacing={3} flexWrap="wrap">
-                    {coverageActions.map((action) => (
-                      <Stack key={action.task_name} spacing={1} align="flex-start">
-                        <Button size="sm" onClick={() => runNamedTask(action.task_name, action.label)}>
-                          {action.label}
-                        </Button>
-                        <Text fontSize="xs" color="gray.300" maxW="180px">{action.description}</Text>
-                      </Stack>
-                    ))}
-                  </HStack>
-                </HStack>
-              </Box>
-            );
-          })()}
+        <Box border="1px solid" borderColor="surface.border" bg="surface.card" borderRadius="lg" p={4} mb={6}>
+          <HStack justify="space-between" align="flex-start" flexWrap="wrap" gap={3}>
+            <Stack spacing={1}>
+              <Heading size="sm">Coverage status</Heading>
+              <Text fontSize="sm" color="gray.400">{coverageStatus.summary || 'No summary yet.'}</Text>
+              <Text fontSize="xs" color="gray.500">
+                Updated {updatedAt ? new Date(updatedAt).toLocaleString() : '—'} ({coverage?.meta?.source || 'db'})
+              </Text>
+            </Stack>
+            <Badge colorScheme={statusColor} fontSize="sm" px={3} py={1} borderRadius="md">
+              {statusLabel}
+            </Badge>
+          </HStack>
+          <Divider my={4} borderColor="surface.border" />
+          <SimpleGrid columns={[1, 2, 4]} spacing={4}>
+            {tile('Tracked Symbols', coverage?.tracked_count, 'Universe size')}
+            {tile('Daily Coverage %', `${coverageStatus.daily_pct ?? 0}%`, `Total bars: ${coverage?.daily?.count ?? 0}`)}
+            {tile('5m Coverage %', `${coverageStatus.m5_pct ?? 0}%`, `Total bars: ${coverage?.m5?.count ?? 0}`)}
+            {tile('Stale (>48h)', coverageStatus.stale_daily || 0, `${coverageStatus.stale_m5 || 0} missing 5m`)}
+          </SimpleGrid>
+          <SimpleGrid columns={[1, 2]} spacing={4} mt={4}>
+            <Box>
+              <Text fontSize="sm" color="gray.400" mb={1}>Daily coverage trend</Text>
+              <Sparkline values={coverageHistory.daily} color="green.400" />
+            </Box>
+            <Box>
+              <Text fontSize="sm" color="gray.400" mb={1}>5m coverage trend</Text>
+              <Sparkline values={coverageHistory.m5} color="blue.300" />
+            </Box>
+          </SimpleGrid>
         </Box>
       )}
-
-      <SimpleGrid columns={[1, 2, 3]} spacing={4} mb={6}>
-        {tile('Tracked Symbols', coverage?.tracked_count, 'Universe size')}
-        {tile('Daily Covered', coverage?.daily?.count, coverage?.symbols ? `${Math.round((coverage.daily.count / coverage.symbols) * 100)}%` : undefined)}
-        {tile('5m Covered', coverage?.m5?.count, coverage?.symbols ? `${Math.round((coverage.m5.count / coverage.symbols) * 100)}%` : undefined)}
-      </SimpleGrid>
-      {coverage?.indices ? (
-        <SimpleGrid columns={[1, 3, 3]} spacing={4} mb={6}>
-          {tile('SP500 Members', coverage.indices.SP500)}
-          {tile('NASDAQ100 Members', coverage.indices.NASDAQ100)}
-          {tile('DOW30 Members', coverage.indices.DOW30)}
-        </SimpleGrid>
-      ) : null}
 
       <Heading size="sm" mb={2}>Quick Actions</Heading>
       <HStack spacing={4} align="flex-start" flexWrap="wrap" mb={6}>

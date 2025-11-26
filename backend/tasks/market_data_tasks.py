@@ -21,7 +21,10 @@ from backend.models import PriceData
 from sqlalchemy.dialects.postgresql import insert as pg_insert
 from backend.models.market_data import MarketSnapshotHistory, MarketSnapshot
 from backend.models import IndexConstituent
-from backend.services.market.market_data_service import market_data_service
+from backend.services.market.market_data_service import (
+    market_data_service,
+    compute_coverage_status,
+)
 from backend.models import Position
 from backend.config import settings
 from .task_utils import task_run
@@ -927,25 +930,35 @@ def monitor_coverage_health() -> dict:
     session = SessionLocal()
     try:
         snapshot = market_data_service.coverage_snapshot(session)
+        status_info = snapshot.get("status") or compute_coverage_status(snapshot)
         payload = {
             "snapshot": snapshot,
             "updated_at": datetime.utcnow().isoformat(),
+            "status": status_info,
+        }
+        redis_client = market_data_service.redis_client
+        history_entry = {
+            "ts": payload["updated_at"],
+            "daily_pct": status_info.get("daily_pct"),
+            "m5_pct": status_info.get("m5_pct"),
+            "stale_daily": status_info.get("stale_daily"),
+            "stale_m5": status_info.get("stale_m5"),
+            "label": status_info.get("label"),
         }
         try:
-            market_data_service.redis_client.set(
-                "coverage:health:last",
-                json.dumps(payload),
-                ex=86400,
-            )
+            pipe = redis_client.pipeline()
+            pipe.set("coverage:health:last", json.dumps(payload), ex=86400)
+            pipe.lpush("coverage:health:history", json.dumps(history_entry))
+            pipe.ltrim("coverage:health:history", 0, 47)
+            pipe.execute()
         except Exception:
             pass
-        stale_daily = len(snapshot.get("daily", {}).get("stale", []))
-        stale_m5 = len(snapshot.get("m5", {}).get("stale", []))
-        status = "ok" if stale_daily == 0 and stale_m5 == 0 else "degraded"
         return {
-            "status": status,
-            "stale_daily": stale_daily,
-            "stale_m5": stale_m5,
+            "status": status_info.get("label"),
+            "daily_pct": status_info.get("daily_pct"),
+            "m5_pct": status_info.get("m5_pct"),
+            "stale_daily": status_info.get("stale_daily"),
+            "stale_m5": status_info.get("stale_m5"),
             "tracked_count": snapshot.get("tracked_count", 0),
             "symbols": snapshot.get("symbols", 0),
         }

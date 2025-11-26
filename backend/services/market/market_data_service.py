@@ -59,7 +59,7 @@ class MarketDataService:
     """
 
     def __init__(self) -> None:
-        self.redis_client = redis.from_url(settings.REDIS_URL)
+        self._redis_client = None
         self.cache_ttl_seconds = int(getattr(settings, "MARKET_DATA_CACHE_TTL", 300))
 
         # Optional API clients
@@ -86,6 +86,15 @@ class MarketDataService:
             "NASDAQ100": {"fmp": "nasdaq_constituent"},
             "DOW30": {"fmp": "dowjones_constituent"},
         }
+
+    @property
+    def redis_client(self) -> redis.Redis:
+        if self._redis_client is None:
+            url = getattr(settings, "REDIS_URL", None)
+            if not url:
+                raise RuntimeError("REDIS_URL is not configured")
+            self._redis_client = redis.from_url(url)
+        return self._redis_client
 
     # ---------------------- Internal helpers ----------------------
     def _visibility_scope(self) -> str:
@@ -1033,6 +1042,56 @@ class MarketDataService:
         """Compatibility wrapper expected by tests – returns the latest snapshot."""
         return await self.get_snapshot(symbol)
 
+def compute_coverage_status(snapshot: Dict[str, Any]) -> Dict[str, Any]:
+    """Derive human-readable coverage state + KPI percentages from a raw snapshot."""
+    total_symbols = int(snapshot.get("symbols") or 0)
+    tracked = int(snapshot.get("tracked_count") or 0)
+
+    daily = snapshot.get("daily", {}) or {}
+    m5 = snapshot.get("m5", {}) or {}
+    daily_count = int(daily.get("count") or 0)
+    m5_count = int(m5.get("count") or 0)
+    stale_daily = len(daily.get("stale") or [])
+    stale_m5 = len(m5.get("stale") or [])
+
+    def pct(count: int) -> float:
+        return round((count / total_symbols) * 100.0, 1) if total_symbols else 0.0
+
+    daily_pct = pct(daily_count)
+    m5_pct = pct(m5_count)
+
+    label = "ok"
+    summary = "Coverage healthy across daily + 5m intervals."
+    if total_symbols == 0:
+        label = "idle"
+        summary = "No symbols discovered yet. Run refresh + tracked tasks."
+    if total_symbols > 0 and daily_pct < 90:
+        label = "degraded"
+        summary = f"Daily coverage {daily_pct}% below 90% SLA."
+    elif stale_daily:
+        label = "degraded"
+        summary = f"{stale_daily} symbols have daily bars older than 48h."
+    elif m5_pct == 0 and total_symbols:
+        label = "degraded"
+        summary = "5m coverage is 0% – run intraday backfill."
+    elif stale_m5:
+        label = "warning"
+        summary = f"{stale_m5} symbols missing 5m data."
+
+    return {
+        "label": label,
+        "summary": summary,
+        "daily_pct": daily_pct,
+        "m5_pct": m5_pct,
+        "stale_daily": stale_daily,
+        "stale_m5": stale_m5,
+        "symbols": total_symbols,
+        "tracked_count": tracked,
+        "thresholds": {"daily_pct": 90, "m5_expectation": ">=1 refresh/day"},
+    }
+
+
+class MarketDataService:
     # ---------------------- Coverage instrumentation ----------------------
     def coverage_snapshot(self, db: Session) -> Dict[str, Any]:
         """Compute coverage freshness, stale lists, and tracked stats for instrumentation/UI."""
@@ -1106,7 +1165,7 @@ class MarketDataService:
         except Exception:
             tracked_symbols = []
 
-        return {
+        snapshot = {
             "generated_at": now.isoformat(),
             "symbols": len(set(symbols)),
             "tracked_count": len(tracked_symbols),
@@ -1125,6 +1184,8 @@ class MarketDataService:
                 "stale": stale_details(m5_last),
             },
         }
+        snapshot["status"] = compute_coverage_status(snapshot)
+        return snapshot
 
 
 # Global instance
