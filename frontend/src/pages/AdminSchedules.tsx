@@ -30,6 +30,8 @@ import {
   IconButton,
   Tooltip,
   Divider,
+  Checkbox,
+  FormHelperText,
 } from '@chakra-ui/react';
 import { FiDownload, FiUpload, FiEdit3, FiPlay, FiPause, FiTrash2, FiRefreshCw } from 'react-icons/fi';
 import api from '../services/api';
@@ -58,6 +60,13 @@ type MetadataState = {
   timeout: number;
   retries: number;
   backoff: number;
+  discordWebhook: string;
+  discordChannels: string;
+  discordMentions: string;
+  prometheusEndpoint: string;
+  alertSlow: boolean;
+  alertSuccess: boolean;
+  slowThreshold: number;
 };
 
 const defaultCron = '0 3 * * *';
@@ -77,6 +86,13 @@ const emptyMetadata = (): MetadataState => ({
   timeout: 3600,
   retries: 0,
   backoff: 0,
+  discordWebhook: '',
+  discordChannels: '',
+  discordMentions: '',
+  prometheusEndpoint: '',
+  alertSlow: true,
+  alertSuccess: false,
+  slowThreshold: 0,
 });
 
 const AdminSchedules: React.FC = () => {
@@ -139,27 +155,60 @@ const AdminSchedules: React.FC = () => {
     return `${cron}${tz ? ` (${tz})` : ''}`;
   };
 
-  const buildMetadataPayload = (meta: MetadataState) => ({
-    queue: meta.queue || undefined,
-    priority: meta.priority === '' ? undefined : Number(meta.priority),
-    safety: {
-      singleflight: meta.singleflight,
-      max_concurrency: meta.maxConcurrency,
-      timeout_s: meta.timeout,
-      retries: meta.retries,
-      backoff_s: meta.backoff,
-    },
-  });
+  const buildMetadataPayload = (meta: MetadataState) => {
+    const channels = meta.discordChannels
+      .split(',')
+      .map((token) => token.trim())
+      .filter((token) => token.length > 0);
+    const mentions = meta.discordMentions
+      .split(',')
+      .map((token) => token.trim())
+      .filter((token) => token.length > 0);
+    const alertOn = ['failure'];
+    if (meta.alertSlow) alertOn.push('slow');
+    if (meta.alertSuccess) alertOn.push('success');
+    return {
+      queue: meta.queue || undefined,
+      priority: meta.priority === '' ? undefined : Number(meta.priority),
+      safety: {
+        singleflight: meta.singleflight,
+        max_concurrency: meta.maxConcurrency,
+        timeout_s: meta.timeout,
+        retries: meta.retries,
+        backoff_s: meta.backoff,
+      },
+      hooks: {
+        discord_webhook: meta.discordWebhook || undefined,
+        discord_channels: channels.length ? channels : undefined,
+        discord_mentions: mentions.length ? mentions : undefined,
+        prometheus_endpoint: meta.prometheusEndpoint || undefined,
+        alert_on: alertOn,
+        slow_threshold_s: meta.slowThreshold > 0 ? meta.slowThreshold : undefined,
+      },
+    };
+  };
 
-  const hydrateMetadataState = (meta: any | null | undefined): MetadataState => ({
-    queue: meta?.queue ?? '',
-    priority: meta?.priority?.toString?.() ?? '',
-    singleflight: meta?.safety?.singleflight ?? true,
-    maxConcurrency: meta?.safety?.max_concurrency ?? 1,
-    timeout: meta?.safety?.timeout_s ?? 3600,
-    retries: meta?.safety?.retries ?? 0,
-    backoff: meta?.safety?.backoff_s ?? 0,
-  });
+  const hydrateMetadataState = (meta: any | null | undefined): MetadataState => {
+    const hooks = meta?.hooks || {};
+    const alertList = Array.isArray(hooks.alert_on) && hooks.alert_on.length > 0 ? hooks.alert_on : ['failure'];
+    const alertSet = new Set((alertList || []).map((label: string) => label?.toLowerCase?.() || label));
+    return {
+      queue: meta?.queue ?? '',
+      priority: meta?.priority?.toString?.() ?? '',
+      singleflight: meta?.safety?.singleflight ?? true,
+      maxConcurrency: meta?.safety?.max_concurrency ?? 1,
+      timeout: meta?.safety?.timeout_s ?? 3600,
+      retries: meta?.safety?.retries ?? 0,
+      backoff: meta?.safety?.backoff_s ?? 0,
+      discordWebhook: hooks?.discord_webhook ?? '',
+      discordChannels: Array.isArray(hooks?.discord_channels) ? hooks.discord_channels.join(', ') : '',
+      discordMentions: Array.isArray(hooks?.discord_mentions) ? hooks.discord_mentions.join(', ') : '',
+      prometheusEndpoint: hooks?.prometheus_endpoint ?? '',
+      alertSlow: alertSet.has('slow'),
+      alertSuccess: alertSet.has('success'),
+      slowThreshold: Number(hooks?.slow_threshold_s ?? 0),
+    };
+  };
 
   const updatePreview = async (cronValue: string, tzValue: string) => {
     try {
@@ -178,17 +227,16 @@ const AdminSchedules: React.FC = () => {
       timezone: template?.default_tz || defaultTimezone,
     };
     setForm(initial);
-    setMetadataState(template
-      ? {
-        queue: template.queue || '',
-        priority: '',
-        singleflight: template.singleflight ?? true,
-        maxConcurrency: template.max_concurrency ?? 1,
-        timeout: template.timeout_s ?? 3600,
-        retries: template.retries ?? 0,
-        backoff: template.backoff_s ?? 0,
-      }
-      : emptyMetadata());
+    const baseMeta = emptyMetadata();
+    if (template) {
+      baseMeta.queue = template.queue || '';
+      baseMeta.singleflight = template.singleflight ?? true;
+      baseMeta.maxConcurrency = template.max_concurrency ?? 1;
+      baseMeta.timeout = template.timeout_s ?? 3600;
+      baseMeta.retries = template.retries ?? 0;
+      baseMeta.backoff = template.backoff_s ?? 0;
+    }
+    setMetadataState(baseMeta);
     setModalMode('create');
     setSelectedSchedule(null);
     updatePreview(initial.cron, initial.timezone);
@@ -248,6 +296,32 @@ const AdminSchedules: React.FC = () => {
         <Text>Single-flight: {safety.singleflight === false ? 'No' : 'Yes'}</Text>
         <Text>Max concurrency: {safety.max_concurrency ?? 1}</Text>
         <Text>Timeout: {(safety.timeout_s ?? 3600) / 60} min</Text>
+      </Box>
+    );
+  };
+
+  const renderHookSummary = (schedule: any) => {
+    const hooks = schedule.metadata?.hooks;
+    if (!hooks) return null;
+    const discordTargets = [
+      hooks.discord_webhook,
+      ...(Array.isArray(hooks.discord_channels) ? hooks.discord_channels : []),
+    ].filter(Boolean);
+    const hasProm = Boolean(hooks.prometheus_endpoint);
+    const hasMentions = Array.isArray(hooks.discord_mentions) && hooks.discord_mentions.length > 0;
+    const alertList = Array.isArray(hooks.alert_on) && hooks.alert_on.length > 0 ? hooks.alert_on : ['failure'];
+    if (!discordTargets.length && !hasProm && alertList.join(',') === 'failure') {
+      return null;
+    }
+    return (
+      <Box fontSize="xs" color="gray.400" mt={2}>
+        {discordTargets.length > 0 && (
+          <Text>Discord: {discordTargets.join(', ')}</Text>
+        )}
+        {hasProm && <Text>Prometheus: {hooks.prometheus_endpoint}</Text>}
+        {alertList.length > 0 && <Text>Alerts: {alertList.join(', ')}</Text>}
+        {hooks.slow_threshold_s ? <Text>Slow threshold: {hooks.slow_threshold_s}s</Text> : null}
+        {hasMentions && <Text>Mentions: {hooks.discord_mentions.join(', ')}</Text>}
       </Box>
     );
   };
@@ -389,7 +463,10 @@ const AdminSchedules: React.FC = () => {
                       <Text fontSize="xs" color="gray.500">Cron: {s.cron || s.schedule}</Text>
                       <Text fontSize="xs" color="gray.500" mt={2}>Queue: {s.metadata?.queue || 'default'}</Text>
                       <Text fontSize="xs" color="gray.500">Priority: {s.metadata?.priority ?? '—'}</Text>
-                      <Box mt={3}>{renderSafetySummary(s)}</Box>
+                      <Box mt={3}>
+                        {renderSafetySummary(s)}
+                        {renderHookSummary(s)}
+                      </Box>
                       <Text fontSize="xs" color="gray.500" mt={3}>Last run: {s.last_run?.status || '—'} @ {s.last_run?.started_at || '—'}</Text>
                       <HStack spacing={2} mt={4} justify="flex-end">
                         <Tooltip label="Edit">
@@ -524,6 +601,66 @@ const AdminSchedules: React.FC = () => {
                 </NumberInput>
               </FormControl>
             </HStack>
+            <Heading size="sm" mt={6} mb={2}>Alerts & Observability</Heading>
+            <FormControl mb={3}>
+              <FormLabel>Discord Webhook or Alias</FormLabel>
+              <Input
+                value={metadataState.discordWebhook}
+                onChange={(e) => setMetadataState({ ...metadataState, discordWebhook: e.target.value })}
+                placeholder="system_status or https://discord.com/api/webhooks/..."
+              />
+              <FormHelperText>Provide a Discord alias from settings or full webhook URL.</FormHelperText>
+            </FormControl>
+            <FormControl mb={3}>
+              <FormLabel>Discord Channels (comma separated)</FormLabel>
+              <Input
+                value={metadataState.discordChannels}
+                onChange={(e) => setMetadataState({ ...metadataState, discordChannels: e.target.value })}
+                placeholder="signals,portfolio"
+              />
+              <FormHelperText>Optional aliases appended to this schedule&apos;s alerts.</FormHelperText>
+            </FormControl>
+            <FormControl mb={3}>
+              <FormLabel>Prometheus Push Endpoint</FormLabel>
+              <Input
+                value={metadataState.prometheusEndpoint}
+                onChange={(e) => setMetadataState({ ...metadataState, prometheusEndpoint: e.target.value })}
+                placeholder="https://pushgateway.example.com/metrics/job/scheduler"
+              />
+              <FormHelperText>Set to Pushgateway-compatible endpoint to publish task durations.</FormHelperText>
+            </FormControl>
+            <FormControl mb={3}>
+              <FormLabel>Slow Alert Threshold (sec)</FormLabel>
+              <NumberInput
+                min={0}
+                value={metadataState.slowThreshold}
+                onChange={(_, val) => setMetadataState({ ...metadataState, slowThreshold: Number.isNaN(val) ? 0 : val })}
+              >
+                <NumberInputField placeholder="Use timeout if blank" />
+              </NumberInput>
+              <FormHelperText>Overrides the safety timeout when determining slow-run alerts.</FormHelperText>
+            </FormControl>
+            <Box mb={3}>
+              <Text fontSize="sm" fontWeight="medium">Alert Events</Text>
+              <Text fontSize="xs" color="gray.500" mb={1}>Failures always emit alerts; opt into additional events below.</Text>
+              <Stack spacing={1} mt={1}>
+                <Checkbox isChecked={metadataState.alertSlow} onChange={(e) => setMetadataState({ ...metadataState, alertSlow: e.target.checked })}>
+                  Slow runs (exceeds timeout)
+                </Checkbox>
+                <Checkbox isChecked={metadataState.alertSuccess} onChange={(e) => setMetadataState({ ...metadataState, alertSuccess: e.target.checked })}>
+                  Successful runs
+                </Checkbox>
+              </Stack>
+            </Box>
+            <FormControl mb={3}>
+              <FormLabel>Discord Mentions (comma separated)</FormLabel>
+              <Input
+                value={metadataState.discordMentions}
+                onChange={(e) => setMetadataState({ ...metadataState, discordMentions: e.target.value })}
+                placeholder="@ops-team,<@1234567890>"
+              />
+              <FormHelperText>Appended to Discord alerts for visibility (supports @roles or user IDs).</FormHelperText>
+            </FormControl>
           </ModalBody>
           <ModalFooter>
             <Button mr={3} onClick={modalDisclosure.onClose}>Cancel</Button>

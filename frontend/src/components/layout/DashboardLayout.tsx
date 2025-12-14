@@ -17,6 +17,7 @@ import {
   MenuList,
   MenuItem,
   Button,
+  useBreakpointValue,
 } from '@chakra-ui/react';
 import { Outlet, useLocation, useNavigate } from 'react-router-dom';
 import {
@@ -67,9 +68,10 @@ interface NavItemProps {
   isActive: boolean;
   onClick: () => void;
   badge?: number;
+  showLabel?: boolean;
 }
 
-const NavItem: React.FC<NavItemProps> = ({ icon: Icon, label, isActive, onClick, badge }) => {
+const NavItem: React.FC<NavItemProps> = ({ icon: Icon, label, isActive, onClick, badge, showLabel = true }) => {
   const bg = useColorModeValue('gray.100', 'rgba(255,255,255,0.05)');
   const activeBg = useColorModeValue('rgba(59,130,246,0.15)', 'brand.500');
   const activeColor = useColorModeValue('brand.600', 'white');
@@ -86,6 +88,7 @@ const NavItem: React.FC<NavItemProps> = ({ icon: Icon, label, isActive, onClick,
       fontWeight="semibold"
       transition="all 0.2s"
       borderRadius="lg"
+      justifyContent={showLabel ? 'flex-start' : 'center'}
       bg={isActive ? activeBg : 'transparent'}
       color={isActive ? activeColor : color}
       _hover={{
@@ -96,9 +99,11 @@ const NavItem: React.FC<NavItemProps> = ({ icon: Icon, label, isActive, onClick,
       position="relative"
     >
       <Icon size={18} />
-      <Text ml={3} fontSize="sm">
-        {label}
-      </Text>
+      {showLabel && (
+        <Text ml={3} fontSize="sm">
+          {label}
+        </Text>
+      )}
       {badge && badge > 0 && (
         <Badge
           ml="auto"
@@ -130,6 +135,8 @@ const DashboardLayout: React.FC = () => {
   const { colorMode, toggleColorMode } = useColorMode();
   const { accounts, loading: accountsLoading, selected, setSelected } = useAccountContext();
   const { user, logout } = useAuth();
+  const isDesktop = useBreakpointValue({ base: false, lg: true });
+  const [isSidebarOpen, setIsSidebarOpen] = useState<boolean>(true);
   const [totals, setTotals] = useState<{ value: number; dayPnL: number; positions: number }>({ value: 0, dayPnL: 0, positions: 0 });
   const [headerStats, setHeaderStats] = useState<{ label: string; sublabel: string }>({ label: 'Combined Portfolio', sublabel: '' });
 
@@ -154,6 +161,12 @@ const DashboardLayout: React.FC = () => {
     load();
   }, []);
 
+  useEffect(() => {
+    if (typeof isDesktop === 'boolean') {
+      setIsSidebarOpen(isDesktop);
+    }
+  }, [isDesktop]);
+
   const formatCurrency = (amount: number) =>
     new Intl.NumberFormat('en-US', { style: 'currency', currency: 'USD', maximumFractionDigits: 0 }).format(amount || 0);
   const formatSignedCurrency = (amount: number) => {
@@ -161,59 +174,40 @@ const DashboardLayout: React.FC = () => {
     return `${(amount || 0) >= 0 ? '+' : '-'}${f}`;
   };
 
+  const sidebarWidth = isSidebarOpen ? 64 : 16;
+
   return (
     <Flex h="100vh" bg={appBg}>
       {/* Sidebar */}
       <Box
-        w={64}
+        w={sidebarWidth}
         bg={sidebarBg}
         borderRight="1px"
         borderColor={borderColor}
         pos="fixed"
         h="full"
         overflowY="auto"
+        transition="width 0.2s ease"
       >
         <VStack spacing={0} align="stretch">
           {/* Logo/Brand */}
-          <Flex align="center" px={6} py={4} borderBottom="1px" borderColor={borderColor}>
-            <Box
-              w={8}
-              h={8}
-              bg="brand.500"
-              borderRadius="lg"
-              display="flex"
-              alignItems="center"
-              justifyContent="center"
-              mr={3}
-            >
+          <Flex align="center" px={isSidebarOpen ? 6 : 3} py={4} borderBottom="1px" borderColor={borderColor}>
+            <Box w={8} h={8} bg="brand.500" borderRadius="lg" display="flex" alignItems="center" justifyContent="center" mr={isSidebarOpen ? 3 : 0}>
               <Text color="white" fontWeight="bold" fontSize="sm">
                 Q
               </Text>
             </Box>
-            <Text fontSize="lg" fontWeight="bold" color="brand.500">
-              QuantMatrix
-            </Text>
+            {isSidebarOpen && (
+              <Text fontSize="lg" fontWeight="bold" color="brand.500">
+                QuantMatrix
+              </Text>
+            )}
           </Flex>
 
-          {/* Account Selector */}
-          <Box px={4} py={4}>
-            <HStack spacing={3}>
-              <Avatar size="sm" name="Portfolio" bg="brand.500" />
-              <Box flex={1}>
-                <Text fontSize="sm" fontWeight="semibold">
-                  {headerStats.label}
-                </Text>
-                <Text fontSize="xs" color="gray.500">
-                  {headerStats.sublabel}
-                </Text>
-              </Box>
-            </HStack>
-          </Box>
-
-          <Divider />
+          {isSidebarOpen && <Divider />}
 
           {/* Navigation */}
-          <VStack spacing={1} px={4} py={4} align="stretch">
+          <VStack spacing={1} px={isSidebarOpen ? 4 : 2} py={4} align="stretch">
             {navigationItems.map((item) => (
               <NavItem
                 key={item.path}
@@ -223,41 +217,53 @@ const DashboardLayout: React.FC = () => {
                 isActive={location.pathname === item.path}
                 onClick={() => navigate(item.path)}
                 badge={item.label === 'Notifications' ? 5 : undefined}
+                showLabel={isSidebarOpen}
               />
             ))}
           </VStack>
 
           {/* Quick Stats */}
-          <Box px={4} py={4} mt="auto">
-            <VStack spacing={2} align="stretch">
-              <Text fontSize="xs" fontWeight="semibold" color="gray.500" textTransform="uppercase">
-                Quick Stats
-              </Text>
-              <HStack justify="space-between">
-                <Text fontSize="xs" color="gray.500">Day P&L</Text>
-                <Text fontSize="xs" fontWeight="semibold" color={totals.dayPnL >= 0 ? 'green.400' : 'red.400'}>
-                  {formatSignedCurrency(totals.dayPnL)}
+          {isSidebarOpen && (
+            <Box px={4} py={4} mt="auto">
+              <VStack spacing={2} align="stretch">
+                <HStack justify="space-between">
+                  <Text fontSize="xs" fontWeight="semibold" color="gray.500">
+                    {headerStats.label}
+                  </Text>
+                  <Text fontSize="xs" fontWeight="semibold" color="gray.200">
+                    {headerStats.sublabel || formatSignedCurrency(totals.dayPnL)}
+                  </Text>
+                </HStack>
+                <Divider />
+                <Text fontSize="xs" fontWeight="semibold" color="gray.500" textTransform="uppercase">
+                  Quick Stats
                 </Text>
-              </HStack>
-              <HStack justify="space-between">
-                <Text fontSize="xs" color="gray.500">Positions</Text>
-                <Text fontSize="xs" fontWeight="semibold">
-                  {totals.positions}
-                </Text>
-              </HStack>
-              <HStack justify="space-between">
-                <Text fontSize="xs" color="gray.500">Margin Used</Text>
-                <Text fontSize="xs" fontWeight="semibold" color="orange.400">
-                  23%
-                </Text>
-              </HStack>
-            </VStack>
-          </Box>
+                <HStack justify="space-between">
+                  <Text fontSize="xs" color="gray.500">Day P&L</Text>
+                  <Text fontSize="xs" fontWeight="semibold" color={totals.dayPnL >= 0 ? 'green.400' : 'red.400'}>
+                    {formatSignedCurrency(totals.dayPnL)}
+                  </Text>
+                </HStack>
+                <HStack justify="space-between">
+                  <Text fontSize="xs" color="gray.500">Positions</Text>
+                  <Text fontSize="xs" fontWeight="semibold">
+                    {totals.positions}
+                  </Text>
+                </HStack>
+                <HStack justify="space-between">
+                  <Text fontSize="xs" color="gray.500">Margin Used</Text>
+                  <Text fontSize="xs" fontWeight="semibold" color="orange.400">
+                    23%
+                  </Text>
+                </HStack>
+              </VStack>
+            </Box>
+          )}
         </VStack>
       </Box>
 
       {/* Main Content */}
-      <Box flex={1} ml={64}>
+      <Box flex={1} ml={sidebarWidth} transition="margin-left 0.2s ease">
         {/* Header */}
         <Flex
           h={16}
@@ -274,6 +280,9 @@ const DashboardLayout: React.FC = () => {
               variant="ghost"
               aria-label="Menu"
               icon={<FiMenu />}
+              position="relative"
+              zIndex={2}
+              onClick={() => setIsSidebarOpen((v) => !v)}
             />
             {/* Global Account Selection */}
             <Select

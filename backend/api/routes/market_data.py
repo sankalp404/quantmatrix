@@ -8,9 +8,9 @@ Providers are used only for OHLCV backfills (paid provider prioritized).
 
 import json
 
-from fastapi import APIRouter, Depends, HTTPException, Query
+from fastapi import APIRouter, Depends, HTTPException, Query, Body
 from sqlalchemy.orm import Session
-from typing import List, Dict, Any, Callable
+from typing import List, Dict, Any, Callable, Optional
 import logging
 from datetime import datetime
 
@@ -37,6 +37,7 @@ from backend.api.dependencies import get_optional_user, get_admin_user, get_mark
 from backend.models.index_constituent import IndexConstituent
 from backend.models.market_data import PriceData
 from backend.models.market_data import JobRun
+from backend.api.routes.utils import serialize_job_runs
 from backend.tasks.market_data_tasks import backfill_5m_last_n_days, enforce_price_data_retention, backfill_5m_for_symbols
 from backend.tasks.market_data_tasks import bootstrap_universe
 from backend.config import settings
@@ -50,8 +51,21 @@ def _visibility_scope() -> str:
     return "all_authenticated" if settings.MARKET_DATA_SECTION_PUBLIC else "admin_only"
 
 
-def _coverage_actions() -> List[Dict[str, str]]:
-    return [
+def _is_backfill_5m_enabled(svc: MarketDataService) -> bool:
+    try:
+        raw = svc.redis_client.get("coverage:backfill_5m_enabled")
+        if raw is None:
+            return True
+        if isinstance(raw, (bytes, bytearray)):
+            raw = raw.decode()
+        return str(raw).strip().lower() not in ("0", "false", "off", "disabled")
+    except Exception:
+        # Fail open if Redis not reachable
+        return True
+
+
+def _coverage_actions(backfill_5m_enabled: bool = True) -> List[Dict[str, Any]]:
+    actions: List[Dict[str, Any]] = [
         {
             "label": "Refresh Index Constituents",
             "task_name": "refresh_index_constituents",
@@ -73,6 +87,12 @@ def _coverage_actions() -> List[Dict[str, str]]:
             "description": "Populate 5m bars for the tracked set (default 1 day) to hit the SLA banner.",
         },
     ]
+    if not backfill_5m_enabled:
+        for action in actions:
+            if action.get("task_name") == "backfill_5m_last_n_days":
+                action["disabled"] = True
+                action["description"] = f"{action.get('description')} (disabled by admin toggle)"
+    return actions
 
 
 def _coverage_education() -> Dict[str, Any]:
@@ -138,6 +158,15 @@ def _load_tracked_details(db: Session, symbols: List[str]) -> Dict[str, Any]:
         .order_by(MarketSnapshot.symbol.asc(), MarketSnapshot.analysis_timestamp.desc())
         .all()
     )
+    price_rows = (
+        db.query(PriceData.symbol, PriceData.close_price)
+        .filter(PriceData.symbol.in_(sym_set), PriceData.interval == "1d")
+        .distinct(PriceData.symbol)
+        .order_by(PriceData.symbol.asc(), PriceData.date.desc())
+        .all()
+    )
+    price_map = {sym.upper(): close for sym, close in price_rows if sym}
+
     details: Dict[str, Any] = {}
     seen: set[str] = set()
 
@@ -153,7 +182,7 @@ def _load_tracked_details(db: Session, symbols: List[str]) -> Dict[str, Any]:
             continue
         seen.add(sym)
         details[sym] = {
-            "current_price": _to_float(getattr(row, "current_price", None)),
+            "current_price": _to_float(getattr(row, "current_price", None)) or _to_float(price_map.get(sym)),
             "atr_value": _to_float(getattr(row, "atr_value", None)),
             "stage_label": getattr(row, "stage_label", None),
             "stage_dist_pct": _to_float(getattr(row, "stage_dist_pct", None)),
@@ -186,6 +215,9 @@ def _load_tracked_details(db: Session, symbols: List[str]) -> Dict[str, Any]:
     for sym, entry in details.items():
         if isinstance(entry.get("indices"), set):
             entry["indices"] = sorted(entry["indices"])
+        # Backfill price if still missing
+        if entry.get("current_price") is None and price_map.get(sym):
+            entry["current_price"] = _to_float(price_map.get(sym))
     return details
 
 # =============================================================================
@@ -530,6 +562,7 @@ async def get_coverage(
         updated_at: str | None = None
         source = "cache"
         history_entries: List[Dict[str, Any]] = []
+        backfill_5m_enabled = _is_backfill_5m_enabled(svc)
 
         def _ensure_status(snap: Dict[str, Any]) -> Dict[str, Any]:
             if "status" not in snap or not snap["status"]:
@@ -581,6 +614,59 @@ async def get_coverage(
 
         snapshot["history"] = history_entries
 
+        sparkline_meta = {
+            "daily_pct": [
+                float(entry.get("daily_pct") or 0) for entry in history_entries
+            ],
+            "m5_pct": [
+                float(entry.get("m5_pct") or 0) for entry in history_entries
+            ],
+            "labels": [entry.get("ts") for entry in history_entries],
+            "stale_daily": [
+                int(entry.get("stale_daily") or 0) for entry in history_entries
+            ],
+            "stale_m5": [
+                int(entry.get("stale_m5") or 0) for entry in history_entries
+            ],
+        }
+
+        def _kpi_cards() -> List[Dict[str, Any]]:
+            tracked = int(snapshot.get("tracked_count") or 0)
+            total_symbols = int(snapshot.get("symbols") or 0)
+            return [
+                {
+                    "id": "tracked",
+                    "label": "Tracked Symbols",
+                    "value": tracked,
+                    "help": "Universe size",
+                },
+                {
+                    "id": "daily_pct",
+                    "label": "Daily Coverage %",
+                    "value": status_info.get("daily_pct"),
+                    "unit": "%",
+                    "help": f"{snapshot.get('daily', {}).get('count', 0)} / {total_symbols} bars",
+                },
+                {
+                    "id": "m5_pct",
+                    "label": "5m Coverage %",
+                    "value": status_info.get("m5_pct"),
+                    "unit": "%",
+                    "help": f"{snapshot.get('m5', {}).get('count', 0)} / {total_symbols} bars",
+                },
+                {
+                    "id": "stale_daily",
+                    "label": "Stale (>48h)",
+                    "value": status_info.get("stale_daily"),
+                    "help": f"{status_info.get('stale_m5', 0)} missing 5m",
+                },
+            ]
+
+        sla_meta = {
+            "daily_pct": status_info.get("thresholds", {}).get("daily_pct"),
+            "m5_expectation": status_info.get("thresholds", {}).get("m5_expectation"),
+        }
+
         age_seconds = None
         if updated_at:
             try:
@@ -592,16 +678,42 @@ async def get_coverage(
             "visibility": _visibility_scope(),
             "exposed_to_all": settings.MARKET_DATA_SECTION_PUBLIC,
             "education": _coverage_education(),
-            "actions": _coverage_actions(),
+            "actions": _coverage_actions(backfill_5m_enabled),
             "updated_at": updated_at,
             "snapshot_age_seconds": age_seconds,
             "source": source,
             "history": history_entries,
+            "sparkline": sparkline_meta,
+            "sla": sla_meta,
+            "kpis": _kpi_cards(),
+            "backfill_5m_enabled": backfill_5m_enabled,
         }
         return snapshot
     except Exception as e:
         logger.error(f"coverage error: {e}")
         raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.get("/admin/coverage/backfill-5m-toggle")
+async def get_backfill_5m_toggle(
+    admin_user: User = Depends(get_admin_user),
+) -> Dict[str, Any]:
+    svc = MarketDataService()
+    return {"backfill_5m_enabled": _is_backfill_5m_enabled(svc)}
+
+
+@router.post("/admin/coverage/backfill-5m-toggle")
+async def set_backfill_5m_toggle(
+    enabled: bool = Body(..., embed=True),
+    admin_user: User = Depends(get_admin_user),
+) -> Dict[str, Any]:
+    svc = MarketDataService()
+    try:
+        svc.redis_client.set("coverage:backfill_5m_enabled", "true" if enabled else "false")
+        return {"backfill_5m_enabled": enabled}
+    except Exception as e:
+        logger.error(f"toggle error: {e}")
+        raise HTTPException(status_code=500, detail="Failed to update 5m backfill toggle")
 
 
 @router.get("/coverage/{symbol}")
@@ -669,31 +781,20 @@ async def post_retention_enforce(
 
 @router.get("/admin/jobs")
 async def admin_get_jobs(
-    limit: int = Query(50, ge=1, le=500),
+    limit: Optional[int] = Query(None, ge=1, le=1000),
+    offset: int = Query(0, ge=0, le=100000),
+    all: bool = Query(False),
     admin_user: User = Depends(get_admin_user),
     db: Session = Depends(get_db),
 ) -> Dict[str, Any]:
-    rows = (
-        db.query(JobRun)
-        .order_by(JobRun.started_at.desc())
-        .limit(limit)
-        .all()
-    )
-    out = []
-    for r in rows:
-        out.append(
-            {
-                "id": r.id,
-                "task_name": r.task_name,
-                "status": r.status,
-                "started_at": getattr(r.started_at, "isoformat", lambda: None)(),
-                "finished_at": getattr(r.finished_at, "isoformat", lambda: None)(),
-                "params": r.params,
-                "counters": r.counters,
-                "error": r.error,
-            }
-        )
-    return {"jobs": out}
+    total = db.query(JobRun).count()
+    query = db.query(JobRun).order_by(JobRun.started_at.desc())
+    if all:
+        rows = query.all()
+        return {"jobs": serialize_job_runs(rows), "total": total, "limit": total, "offset": 0}
+    effective_limit = limit or 50
+    rows = query.offset(offset).limit(effective_limit).all()
+    return {"jobs": serialize_job_runs(rows), "total": total, "limit": effective_limit, "offset": offset}
 
 
 @router.get("/admin/tasks")

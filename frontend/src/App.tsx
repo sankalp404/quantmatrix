@@ -33,8 +33,8 @@ import { Box, Heading, Text } from '@chakra-ui/react';
 import AdminDashboard from './pages/AdminDashboard';
 import AdminJobs from './pages/AdminJobs';
 import AdminSchedules from './pages/AdminSchedules';
-import AdminCoverage from './pages/AdminCoverage';
-import AdminTracked from './pages/AdminTracked';
+import MarketCoverage from './pages/MarketCoverage';
+import MarketTracked from './pages/MarketTracked';
 import AdminRunbook from './pages/AdminRunbook';
 
 const surfacePalette = {
@@ -104,7 +104,7 @@ const theme = extendTheme({
     colors: surfaceTokens,
   },
   fonts: {
-    heading: `'Inter', ui-sans-serif, system-ui, -apple-system, Segoe UI, Roboto, Helvetica, Arial, 'Apple Color Emoji', 'Segoe UI Emoji'`,
+    heading: `'Space Grotesk', 'Inter', ui-sans-serif, system-ui, -apple-system, Segoe UI, Roboto, Helvetica, Arial, 'Apple Color Emoji', 'Segoe UI Emoji'`,
     body: `'Inter', ui-sans-serif, system-ui, -apple-system, Segoe UI, Roboto, Helvetica, Arial, 'Apple Color Emoji', 'Segoe UI Emoji'`,
   },
   styles: {
@@ -248,8 +248,8 @@ function App() {
                     <Route path="security" element={<BoxPlaceholder title="Security" />} />
                     <Route path="brokerages" element={<Settings />} />
                     {/* Market Data (read-only) */}
-                    <Route path="market/coverage" element={<AdminCoverage />} />
-                    <Route path="market/tracked" element={<AdminTracked />} />
+                    <Route path="market/coverage" element={<MarketCoverage />} />
+                    <Route path="market/tracked" element={<MarketTracked />} />
                     {/* Admin under Settings */}
                     <Route path="admin/dashboard" element={<AdminDashboard />} />
                     <Route path="admin/jobs" element={<AdminJobs />} />

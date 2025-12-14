@@ -3,7 +3,6 @@ from __future__ import annotations
 from fastapi import APIRouter, Depends, HTTPException, Query
 from typing import Any, Dict, List, Optional
 from pydantic import BaseModel
-from celery.schedules import crontab
 import json
 
 from backend.api.dependencies import get_admin_user
@@ -20,6 +19,7 @@ from backend.tasks.schedule_metadata import (
     metadata_to_options,
     save_schedule_metadata,
 )
+from backend.tasks.schedule_helpers import build_crontab_schedule
 from datetime import datetime, timedelta
 from zoneinfo import ZoneInfo
 from croniter import croniter
@@ -208,12 +208,18 @@ async def create_schedule(
             if meta:
                 meta.touch_audit(actor, is_create=True)
         options = metadata_to_options(meta)
+        schedule = build_crontab_schedule(
+            minute=minute,
+            hour=hour,
+            day_of_month=dom,
+            month_of_year=mon,
+            day_of_week=dow,
+            timezone=payload.timezone,
+        )
         entry = rb.RedBeatSchedulerEntry(
             name=payload.name,
             task=payload.task,
-            schedule=crontab(
-                minute=minute, hour=hour, day_of_month=dom, month_of_year=mon, day_of_week=dow, timezone=payload.timezone
-            ),
+            schedule=schedule,
             args=payload.args or (),
             kwargs=payload.kwargs or {},
             options=options,
@@ -263,17 +269,18 @@ async def update_schedule(
         options = metadata_to_options(meta)
         # Delete and recreate
         current.delete()
+        schedule = build_crontab_schedule(
+            minute=minute,
+            hour=hour,
+            day_of_month=dom,
+            month_of_year=mon,
+            day_of_week=dow,
+            timezone=tz or "UTC",
+        )
         entry = rb.RedBeatSchedulerEntry(
             name=name,
             task=current.task,
-            schedule=crontab(
-                minute=minute,
-                hour=hour,
-                day_of_month=dom,
-                month_of_year=mon,
-                day_of_week=dow,
-                timezone=tz or "UTC",
-            ),
+            schedule=schedule,
             args=payload.args if payload.args is not None else (current.args or ()),
             kwargs=payload.kwargs if payload.kwargs is not None else (current.kwargs or {}),
             options=options,
@@ -388,6 +395,8 @@ def _get_redis() -> redislib.Redis:
     # Use same URL as broker/result; prefer CELERY_BROKER_URL then REDIS_URL
     from backend.config import settings
     url = getattr(settings, "CELERY_BROKER_URL", None) or getattr(settings, "REDIS_URL", None)
+    if not url:
+        raise RuntimeError("Redis URL is not configured; set CELERY_BROKER_URL or REDIS_URL")
     return redislib.from_url(url)
 
 

@@ -29,6 +29,7 @@ import {
   FormLabel,
   Textarea,
   Input,
+  Select,
   HStack,
   Stack,
   IconButton,
@@ -39,7 +40,16 @@ import {
   Radio,
   useColorModeValue,
 } from '@chakra-ui/react';
-import { FiPlay, FiCode, FiCalendar, FiInfo } from 'react-icons/fi';
+import {
+  FiPlay,
+  FiCode,
+  FiCalendar,
+  FiInfo,
+  FiChevronLeft,
+  FiChevronRight,
+  FiChevronsLeft,
+  FiChevronsRight,
+} from 'react-icons/fi';
 import api from '../services/api';
 
 const AdminJobs: React.FC = () => {
@@ -63,10 +73,37 @@ const AdminJobs: React.FC = () => {
   const tabSelectedBg = useColorModeValue('white', 'brand.600');
   const tabSelectedColor = useColorModeValue('brand.600', 'white');
 
-  const load = async () => {
+  const PAGE_SIZE_KEY = 'adminJobs.pageSize';
+  const initialPageSize = React.useMemo(() => {
+    if (typeof window === 'undefined') return '50';
+    const stored = window.localStorage.getItem(PAGE_SIZE_KEY);
+    if (stored === 'all') return 'all';
+    if (['25', '50', '100', '200'].includes(stored || '')) return stored as string;
+    return '50';
+  }, []);
+
+  const [page, setPage] = React.useState(0);
+  const [pageSize, setPageSize] = React.useState<string>(initialPageSize); // '25' | '50' | '100' | '200' | 'all'
+  const [total, setTotal] = React.useState<number>(0);
+
+  const load = async (pageArg = page, pageSizeArg = pageSize) => {
     try {
-      const r = await api.get('/market-data/admin/jobs');
+      const params: any = {};
+      if (pageSizeArg === 'all') {
+        params.all = true;
+      } else {
+        const numericSize = Number(pageSizeArg) || 50;
+        params.limit = numericSize;
+        params.offset = pageArg * numericSize;
+      }
+      const r = await api.get('/market-data/admin/jobs', { params });
       setJobs(r.data?.jobs || []);
+      const apiTotal = r.data?.total;
+      const parsedTotal = typeof apiTotal === 'number' ? apiTotal : Number(apiTotal);
+      setTotal(Number.isFinite(parsedTotal) && parsedTotal > 0 ? parsedTotal : (r.data?.jobs || []).length);
+      if (pageSizeArg === 'all') {
+        setPage(0);
+      }
     } catch { }
     try {
       const c = await api.get('/admin/tasks/catalog');
@@ -74,13 +111,53 @@ const AdminJobs: React.FC = () => {
     } catch { }
   };
   React.useEffect(() => { load(); }, []);
+  React.useEffect(() => {
+    if (typeof window !== 'undefined') {
+      window.localStorage.setItem(PAGE_SIZE_KEY, pageSize);
+    }
+  }, [pageSize]);
+
+  const onPageChange = (nextPage: number) => {
+    if (pageSize === 'all') return;
+    if (nextPage < 0) return;
+    const numericSize = Number(pageSize) || 50;
+    const totalPages = Math.max(1, Math.ceil(total / numericSize));
+    if (nextPage >= totalPages) return;
+    setPage(nextPage);
+    load(nextPage, pageSize);
+  };
+
+  const onPageSizeChange = (e: React.ChangeEvent<HTMLSelectElement>) => {
+    const val = e.target.value;
+    const nextSize = val;
+    setPageSize(nextSize);
+    setPage(0);
+    load(0, nextSize);
+  };
 
   const color = (s: string) => s === 'ok' ? 'green' : (s === 'running' ? 'blue' : 'red');
 
   const formatTs = (value?: string | null) => (value ? new Date(value).toLocaleString() : '—');
 
+  const summarizeCounters = (counters: any) => {
+    if (!counters) return 'No counters reported';
+    if (counters.summary) return counters.summary;
+    const tracked = counters.tracked_total ?? counters.universe ?? counters.tracked;
+    const inserted = counters.bars_inserted_total ?? counters.inserted ?? counters.updated_total;
+    const uptodate = counters.up_to_date_total ?? counters.up_to_date;
+    const errors = counters.errors ?? 0;
+    const provider = counters.provider_usage ? Object.keys(counters.provider_usage).join(', ') : undefined;
+    const parts = [];
+    if (inserted !== undefined) parts.push(`Inserted ${inserted}`);
+    if (uptodate !== undefined) parts.push(`${uptodate} already up-to-date`);
+    if (tracked !== undefined) parts.push(`tracked ${tracked}`);
+    parts.push(`${errors} errors`);
+    if (provider) parts.push(`provider: ${provider.toUpperCase()}`);
+    return parts.join('; ');
+  };
+
   const jobSummary = React.useMemo(() => {
-    const summary = { total: jobs.length, ok: 0, running: 0, error: 0 };
+    const summary = { total: total || jobs.length, ok: 0, running: 0, error: 0 };
     jobs.forEach((job) => {
       const key = job.status as 'ok' | 'running' | 'error';
       if (summary[key] !== undefined) {
@@ -346,7 +423,7 @@ const AdminJobs: React.FC = () => {
                     <Td>{formatTs(j.finished_at)}</Td>
                     <Td>
                       <Text fontSize="xs" color="gray.500">
-                        {j.counters?.summary || 'No counters reported'}
+                        {summarizeCounters(j.counters)}
                       </Text>
                     </Td>
                     <Td textAlign="right">
@@ -364,6 +441,71 @@ const AdminJobs: React.FC = () => {
                 ))}
               </Tbody>
             </Table>
+            <HStack justify="space-between" mt={3} align="center" flexWrap="wrap" rowGap={2}>
+              <Text fontSize="sm" color="gray.500">
+                {(() => {
+                  const numericSize = pageSize === 'all' ? total : Number(pageSize) || 50;
+                  const start = pageSize === 'all' ? (total > 0 ? 1 : 0) : page * numericSize + 1;
+                  const end = pageSize === 'all' ? total : Math.min(total, (page + 1) * numericSize);
+                  if (!total) return `Showing ${jobs.length} of —`;
+                  return `Showing ${start}–${end} of ${total} jobs${pageSize === 'all' ? ' (all)' : ''}`;
+                })()}
+              </Text>
+              <HStack spacing={3} align="center">
+                <HStack spacing={1}>
+                  <Text fontSize="sm" color="gray.500">Jobs per page</Text>
+                  <Select size="sm" value={pageSize} onChange={onPageSizeChange} width="110px">
+                    {[25, 50, 100, 200].map((n) => (
+                      <option key={n} value={n}>{n}</option>
+                    ))}
+                    <option value="all">All</option>
+                  </Select>
+                </HStack>
+                {pageSize !== 'all' && (
+                  <HStack spacing={2} align="center">
+                    <IconButton
+                      aria-label="First page"
+                      icon={<FiChevronsLeft />}
+                      size="sm"
+                      variant="ghost"
+                      onClick={() => onPageChange(0)}
+                      isDisabled={page === 0}
+                    />
+                    <IconButton
+                      aria-label="Previous page"
+                      icon={<FiChevronLeft />}
+                      size="sm"
+                      variant="ghost"
+                      onClick={() => onPageChange(page - 1)}
+                      isDisabled={page === 0}
+                    />
+                    <Text fontSize="sm" color="gray.500">
+                      Page {page + 1} of {Math.max(1, Math.ceil(total / (Number(pageSize) || 50)))}
+                    </Text>
+                    <IconButton
+                      aria-label="Next page"
+                      icon={<FiChevronRight />}
+                      size="sm"
+                      variant="ghost"
+                      onClick={() => onPageChange(page + 1)}
+                      isDisabled={(page + 1) * (Number(pageSize) || 50) >= total}
+                    />
+                    <IconButton
+                      aria-label="Last page"
+                      icon={<FiChevronsRight />}
+                      size="sm"
+                      variant="ghost"
+                      onClick={() => {
+                        const numericSize = Number(pageSize) || 50;
+                        const totalPages = Math.max(1, Math.ceil(total / numericSize));
+                        onPageChange(totalPages - 1);
+                      }}
+                      isDisabled={(page + 1) * (Number(pageSize) || 50) >= total}
+                    />
+                  </HStack>
+                )}
+              </HStack>
+            </HStack>
           </TabPanel>
         </TabPanels>
       </Tabs>

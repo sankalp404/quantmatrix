@@ -39,8 +39,11 @@ class HookConfig(BaseModel):
     """Optional alert integrations."""
 
     discord_webhook: Optional[str] = None
+    discord_channels: List[str] = Field(default_factory=list)
+    discord_mentions: List[str] = Field(default_factory=list)
     prometheus_endpoint: Optional[str] = None
     alert_on: List[str] = Field(default_factory=lambda: ["failure"])
+    slow_threshold_s: Optional[float] = None
 
 
 class ScheduleMetadata(BaseModel):

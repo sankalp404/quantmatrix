@@ -120,4 +120,56 @@ def test_coverage_prefers_cached_snapshot(monkeypatch):
     assert body["history"]
 
 
+def test_coverage_meta_exposes_kpis_and_sparkline(monkeypatch):
+    from backend.api.routes import market_data as routes
+
+    monkeypatch.setattr(settings, "MARKET_DATA_SECTION_PUBLIC", True)
+
+    class _RedisStub:
+        def get(self, key):
+            return None
+
+        def lrange(self, key, start, end):
+            return []
+
+    class _StubService:
+        def __init__(self):
+            self.redis_client = _RedisStub()
+
+        def coverage_snapshot(self, db):
+            return {
+                "generated_at": "2025-01-01T00:00:00",
+                "symbols": 2,
+                "tracked_count": 2,
+                "daily": {
+                    "count": 2,
+                    "last": {
+                        "AAA": "2025-01-01T00:00:00",
+                        "BBB": "2025-01-01T00:00:00",
+                    },
+                    "stale": [],
+                },
+                "m5": {
+                    "count": 1,
+                    "last": {
+                        "AAA": "2025-01-01T00:00:00",
+                    },
+                    "stale": [],
+                },
+            }
+
+    monkeypatch.setattr(routes, "MarketDataService", _StubService)
+
+    resp = client.get("/api/v1/market-data/coverage")
+    assert resp.status_code == 200
+    payload = resp.json()
+    meta = payload["meta"]
+    assert "sparkline" in meta
+    assert "kpis" in meta
+    assert isinstance(meta["kpis"], list)
+    assert meta["kpis"][0]["id"] == "tracked"
+    assert len(meta["sparkline"]["daily_pct"]) >= 1
+    assert len(meta["sparkline"]["m5_pct"]) >= 1
+    assert len(meta["sparkline"]["labels"]) >= 1
+    assert meta["sla"]["daily_pct"] == payload["status"]["thresholds"]["daily_pct"]
 

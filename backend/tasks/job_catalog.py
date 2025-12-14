@@ -3,6 +3,7 @@ from __future__ import annotations
 from dataclasses import dataclass, asdict
 from typing import Any, Dict, List, Optional
 
+from backend.tasks.schedule_helpers import build_crontab_schedule
 from backend.tasks.schedule_metadata import (
     HookConfig,
     MaintenanceWindow,
@@ -152,7 +153,6 @@ def seed_redbeat_if_empty(celery_app) -> Dict[str, int]:
     """Seed RedBeat schedules from catalog when empty."""
     try:
         from redbeat import schedulers as rb
-        from celery.schedules import crontab
     except Exception:
         return {"seeded": 0}
     try:
@@ -166,17 +166,18 @@ def seed_redbeat_if_empty(celery_app) -> Dict[str, int]:
             minute, hour, dom, month, dow = tmpl.default_cron.split()
             meta = _metadata_from_template(tmpl)
             options = metadata_to_options(meta)
+            schedule = build_crontab_schedule(
+                minute=minute,
+                hour=hour,
+                day_of_month=dom,
+                month_of_year=month,
+                day_of_week=dow,
+                timezone=tmpl.default_tz,
+            )
             entry = rb.RedBeatSchedulerEntry(
                 name=tmpl.id,
                 task=tmpl.task,
-                schedule=crontab(
-                    minute=minute,
-                    hour=hour,
-                    day_of_month=dom,
-                    month_of_year=month,
-                    day_of_week=dow,
-                    timezone=tmpl.default_tz,
-                ),
+                schedule=schedule,
                 args=tmpl.args or (),
                 kwargs=tmpl.kwargs or {},
                 options=options,

@@ -1,4 +1,5 @@
 from backend.tasks.schedule_metadata import (
+    HookConfig,
     ScheduleMetadata,
     ScheduleMetadataPatch,
     delete_schedule_metadata,
@@ -48,4 +49,20 @@ def test_metadata_patch_can_clear_queue():
     updated = patch.apply(base)
     assert updated.queue is None
     assert updated.priority is None
+
+
+def test_metadata_patch_updates_hooks():
+    base = ScheduleMetadata(hooks=HookConfig(discord_webhook="system_status", alert_on=["failure"]))
+    patch = ScheduleMetadataPatch(
+        hooks=HookConfig(
+            discord_webhook="signals",
+            discord_channels=["system_status", "playground"],
+            prometheus_endpoint="https://push.example.com/job/test",
+            alert_on=["failure", "slow"],
+        )
+    )
+    updated = patch.apply(base)
+    assert updated.hooks.discord_webhook == "signals"
+    assert updated.hooks.discord_channels == ["system_status", "playground"]
+    assert "slow" in updated.hooks.alert_on
 

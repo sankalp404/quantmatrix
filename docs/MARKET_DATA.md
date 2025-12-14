@@ -167,6 +167,18 @@ Troubleshooting:
 - Export returns an array of schedules (name/task/cron/tz/args/kwargs/metadata) that can be versioned in git; import replays that list with audit stamping.
 - Catalog seeding writes metadata defaults for every template (e.g., `account_sync` jobs route to their queue, market-data jobs enforce single-flight + timeouts) so new environments get consistent guard rails without hand editing Redis.
 
+### Scheduler Alerts & Prometheus Hooks
+
+- `hooks.discord_webhook` accepts either a full webhook URL or an alias (`system_status`, `signals`, `portfolio`, `morning_brew`, `playground`). Multiple targets can be supplied via comma-delimited values.
+- Event types emitted by `task_run`:
+  - `failure` (default) when task raises.
+  - `slow` when runtime exceeds `metadata.safety.timeout_s`.
+  - `success` when runs complete (opt-in by including `"success"` in `alert_on`).
+- Discord alerts render embeds with job id, duration, queue, counters, and any error snippet to the configured channels.
+- `hooks.prometheus_endpoint` can point to a Pushgateway-compatible URL. Each run writes `quantmatrix_task_duration_seconds{task="...",event="...",queue="..."} <value>` so Grafana/Prometheus alerting rules can detect spikes.
+- If no per-job hook is configured, failures still emit to the global `DISCORD_WEBHOOK_SYSTEM_STATUS` endpoint (when set) so regressions cannot go unnoticed.
+- Admin Schedules UI surfaces these fields under “Alerts & Observability,” allowing operators to wire Discord aliases, comma-separated channel lists, Prometheus endpoints, and opt-in events (slow/success) without touching Redis exports.
+
 ## Coverage Health Monitor
 
 - Celery task `monitor_coverage_health` runs hourly (Admin Coverage button or default schedule) and caches:

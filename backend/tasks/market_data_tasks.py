@@ -486,7 +486,7 @@ def backfill_symbols(symbols: List[str]) -> dict:
 
 @shared_task(name="backend.tasks.market_data_tasks.backfill_index_universe")
 @task_run("backfill_index_universe")
-def backfill_index_universe(batch_size: int = 20) -> dict:
+def backfill_index_universe(batch_size: int = 100) -> dict:
     """Bootstrap-only: backfill last-200 OHLCV for SP500/NASDAQ100/DOW30 (batched)."""
     _set_task_status("backfill_index_universe", "running")
     loop = _setup_event_loop()
@@ -673,7 +673,10 @@ def bootstrap_universe() -> dict:
     res4 = backfill_last_200_bars()
     _append("backfill_last_200_bars", res4)
 
-    res5 = backfill_5m_last_n_days(n_days=1, batch_size=50)
+    if _is_5m_backfill_enabled():
+        res5 = backfill_5m_last_n_days(n_days=1, batch_size=50)
+    else:
+        res5 = {"status": "skipped", "reason": "5m backfill disabled by admin toggle"}
     _append("backfill_5m_last_n_days", res5)
 
     res6 = recompute_indicators_universe(batch_size=50)
@@ -832,10 +835,33 @@ def record_daily_history(symbols: List[str] | None = None) -> dict:
 # ============================= 5m Intraday Backfill and Retention =============================
 
 
+def _is_5m_backfill_enabled() -> bool:
+    """Check admin toggle stored in Redis; default to enabled on errors."""
+    try:
+        raw = market_data_service.redis_client.get("coverage:backfill_5m_enabled")
+        if raw is None:
+            return True
+        if isinstance(raw, (bytes, bytearray)):
+            raw = raw.decode()
+        return str(raw).strip().lower() not in ("0", "false", "off", "disabled")
+    except Exception:
+        # Fail open if Redis unavailable so daily flows aren't blocked
+        return True
+
+
 @shared_task(name="backend.tasks.market_data_tasks.backfill_5m_for_symbols")
 @task_run("backfill_5m_for_symbols")
 def backfill_5m_for_symbols(symbols: List[str], n_days: int = 5) -> dict:
     """Delta backfill last N days of 5m bars for a provided symbol list."""
+    if not _is_5m_backfill_enabled():
+        return {
+            "status": "skipped",
+            "reason": "5m backfill disabled by admin toggle",
+            "symbols": len(symbols or []),
+            "processed": 0,
+            "errors": 0,
+            "provider_usage": {},
+        }
     session = SessionLocal()
     loop = None
     try:
@@ -871,6 +897,15 @@ def backfill_5m_for_symbols(symbols: List[str], n_days: int = 5) -> dict:
 @task_run("backfill_5m_last_n_days")
 def backfill_5m_last_n_days(n_days: int = 5, batch_size: int = 50) -> dict:
     """Backfill last N days of 5m bars for tracked universe in batches."""
+    if not _is_5m_backfill_enabled():
+        return {
+            "status": "skipped",
+            "reason": "5m backfill disabled by admin toggle",
+            "symbols": 0,
+            "processed": 0,
+            "errors": 0,
+            "provider_usage": {},
+        }
     session = SessionLocal()
     loop = None
     try:

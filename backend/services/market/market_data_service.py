@@ -451,9 +451,12 @@ class MarketDataService:
             if interval != "1d":
                 return None
             data = fmpsdk.historical_price_full(apikey=settings.FMP_API_KEY, symbol=symbol)
-            if not data or "historical" not in data:
+            # FMP can return either {"symbol": ..., "historical": [...]} or a plain list
+            if isinstance(data, dict):
+                data = data.get("historical")
+            if not data or not isinstance(data, list):
                 return None
-            df = pd.DataFrame(data["historical"])
+            df = pd.DataFrame(data)
             if df.empty or "date" not in df.columns:
                 return None
             df["date"] = pd.to_datetime(df["date"])
@@ -1042,56 +1045,6 @@ class MarketDataService:
         """Compatibility wrapper expected by tests – returns the latest snapshot."""
         return await self.get_snapshot(symbol)
 
-def compute_coverage_status(snapshot: Dict[str, Any]) -> Dict[str, Any]:
-    """Derive human-readable coverage state + KPI percentages from a raw snapshot."""
-    total_symbols = int(snapshot.get("symbols") or 0)
-    tracked = int(snapshot.get("tracked_count") or 0)
-
-    daily = snapshot.get("daily", {}) or {}
-    m5 = snapshot.get("m5", {}) or {}
-    daily_count = int(daily.get("count") or 0)
-    m5_count = int(m5.get("count") or 0)
-    stale_daily = len(daily.get("stale") or [])
-    stale_m5 = len(m5.get("stale") or [])
-
-    def pct(count: int) -> float:
-        return round((count / total_symbols) * 100.0, 1) if total_symbols else 0.0
-
-    daily_pct = pct(daily_count)
-    m5_pct = pct(m5_count)
-
-    label = "ok"
-    summary = "Coverage healthy across daily + 5m intervals."
-    if total_symbols == 0:
-        label = "idle"
-        summary = "No symbols discovered yet. Run refresh + tracked tasks."
-    if total_symbols > 0 and daily_pct < 90:
-        label = "degraded"
-        summary = f"Daily coverage {daily_pct}% below 90% SLA."
-    elif stale_daily:
-        label = "degraded"
-        summary = f"{stale_daily} symbols have daily bars older than 48h."
-    elif m5_pct == 0 and total_symbols:
-        label = "degraded"
-        summary = "5m coverage is 0% – run intraday backfill."
-    elif stale_m5:
-        label = "warning"
-        summary = f"{stale_m5} symbols missing 5m data."
-
-    return {
-        "label": label,
-        "summary": summary,
-        "daily_pct": daily_pct,
-        "m5_pct": m5_pct,
-        "stale_daily": stale_daily,
-        "stale_m5": stale_m5,
-        "symbols": total_symbols,
-        "tracked_count": tracked,
-        "thresholds": {"daily_pct": 90, "m5_expectation": ">=1 refresh/day"},
-    }
-
-
-class MarketDataService:
     # ---------------------- Coverage instrumentation ----------------------
     def coverage_snapshot(self, db: Session) -> Dict[str, Any]:
         """Compute coverage freshness, stale lists, and tracked stats for instrumentation/UI."""
@@ -1140,13 +1093,7 @@ class MarketDataService:
                 dt = datetime.fromisoformat(iso) if iso else None
                 bucket = bucketize(dt)
                 if bucket in (">48h", "none"):
-                    items.append(
-                        {
-                            "symbol": sym,
-                            "last": iso,
-                            "bucket": bucket,
-                        }
-                    )
+                    items.append({"symbol": sym, "last": iso, "bucket": bucket})
             items.sort(key=lambda item: item.get("last") or "")
             return items[:stale_limit]
 
@@ -1164,11 +1111,14 @@ class MarketDataService:
             tracked_symbols = json.loads(raw) if raw else []
         except Exception:
             tracked_symbols = []
+        tracked_symbols = [str(s).upper() for s in tracked_symbols if s]
+        tracked_total = len(set(tracked_symbols))
+        total_symbols = tracked_total or len(set(symbols))
 
         snapshot = {
             "generated_at": now.isoformat(),
-            "symbols": len(set(symbols)),
-            "tracked_count": len(tracked_symbols),
+            "symbols": total_symbols,
+            "tracked_count": tracked_total,
             "tracked_sample": tracked_symbols[:10],
             "indices": idx_counts,
             "daily": {
@@ -1186,6 +1136,54 @@ class MarketDataService:
         }
         snapshot["status"] = compute_coverage_status(snapshot)
         return snapshot
+
+def compute_coverage_status(snapshot: Dict[str, Any]) -> Dict[str, Any]:
+    """Derive human-readable coverage state + KPI percentages from a raw snapshot."""
+    total_symbols = int(snapshot.get("symbols") or 0)
+    tracked = int(snapshot.get("tracked_count") or 0)
+
+    daily = snapshot.get("daily", {}) or {}
+    m5 = snapshot.get("m5", {}) or {}
+    daily_count = int(daily.get("count") or 0)
+    m5_count = int(m5.get("count") or 0)
+    stale_daily = len(daily.get("stale") or [])
+    stale_m5 = len(m5.get("stale") or [])
+
+    def pct(count: int) -> float:
+        return round((count / total_symbols) * 100.0, 1) if total_symbols else 0.0
+
+    daily_pct = pct(daily_count)
+    m5_pct = pct(m5_count)
+
+    label = "ok"
+    summary = "Coverage healthy across daily + 5m intervals."
+    if total_symbols == 0:
+        label = "idle"
+        summary = "No symbols discovered yet. Run refresh + tracked tasks."
+    if total_symbols > 0 and daily_pct < 90:
+        label = "degraded"
+        summary = f"Daily coverage {daily_pct}% below 90% SLA."
+    elif stale_daily:
+        label = "degraded"
+        summary = f"{stale_daily} symbols have daily bars older than 48h."
+    elif m5_pct == 0 and total_symbols:
+        label = "degraded"
+        summary = "5m coverage is 0% – run intraday backfill."
+    elif stale_m5:
+        label = "warning"
+        summary = f"{stale_m5} symbols missing 5m data."
+
+    return {
+        "label": label,
+        "summary": summary,
+        "daily_pct": daily_pct,
+        "m5_pct": m5_pct,
+        "stale_daily": stale_daily,
+        "stale_m5": stale_m5,
+        "symbols": total_symbols,
+        "tracked_count": tracked,
+        "thresholds": {"daily_pct": 90, "m5_expectation": ">=1 refresh/day"},
+    }
 
 
 # Global instance
