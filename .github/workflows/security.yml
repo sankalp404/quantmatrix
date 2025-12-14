@@ -24,10 +24,10 @@ jobs:
     
     steps:
     - name: 📥 Checkout Code
-      uses: actions/checkout@v4
+      uses: actions/checkout@v6
       
     - name: 🐍 Set up Python
-      uses: actions/setup-python@v4
+      uses: actions/setup-python@v6
       with:
         python-version: ${{ env.PYTHON_VERSION }}
         
@@ -60,7 +60,7 @@ jobs:
         fi
         
     - name: 📊 Upload Security Report
-      uses: actions/upload-artifact@v4
+      uses: actions/upload-artifact@v5
       if: always()
       with:
         name: security-reports
@@ -77,10 +77,10 @@ jobs:
     
     steps:
     - name: 📥 Checkout Code
-      uses: actions/checkout@v4
+      uses: actions/checkout@v6
       
     - name: 🐍 Set up Python
-      uses: actions/setup-python@v4
+      uses: actions/setup-python@v6
       with:
         python-version: ${{ env.PYTHON_VERSION }}
         
@@ -92,7 +92,7 @@ jobs:
         bandit -r backend/ -f txt -x backend/migrations/,backend/tests_v2/
         
     - name: 📊 Upload Bandit Report
-      uses: actions/upload-artifact@v4
+      uses: actions/upload-artifact@v5
       if: always()
       with:
         name: bandit-report
@@ -108,7 +108,7 @@ jobs:
     
     steps:
     - name: 📥 Checkout Code
-      uses: actions/checkout@v4
+      uses: actions/checkout@v6
       with:
         fetch-depth: 0  # Full history for secret scanning
         
@@ -134,13 +134,13 @@ jobs:
     
     steps:
     - name: 📥 Checkout Code
-      uses: actions/checkout@v4
+      uses: actions/checkout@v6
       
     - name: 🐳 Set up Docker Buildx
       uses: docker/setup-buildx-action@v3
       
     - name: 🏗️ Build Backend Image for Scanning
-      uses: docker/build-push-action@v5
+      uses: docker/build-push-action@v6
       with:
         context: .
         file: Dockerfile.backend
@@ -156,7 +156,7 @@ jobs:
         output: 'trivy-results.sarif'
         
     - name: 📊 Upload Trivy Results
-      uses: github/codeql-action/upload-sarif@v2
+      uses: github/codeql-action/upload-sarif@v3
       if: always()
       with:
         sarif_file: 'trivy-results.sarif'
@@ -171,10 +171,10 @@ jobs:
     
     steps:
     - name: 📥 Checkout Code
-      uses: actions/checkout@v4
+      uses: actions/checkout@v6
       
     - name: 🐍 Set up Python
-      uses: actions/setup-python@v4
+      uses: actions/setup-python@v6
       with:
         python-version: ${{ env.PYTHON_VERSION }}
         
@@ -249,7 +249,7 @@ jobs:
     
     steps:
     - name: 📥 Checkout Code
-      uses: actions/checkout@v4
+      uses: actions/checkout@v6
       
     - name: 📋 Financial Regulations Compliance
       run: |

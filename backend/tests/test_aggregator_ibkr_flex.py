@@ -4,7 +4,7 @@ import pytest
 from fastapi.testclient import TestClient
 
 from backend.api.main import app
-from backend.database import SessionLocal
+from backend.api.dependencies import get_db
 from backend.models.broker_account import BrokerAccount, AccountCredentials, BrokerType
 import backend.api.routes.aggregator as agg
 
@@ -29,7 +29,10 @@ def _login(client):
     return r.json().get("id"), r2.json()["access_token"]
 
 
-def test_ibkr_flex_connect_and_status(client, monkeypatch):
+def test_ibkr_flex_connect_and_status(client, monkeypatch, db_session):
+    def _override_db():
+        yield db_session
+    app.dependency_overrides[get_db] = _override_db
     user_id, token = _login(client)
     if not token:
         pytest.skip("login failed in test env")
@@ -51,23 +54,20 @@ def test_ibkr_flex_connect_and_status(client, monkeypatch):
     assert job_id
 
     # verify credentials row exists with metadata
-    db = SessionLocal()
-    try:
-        acct = db.query(BrokerAccount).filter(BrokerAccount.user_id == user_id, BrokerAccount.broker == BrokerType.IBKR).first()
-        assert acct is not None
-        cred = db.query(AccountCredentials).filter(AccountCredentials.account_id == acct.id).first()
-        assert cred is not None
-        assert cred.provider == BrokerType.IBKR
-        assert cred.credential_type == "ibkr_flex"
-        assert cred.encrypted_credentials is not None
-    finally:
-        db.close()
+    acct = db_session.query(BrokerAccount).filter(BrokerAccount.user_id == user_id, BrokerAccount.broker == BrokerType.IBKR).first()
+    assert acct is not None
+    cred = db_session.query(AccountCredentials).filter(AccountCredentials.account_id == acct.id).first()
+    assert cred is not None
+    assert cred.provider == BrokerType.IBKR
+    assert cred.credential_type == "ibkr_flex"
+    assert cred.encrypted_credentials is not None
 
     # status endpoint should report connected/no error
     rs = client.get("/api/v1/aggregator/ibkr/status", headers={"Authorization": f"Bearer {token}"})
     assert rs.status_code == 200
     body = rs.json()
     assert body.get("connected") in (True, False)
+    app.dependency_overrides.pop(get_db, None)
 
 
 

@@ -15,6 +15,8 @@ DATABASE_URL = os.getenv(
     "DATABASE_URL", "postgresql://quantmatrix:quantmatrix@localhost:5432/quantmatrix"
 )
 
+APP_DATABASE_URL = DATABASE_URL
+
 # Create engine
 engine = create_engine(
     DATABASE_URL,
@@ -23,8 +25,37 @@ engine = create_engine(
     pool_recycle=300,
 )
 
-# Session factory
-SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
+# Raw factory kept private; SessionLocal wrapper enforces test safety in pytest
+_RAW_SESSION_FACTORY = sessionmaker(autocommit=False, autoflush=False, bind=engine)
+
+
+def _assert_test_db_guard():
+    """Abort if pytest tries to use the app database.
+
+    Rules:
+    - If running under pytest (PYTEST_CURRENT_TEST or QUANTMATRIX_TESTING), require TEST_DATABASE_URL.
+    - If TEST_DATABASE_URL equals APP_DATABASE_URL, abort.
+    """
+    is_testing = bool(
+        os.getenv("PYTEST_CURRENT_TEST") or os.getenv("QUANTMATRIX_TESTING")
+    )
+    if not is_testing:
+        return
+    test_db_url = os.getenv("TEST_DATABASE_URL", "")
+    if not test_db_url:
+        raise RuntimeError(
+            "TEST_DATABASE_URL is required for tests; refusing to use APP_DATABASE_URL"
+        )
+    if test_db_url == APP_DATABASE_URL:
+        raise RuntimeError(
+            "TEST_DATABASE_URL equals APP_DATABASE_URL; aborting to avoid destructive operations"
+        )
+
+
+def SessionLocal():
+    """Guarded session factory. In tests, refuses to hit the app DB."""
+    _assert_test_db_guard()
+    return _RAW_SESSION_FACTORY()
 
 # Base class for all models (re-export from models)
 from backend.models import Base

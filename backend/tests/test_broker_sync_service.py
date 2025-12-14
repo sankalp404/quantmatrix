@@ -13,7 +13,6 @@ Tests for broker_sync_service.py functionality:
 import pytest
 from unittest.mock import Mock, patch
 
-from backend.database import SessionLocal
 from backend.models import User, BrokerAccount
 from backend.models.broker_account import BrokerType, AccountType, SyncStatus
 from backend.services.portfolio.broker_sync_service import BrokerSyncService

@@ -41,6 +41,7 @@ Responsibilities by layer
 - Nightly delta backfill safety for portfolio symbols (last-200)
 - Nightly recompute indicators for full universe (from local `price_data`)
 - Nightly history recording (`market_analysis_history`)
+- Hourly coverage-health snapshot (`monitor_coverage_health`) caches freshness buckets + stale symbol lists in Redis so Admin → Coverage can render SLAs instantly and alert on drift.
 
 Paid mode operations
 --------------------
@@ -96,3 +97,92 @@ Notes on retention
      - nightly delta backfill safety → `backfill_last_200_bars`
      - nightly universe indicators recompute → `recompute_indicators_universe`
      - nightly history write → `record_daily_history`
+     - nightly 5m backfill → `backfill_5m_last_n_days`
+     - retention enforcement (5m) → `enforce_price_data_retention`
+
+## Intraday (5m) Backfill and Retention
+- Persist 5m bars for tracked symbols (default lookback: 5–30 days)
+- Providers: FMP `historical_chart(5min)` → Twelve Data 5min → yfinance 5m
+- Retain last 90 days of 5m data by default; enforce via scheduled retention task
+
+## Admin Area (RBAC: admin)
+- Dashboard: freshness KPIs, last task statuses, quick actions (tracked update, backfills, recompute, record history, coverage monitor)
+- Jobs: view recent `job_run` rows with durations, counters, errors, and drill-in modal for params/counters/logs
+- Schedules: full CRUD via RedBeat with cron preview, queue/priority routing, maintenance windows, preflight hooks, export/import, pause/resume, and run-now controls (see “Scheduler Metadata & Export/Import” below)
+- Coverage: daily and 5m coverage summary, stale (>48h) lists, missing 5m table, education/hints, one-click schedule for coverage monitor
+- Tracked: view `tracked:all` and `tracked:new` (Redis), optional columns (price, ATR, stage, market cap, sector), quick actions to refresh/update/backfill
+
+## API Additions
+- `GET /api/v1/market-data/db/history?symbol=SPY&interval=1d|5m&start&end&limit`
+- `GET /api/v1/market-data/coverage` and `/coverage/{symbol}`
+- `POST /api/v1/market-data/backfill/5m?n_days=5&batch_size=50` (admin)
+- `POST /api/v1/market-data/retention/enforce?max_days_5m=90` (admin)
+- `GET /api/v1/market-data/admin/jobs` (admin)
+- `GET /api/v1/market-data/admin/tasks` and `POST /api/v1/market-data/admin/tasks/run` (limited set; admin)
+- `GET /api/v1/admin/schedules` / `POST|PUT|DELETE /admin/schedules` / `POST /admin/schedules/import|export|pause|resume|run-now|preview` – dynamic RedBeat management with queue routing, metadata, and import/export workflows
+
+## Coverage & Freshness (SLA)
+
+- `GET /api/v1/market-data/coverage` returns:
+  - symbols: distinct symbols in `price_data`
+  - tracked_count: Redis `tracked:all` size
+  - indices: active member counts (SP500, NASDAQ100, DOW30)
+  - daily/m5: { count, last: {symbol->iso ts}, freshness buckets: {"<=24h","24-48h",">48h","none"} }
+- SLA guidance:
+  - Daily coverage ≥ 90% of symbols
+  - No symbols in >48h bucket under normal operation
+  - 5m coverage present for D‑1 during market days
+
+## Universe Bootstrap Runbook
+
+1) Refresh Index Constituents
+2) Update Tracked
+3) Backfill Index Universe (daily)
+4) Backfill Last‑200
+5) Backfill 5m (D‑1)
+6) Recompute Indicators
+7) Record Daily History
+8) Schedule/Run Coverage Monitor (hourly) to ensure stale lists stay empty
+
+One-click: POST `/api/v1/market-data/admin/bootstrap` (Admin UI button “Bootstrap Universe”)
+
+Troubleshooting:
+- If Refresh fetched 0 members: check provider reachability; FMP quota; Wikipedia blocked; rerun.
+- If freshness shows many >48h: run Backfill Daily, Recompute, then Record History.
+- If 5m coverage is 0 after market opens: run Backfill 5m (D‑1).
+
+## Index Refresh Observability
+
+- Provider strategy: FMP-first, Wikipedia fallback (HTML tables)
+- JobRun.counters per index include: fetched, inserted, reactivated, inactivated, provider_used, fallback_used
+- Redis meta: `index_constituents:{INDEX}:meta` stores {provider_used, fallback_used, count} for 24h
+
+## Scheduler Metadata & Export/Import
+
+- `ScheduleMetadata` is persisted per RedBeat entry (`redbeat:meta:{name}`) and includes:
+  - `queue` / `priority` → passed into Celery `apply_async` for routing and QoS
+  - `dependencies`, `maintenance_windows`, `preflight_checks`, `safety` (single-flight, max concurrency, timeout, retry/backoff), `hooks` (Discord webhooks, Prometheus endpoints), audit fields (`created_by/at`, `updated_by/at`)
+- API payloads accept a `metadata` object (`ScheduleMetadataPatch`) on create/update/import; Admin UI surfaces editable fields alongside cron/args.
+- Pausing a schedule snapshots args/kwargs/metadata to `redbeat:paused:{name}`; resuming requires cron but restores the saved metadata automatically.
+- Export returns an array of schedules (name/task/cron/tz/args/kwargs/metadata) that can be versioned in git; import replays that list with audit stamping.
+- Catalog seeding writes metadata defaults for every template (e.g., `account_sync` jobs route to their queue, market-data jobs enforce single-flight + timeouts) so new environments get consistent guard rails without hand editing Redis.
+
+### Scheduler Alerts & Prometheus Hooks
+
+- `hooks.discord_webhook` accepts either a full webhook URL or an alias (`system_status`, `signals`, `portfolio`, `morning_brew`, `playground`). Multiple targets can be supplied via comma-delimited values.
+- Event types emitted by `task_run`:
+  - `failure` (default) when task raises.
+  - `slow` when runtime exceeds `metadata.safety.timeout_s`.
+  - `success` when runs complete (opt-in by including `"success"` in `alert_on`).
+- Discord alerts render embeds with job id, duration, queue, counters, and any error snippet to the configured channels.
+- `hooks.prometheus_endpoint` can point to a Pushgateway-compatible URL. Each run writes `quantmatrix_task_duration_seconds{task="...",event="...",queue="..."} <value>` so Grafana/Prometheus alerting rules can detect spikes.
+- If no per-job hook is configured, failures still emit to the global `DISCORD_WEBHOOK_SYSTEM_STATUS` endpoint (when set) so regressions cannot go unnoticed.
+- Admin Schedules UI surfaces these fields under “Alerts & Observability,” allowing operators to wire Discord aliases, comma-separated channel lists, Prometheus endpoints, and opt-in events (slow/success) without touching Redis exports.
+
+## Coverage Health Monitor
+
+- Celery task `monitor_coverage_health` runs hourly (Admin Coverage button or default schedule) and caches:
+  - `generated_at`, total tracked symbols, index member counts
+  - Daily + 5m coverage counts, freshness buckets, stale lists (first 50 symbols per bucket)
+  - Status summary (`ok` / `degraded`) plus tracked symbols
+- Redis key `coverage:health:last` feeds Admin Dashboard/Coverage quick actions and SLA banners, enabling Discord/alert hooks to detect drift without hitting Postgres every refresh.

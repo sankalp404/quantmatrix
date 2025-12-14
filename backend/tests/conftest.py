@@ -5,6 +5,7 @@ Test configuration for QuantMatrix backend tests.
 import pytest
 import sys
 import os
+import inspect as pyinspect
 
 
 @pytest.fixture(autouse=True, scope="session")
@@ -23,6 +24,7 @@ try:
     from backend.models import User, BrokerAccount, Instrument  # Fixed imports
     from sqlalchemy import inspect
     from sqlalchemy.exc import ProgrammingError
+    from sqlalchemy.engine import Engine
     MODELS_AVAILABLE = True
 except ImportError as e:
     MODELS_AVAILABLE = False
@@ -66,13 +68,22 @@ def test_db(request):
     cfg.set_main_option("script_location", os.path.join(os.path.dirname(__file__), "..", "alembic"))
     # override URL to TEST DB
     cfg.set_main_option("sqlalchemy.url", TEST_DATABASE_URL)
-    alembic_command.upgrade(cfg, "head")
+    alembic_command.upgrade(cfg, "heads")
 
     try:
         yield test_engine
     finally:
         # Schema remains for session; per-test transactions provide isolation
         pass
+
+
+def pytest_addoption(parser):
+    parser.addoption(
+        "--allow-destructive-tests",
+        action="store_true",
+        default=False,
+        help="Allow tests marked as destructive to run",
+    )
 
 
 @pytest.fixture
@@ -120,3 +131,62 @@ def sample_user():
         pytest.skip("Models not available")
 
     return User(username="testuser", email="test@example.com", full_name="Test User")
+
+
+@pytest.fixture(autouse=True)
+def _schema_guard(db_session):
+    """Skip DB tests if core tables are missing in the test database."""
+    if db_session is None:
+        return
+    inspector = inspect(db_session.bind)
+    required = ["users", "broker_accounts"]
+    missing = [t for t in required if not inspector.has_table(t)]
+    if missing:
+        pytest.skip(f"Test DB not migrated; missing tables: {', '.join(missing)}")
+
+
+def pytest_collection_modifyitems(items):
+    """Fail fast on forbidden DB imports and mark destructive tests for skipping unless enabled."""
+    violations = []
+    destructive_items = []
+
+    def _is_forbidden(obj, name: str) -> bool:
+        if name == "SessionLocal":
+            return True
+        if name == "engine":
+            try:
+                from sqlalchemy.engine import Engine as _Engine
+                return isinstance(obj, _Engine)
+            except Exception:
+                return False
+        if name == "create_engine":
+            return callable(obj) and getattr(obj, "__module__", "").startswith("sqlalchemy")
+        return False
+
+    for item in items:
+        mod = item.module
+        for name in ("SessionLocal", "engine", "create_engine"):
+            if name in mod.__dict__ and _is_forbidden(mod.__dict__[name], name):
+                violations.append(f"{mod.__name__}:{name}")
+        if item.get_closest_marker("destructive"):
+            destructive_items.append(item)
+
+    if violations:
+        uniq = sorted(set(violations))
+        raise pytest.UsageError(
+            "Tests must use db_session fixture; forbidden DB handles detected in: "
+            + ", ".join(uniq)
+        )
+
+    if items:
+        cfg = items[0].config
+        allow_destructive = (
+            os.getenv("ALLOW_DESTRUCTIVE_TESTS") == "1"
+            or cfg.getoption("--allow-destructive-tests", default=False)
+        )
+        if destructive_items and not allow_destructive:
+            skip_marker = pytest.mark.skip(
+                reason="Destructive tests disabled; set ALLOW_DESTRUCTIVE_TESTS=1 or use --allow-destructive-tests"
+            )
+            for it in destructive_items:
+                it.add_marker(skip_marker)

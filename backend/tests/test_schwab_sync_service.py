@@ -2,7 +2,6 @@ import asyncio
 from decimal import Decimal
 from backend.services.portfolio.schwab_sync_service import SchwabSyncService
 from backend.models.broker_account import BrokerAccount, BrokerType, AccountType
-from backend.database import SessionLocal
 
 
 class DummySchwabClient:
@@ -35,65 +34,57 @@ class DummySchwabClient:
             {"type": "split", "symbol": "AAPL", "numerator": 2, "denominator": 1},
         ]
 
-def _create_account() -> BrokerAccount:
-    session = SessionLocal()
-    try:
-        from backend.models.user import User
+def _create_account(session) -> BrokerAccount:
+    from backend.models.user import User
 
-        user = session.query(User).filter(User.username == "sync_tester").first()
-        if not user:
-            user = User(username="sync_tester", email="sync_tester@example.com", password_hash="x", is_active=True)
-            session.add(user)
-            session.commit()
-            session.refresh(user)
-        acct = BrokerAccount(
-            user_id=user.id,
-            broker=BrokerType.SCHWAB,
-            account_number="SCHWAB123",
-            account_name="Schwab Test",
-            account_type=AccountType.TAXABLE,
-            currency="USD",
-        )
-        session.add(acct)
+    user = session.query(User).filter(User.username == "sync_tester").first()
+    if not user:
+        user = User(username="sync_tester", email="sync_tester@example.com", password_hash="x", is_active=True)
+        session.add(user)
         session.commit()
-        session.refresh(acct)
-        return acct
-    finally:
-        session.close()
+        session.refresh(user)
+    acct = BrokerAccount(
+        user_id=user.id,
+        broker=BrokerType.SCHWAB,
+        account_number="SCHWAB123",
+        account_name="Schwab Test",
+        account_type=AccountType.TAXABLE,
+        currency="USD",
+    )
+    session.add(acct)
+    session.commit()
+    session.refresh(acct)
+    return acct
 
 
-def test_schwab_sync_positions_only():
-    account = _create_account()
-    session = SessionLocal()
-    try:
-        service = SchwabSyncService(client=DummySchwabClient())
-        result = asyncio.get_event_loop().run_until_complete(
-            service.sync_account_comprehensive(account_number=account.account_number, session=session)
-        )
-        assert result["status"] == "success"
-        from backend.models.position import Position, PositionStatus, PositionType
+def test_schwab_sync_positions_only(db_session):
+    account = _create_account(db_session)
+    service = SchwabSyncService(client=DummySchwabClient())
+    result = asyncio.get_event_loop().run_until_complete(
+        service.sync_account_comprehensive(account_number=account.account_number, session=db_session)
+    )
+    assert result["status"] == "success"
+    from backend.models.position import Position, PositionStatus, PositionType
 
-        aapl = session.query(Position).filter(Position.account_id == account.id, Position.symbol == "AAPL").first()
-        assert aapl is not None
-        # 10 from positions, then 2:1 split → 20
-        assert Decimal(aapl.quantity) == Decimal("20")
-        assert aapl.position_type == PositionType.LONG
-        # average cost 150 becomes 75 after split
-        assert Decimal(aapl.average_cost) == Decimal("75")
-        msft = session.query(Position).filter(Position.account_id == account.id, Position.symbol == "MSFT").first()
-        assert msft is not None
-        assert msft.status == PositionStatus.CLOSED
+    aapl = db_session.query(Position).filter(Position.account_id == account.id, Position.symbol == "AAPL").first()
+    assert aapl is not None
+    # 10 from positions, then 2:1 split → 20
+    assert Decimal(aapl.quantity) == Decimal("20")
+    assert aapl.position_type == PositionType.LONG
+    # average cost 150 becomes 75 after split
+    assert Decimal(aapl.average_cost) == Decimal("75")
+    msft = db_session.query(Position).filter(Position.account_id == account.id, Position.symbol == "MSFT").first()
+    assert msft is not None
+    assert msft.status == PositionStatus.CLOSED
 
-        # Options created
-        from backend.models.options import Option
+    # Options created
+    from backend.models.options import Option
 
-        opt = (
-            session.query(Option)
-            .filter(Option.account_id == account.id, Option.underlying_symbol == "AAPL", Option.option_type == "CALL")
-            .first()
-        )
-        assert opt is not None and opt.open_quantity == 2
-    finally:
-        session.close()
+    opt = (
+        db_session.query(Option)
+        .filter(Option.account_id == account.id, Option.underlying_symbol == "AAPL", Option.option_type == "CALL")
+        .first()
+    )
+    assert opt is not None and opt.open_quantity == 2
 
 
