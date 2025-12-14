@@ -1,11 +1,13 @@
 from fastapi.testclient import TestClient
 from backend.api.main import app
-from backend.database import SessionLocal
 from backend.models.index_constituent import IndexConstituent
 from backend.tasks.market_data_tasks import refresh_index_constituents
+from backend.tasks import market_data_tasks
+import pytest
 
 
-def test_refresh_index_constituents_records_counters(monkeypatch):
+@pytest.mark.destructive
+def test_refresh_index_constituents_records_counters(monkeypatch, db_session):
     # Monkeypatch service to return a small set deterministically
     from backend.services.market.market_data_service import market_data_service
 
@@ -20,13 +22,11 @@ def test_refresh_index_constituents_records_counters(monkeypatch):
 
     monkeypatch.setattr(market_data_service, "get_index_constituents", fake_get_index_constituents)
 
+    # Route SessionLocal inside task to our test session
+    monkeypatch.setattr(market_data_tasks, "SessionLocal", lambda: db_session)
     # Clean existing
-    db = SessionLocal()
-    try:
-        db.query(IndexConstituent).delete()
-        db.commit()
-    finally:
-        db.close()
+    db_session.query(IndexConstituent).delete()
+    db_session.commit()
 
     res = refresh_index_constituents()
     assert res["status"] == "ok"
@@ -38,12 +38,8 @@ def test_refresh_index_constituents_records_counters(monkeypatch):
         assert "inactivated" in idx[k]
 
     # Verify rows written
-    db = SessionLocal()
-    try:
-        count = db.query(IndexConstituent).count()
-        assert count > 0
-    finally:
-        db.close()
+    count = db_session.query(IndexConstituent).count()
+    assert count > 0
 
 
 

@@ -5,10 +5,11 @@ import pytest
 from sqlalchemy.exc import OperationalError
 from backend.api.main import app
 from backend.api.routes.market_data import get_market_data_viewer
-from backend.database import SessionLocal
+from backend.database import get_db
 from backend.models.market_data import PriceData
 from backend.models.user import UserRole
 from backend.config import settings
+from backend.tasks import market_data_tasks
 
 client = TestClient(app)
 
@@ -25,41 +26,46 @@ def allow_market_data_viewer():
     app.dependency_overrides.pop(get_market_data_viewer, None)
 
 
-def test_coverage_endpoint_buckets(monkeypatch):
+@pytest.mark.destructive
+def test_coverage_endpoint_buckets(monkeypatch, db_session):
+    if db_session is None:
+        pytest.skip("DB session unavailable for coverage test")
     monkeypatch.setattr(settings, "MARKET_DATA_SECTION_PUBLIC", True)
     try:
-        db = SessionLocal()
-    except OperationalError:
-        pytest.skip("Database unavailable for coverage test")
-    try:
+        # Route monitor_coverage_health to the test session
+        monkeypatch.setattr(market_data_tasks, "SessionLocal", lambda: db_session)
+        def _override_db():
+            yield db_session
+        app.dependency_overrides[get_db] = _override_db
         # Clean and insert two symbols: one fresh, one stale
-        db.query(PriceData).delete()
+        db_session.query(PriceData).delete()
         now = datetime.utcnow()
         rows = [
             PriceData(symbol="TESTF", date=now - timedelta(hours=2), open_price=1, high_price=1, low_price=1, close_price=1, adjusted_close=1, volume=100, interval="1d", is_adjusted=True, data_source="test"),
             PriceData(symbol="TESTS", date=now - timedelta(days=3), open_price=1, high_price=1, low_price=1, close_price=1, adjusted_close=1, volume=100, interval="1d", is_adjusted=True, data_source="test"),
         ]
         for r in rows:
-            db.add(r)
-        db.commit()
+            db_session.add(r)
+        db_session.commit()
     except OperationalError:
-        db.rollback()
+        db_session.rollback()
         pytest.skip("Database unavailable for coverage test")
-    finally:
-        db.close()
 
-    resp = client.get("/api/v1/market-data/coverage")
-    assert resp.status_code == 200
-    data = resp.json()
-    assert "daily" in data
-    assert "freshness" in data["daily"]
-    # Buckets should exist
-    buckets = data["daily"]["freshness"]
-    assert all(k in buckets for k in ["<=24h", "24-48h", ">48h", "none"])
-    # Sanity: counts sum to daily count
-    assert sum(buckets.values()) == data["daily"]["count"]
-    assert "status" in data
-    assert "history" in data
+    try:
+        resp = client.get("/api/v1/market-data/coverage")
+        assert resp.status_code == 200
+        data = resp.json()
+        assert "daily" in data
+        assert "freshness" in data["daily"]
+        # Buckets should exist
+        buckets = data["daily"]["freshness"]
+        assert all(k in buckets for k in ["<=24h", "24-48h", ">48h", "none"])
+        # Sanity: counts sum to daily count
+        assert sum(buckets.values()) == data["daily"]["count"]
+        assert "status" in data
+        assert "history" in data
+    finally:
+        app.dependency_overrides.pop(get_db, None)
 
 
 def test_coverage_prefers_cached_snapshot(monkeypatch):

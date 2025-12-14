@@ -1,7 +1,7 @@
 import pytest
 from sqlalchemy.exc import IntegrityError
+from sqlalchemy import inspect
 
-from backend.database import SessionLocal, Base, engine
 from backend.models import BrokerAccount, User
 from backend.models.broker_account import BrokerType, AccountType, AccountStatus
 from backend.models.trade import Trade
@@ -10,20 +10,16 @@ from backend.models.options import Option
 from datetime import datetime, date
 
 
-@pytest.fixture(scope="module", autouse=True)
-def setup_db():
-    Base.metadata.create_all(bind=engine)
-    yield
-    Base.metadata.drop_all(bind=engine)
-
-
 @pytest.fixture
-def db():
-    session = SessionLocal()
-    try:
-        yield session
-    finally:
-        session.close()
+def db(db_session):
+    yield db_session
+
+
+@pytest.fixture(autouse=True)
+def _require_schema(db_session):
+    inspector = inspect(db_session.bind)
+    if not inspector.has_table("users") or not inspector.has_table("broker_accounts"):
+        pytest.skip("Test DB not migrated; required tables missing")
 
 
 @pytest.fixture

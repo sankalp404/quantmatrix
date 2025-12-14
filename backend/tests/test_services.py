@@ -325,27 +325,14 @@ class TestSignalGenerationService:
 class TestDatabaseServices:
     """Test database-related services."""
 
-    def test_database_connection(self):
+    def test_database_connection(self, db_session):
         """Test basic database connection."""
         try:
-            from backend.database import SessionLocal
-
-            # Test database session creation
-            db = SessionLocal()
-            assert db is not None
-
-            # Test basic query (if database exists)
-            try:
-                result = db.execute("SELECT 1").scalar()
-                if result == 1:
-                    logger.info("✅ Database connection test passed")
-                else:
-                    logger.warning("⚠️ Database query returned unexpected result")
-            except Exception as query_error:
-                logger.warning(f"⚠️ Database query failed: {query_error}")
-            finally:
-                db.close()
-
+            result = db_session.execute("SELECT 1").scalar()
+            if result == 1:
+                logger.info("✅ Database connection test passed")
+            else:
+                logger.warning("⚠️ Database query returned unexpected result")
         except Exception as e:
             logger.warning(f"⚠️ Database connection test failed: {e}")
 

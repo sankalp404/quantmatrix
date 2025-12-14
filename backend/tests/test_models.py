@@ -16,8 +16,8 @@ import inspect
 import importlib
 import pytest
 from sqlalchemy import ForeignKey
+from sqlalchemy import inspect as sa_inspect
 
-from backend.database import SessionLocal, engine
 from backend.models import (
     User,
     BrokerAccount,
@@ -40,18 +40,11 @@ from backend.models.broker_account import AccountType, BrokerType
 # Fixtures
 # ---------------------------------------------------------------------------
 
-
-@pytest.fixture(scope="function")
-def db_session():
-    """Yield a fresh transactional session."""
-    conn = engine.connect()
-    txn = conn.begin()
-    session = SessionLocal(bind=conn)
-    yield session
-    session.close()
-    txn.rollback()
-    conn.close()
-
+@pytest.fixture(autouse=True)
+def _require_schema(db_session):
+    inspector = sa_inspect(db_session.bind)
+    if not inspector.has_table("users") or not inspector.has_table("broker_accounts"):
+        pytest.skip("Test DB not migrated; required tables missing")
 
 # ---------------------------------------------------------------------------
 # 1. Import integrity

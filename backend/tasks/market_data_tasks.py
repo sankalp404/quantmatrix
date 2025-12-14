@@ -965,7 +965,61 @@ def monitor_coverage_health() -> dict:
     session = SessionLocal()
     try:
         snapshot = market_data_service.coverage_snapshot(session)
-        status_info = snapshot.get("status") or compute_coverage_status(snapshot)
+
+        # Recompute freshness from DB to avoid stale cache artifacts
+        def recompute_from_db():
+            last_daily_rows = (
+                session.query(PriceData.symbol, PriceData.date)
+                .filter(PriceData.interval == "1d")
+                .order_by(PriceData.symbol.asc(), PriceData.date.desc())
+                .distinct(PriceData.symbol)
+                .all()
+            )
+            total = len(last_daily_rows)
+            fresh_24 = fresh_48 = 0
+            stale = 0
+            from datetime import timedelta
+
+            now = datetime.utcnow()
+            stale_symbols = []
+            for sym, dt in last_daily_rows:
+                if not dt:
+                    stale += 1
+                    stale_symbols.append(sym)
+                    continue
+                age = now - dt
+                if age <= timedelta(hours=24):
+                    fresh_24 += 1
+                elif age <= timedelta(hours=48):
+                    fresh_48 += 1
+                else:
+                    stale += 1
+                    stale_symbols.append(sym)
+
+            daily_count = fresh_24 + fresh_48
+            daily_pct = (daily_count / total * 100.0) if total > 0 else 0.0
+            daily_pct = max(0.0, min(100.0, daily_pct))
+
+            snapshot["symbols"] = total
+            snapshot["tracked_count"] = total
+            snapshot["daily"] = {
+                "count": daily_count,
+                "fresh_24h": fresh_24,
+                "fresh_48h": fresh_48,
+                "fresh_gt48h": 0,
+                "stale_48h": stale,
+                "stale": [{"symbol": s} for s in stale_symbols],
+            }
+            status = snapshot.get("status") or {}
+            status["daily_pct"] = daily_pct
+            status["stale_daily"] = stale
+            status["tracked_total"] = total
+            status["universe"] = total
+            status["symbols"] = total
+            snapshot["status"] = status
+            return status
+
+        status_info = recompute_from_db()
         payload = {
             "snapshot": snapshot,
             "updated_at": datetime.utcnow().isoformat(),

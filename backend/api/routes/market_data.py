@@ -587,6 +587,64 @@ async def get_coverage(
 
         status_info = _ensure_status(snapshot)
 
+        # Recompute stale/freshness and counts directly from DB to avoid stale cache artifacts
+        try:
+            last_daily_rows = (
+                db.query(
+                    PriceData.symbol,
+                    PriceData.date,
+                )
+                .filter(PriceData.interval == "1d")
+                .order_by(PriceData.symbol.asc(), PriceData.date.desc())
+                .distinct(PriceData.symbol)
+                .all()
+            )
+            total_symbols = len(last_daily_rows)
+            fresh_24 = 0
+            fresh_48 = 0
+            stale_daily = 0
+            from datetime import timedelta
+
+            now_utc = datetime.utcnow()
+            stale_list = []
+            for sym, dt in last_daily_rows:
+                if not dt:
+                    stale_daily += 1
+                    stale_list.append(sym)
+                    continue
+                age = now_utc - dt
+                if age <= timedelta(hours=24):
+                    fresh_24 += 1
+                elif age <= timedelta(hours=48):
+                    fresh_48 += 1
+                else:
+                    stale_daily += 1
+                    stale_list.append(sym)
+            fresh_gt48 = max(0, total_symbols - fresh_24 - fresh_48 - stale_daily)
+
+            daily_pct = 0.0
+            if total_symbols > 0:
+                daily_pct = max(0.0, min(100.0, ((fresh_24 + fresh_48 + fresh_gt48) / total_symbols) * 100.0))
+
+            status_info["daily_pct"] = daily_pct
+            status_info["tracked_total"] = total_symbols
+            status_info["universe"] = total_symbols
+            status_info["symbols"] = total_symbols
+            status_info["stale_daily"] = stale_daily
+
+            snapshot["daily"] = {
+                "count": fresh_24 + fresh_48 + fresh_gt48,
+                "fresh_24h": fresh_24,
+                "fresh_48h": fresh_48,
+                "fresh_gt48h": fresh_gt48,
+                "stale_48h": stale_daily,
+                "stale": [{"symbol": s} for s in stale_list],
+            }
+            snapshot["symbols"] = total_symbols
+            snapshot["tracked_count"] = total_symbols
+        except Exception:
+            pass
+
         try:
             raw_history = svc.redis_client.lrange("coverage:health:history", 0, 47)
             for entry in raw_history or []:
@@ -667,6 +725,33 @@ async def get_coverage(
             "m5_expectation": status_info.get("thresholds", {}).get("m5_expectation"),
         }
 
+        # Clamp pct and rebuild freshness buckets
+        def _clamp_pct(val: Any) -> float:
+            try:
+                v = float(val or 0)
+                return max(0.0, min(100.0, v))
+            except Exception:
+                return 0.0
+
+        status_info["daily_pct"] = _clamp_pct(status_info.get("daily_pct"))
+        status_info["m5_pct"] = _clamp_pct(status_info.get("m5_pct"))
+
+        total_symbols = int(snapshot.get("symbols") or 0)
+        daily_section = snapshot.get("daily", {}) or {}
+        stale_daily = int(status_info.get("stale_daily") or 0)
+        fresh_24 = int(daily_section.get("fresh_24h") or 0)
+        fresh_48 = int(daily_section.get("fresh_48h") or 0)
+        fresh_gt48 = max(0, total_symbols - fresh_24 - fresh_48 - stale_daily)
+
+        snapshot["daily"] = {
+            **daily_section,
+            "fresh_24h": fresh_24,
+            "fresh_48h": fresh_48,
+            "fresh_gt48h": fresh_gt48,
+            "stale_48h": stale_daily,
+            "count": daily_section.get("count", daily_section.get("daily_count")),
+        }
+
         age_seconds = None
         if updated_at:
             try:
@@ -714,6 +799,28 @@ async def set_backfill_5m_toggle(
     except Exception as e:
         logger.error(f"toggle error: {e}")
         raise HTTPException(status_code=500, detail="Failed to update 5m backfill toggle")
+
+
+@router.post("/admin/coverage/backfill-stale-daily")
+async def backfill_stale_daily(
+    admin_user: User = Depends(get_admin_user),
+) -> Dict[str, Any]:
+    """
+    Backfill daily bars for symbols currently marked stale (>48h) in coverage snapshot.
+    """
+    svc = MarketDataService()
+    session = get_db()()
+    try:
+        snap = svc.coverage_snapshot(session)
+        stale = [s.get("symbol") for s in snap.get("daily", {}).get("stale", []) if s.get("symbol")]
+        if not stale:
+            return {"status": "ok", "backfilled": 0, "symbols": []}
+        res = backfill_symbols(stale)
+        return {"status": "ok", "backfilled": res.get("backfilled"), "errors": res.get("errors"), "symbols": stale}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+    finally:
+        session.close()
 
 
 @router.get("/coverage/{symbol}")

@@ -62,7 +62,6 @@ const MarketTracked: React.FC = () => {
           </Text>
         </Box>
       )}
-      <Heading size="sm" mb={2}>All</Heading>
       <Table size="sm">
         <Thead>
           <Tr>

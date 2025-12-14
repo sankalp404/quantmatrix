@@ -11,6 +11,22 @@ Test Database Isolation (Backend)
   - Export `TEST_DATABASE_URL` in your shell or `.env`.
   - Run: `./run.sh test`
 
+Safe Patterns (Enforced)
+------------------------
+- Single DB path: all tests must use the `db_session` fixture. Direct `SessionLocal`/`engine`/`create_engine` imports in tests are blocked.
+- Destructive tests: must be marked `@pytest.mark.destructive` and only run with `ALLOW_DESTRUCTIVE_TESTS=1` or `--allow-destructive-tests`.
+- Schema guard: DB tests skip if core tables (e.g., `users`, `broker_accounts`) are missing in the test DB.
+- Misconfig guard: DB tests skip if `TEST_DATABASE_URL` is unset or equals `DATABASE_URL`.
+- Alembic: test migrations run only against `TEST_DATABASE_URL`.
+
+Env Guidance
+------------
+- Leave production `.env` untouched.
+- For pytest/CI, load a test-safe env (e.g., `.env.test`) that sets:
+  - `TEST_DATABASE_URL=postgresql://quantmatrix:quantmatrix@postgres:5432/quantmatrix_test`
+  - Optionally set `DATABASE_URL` to a throwaway dev DB when running tests locally; avoid pointing to prod.
+- Docker Compose runtime can continue using `.env`; test jobs should override with `.env.test` or exported vars.
+
 Do/Don't
 --------
 - Do: use the `db_session` fixture provided in `backend/tests/conftest.py`.
