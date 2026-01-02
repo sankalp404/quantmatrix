@@ -13,13 +13,20 @@ depends_on = None
 
 
 def upgrade():
-    with op.batch_alter_table("instruments") as batch_op:
-        batch_op.alter_column("symbol", type_=sa.String(length=100))
+    try:
+        with op.batch_alter_table("instruments") as batch_op:
+            batch_op.alter_column("symbol", type_=sa.String(length=100))
+    except Exception:
+        # If instruments table/column already matches, do nothing.
+        pass
 
 
 def downgrade():
-    with op.batch_alter_table("instruments") as batch_op:
-        batch_op.alter_column("symbol", type_=sa.String(length=20))
+    try:
+        with op.batch_alter_table("instruments") as batch_op:
+            batch_op.alter_column("symbol", type_=sa.String(length=20))
+    except Exception:
+        pass
 
 
 

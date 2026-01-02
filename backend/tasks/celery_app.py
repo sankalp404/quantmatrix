@@ -1,6 +1,9 @@
 from celery import Celery
 from celery.schedules import crontab
 from backend.config import settings
+import os
+
+USE_REDBEAT = True
 
 celery_app = Celery(
     "quantmatrix",
@@ -35,47 +38,75 @@ celery_app.conf.update(
     # Timezone
     timezone="UTC",
     enable_utc=True,
-    # Beat schedule for periodic tasks
-    beat_schedule={
-        # Nightly (ordered chronologically, UTC):
-        # 1) IBKR Flex sync
-        "ibkr-daily-flex-sync": {
-            "task": "backend.tasks.account_sync.sync_all_ibkr_accounts",
-            "schedule": crontab(hour=2, minute=15),  # 10:15 PM ET
-            "args": (),
-        },
-        # 2) Build tracked set and delta in Redis
-        "update-tracked-symbol-cache": {
-            "task": "backend.tasks.market_data_tasks.update_tracked_symbol_cache",
-            "schedule": crontab(hour=2, minute=30),  # 10:30 PM ET
-            "args": (),
-        },
-        # 3) Backfill only newly tracked symbols
-        "backfill-new-tracked": {
-            "task": "backend.tasks.market_data_tasks.backfill_new_tracked",
-            "schedule": crontab(hour=2, minute=45),  # 10:45 PM ET
-            "args": (),
-        },
-        # 4) Delta backfill for all tracked symbols (indices ∪ portfolio)
-        "backfill-last-200": {
-            "task": "backend.tasks.market_data_tasks.backfill_last_200_bars",
-            "schedule": crontab(hour=3, minute=0),  # 11:00 PM ET
-            "args": (),
-        },
-        # 5) Record immutable daily history before final recompute (captures end-of-day state)
-        "record-daily-history": {
-            "task": "backend.tasks.market_data_tasks.record_daily_history",
-            "schedule": crontab(hour=3, minute=20),  # 11:20 PM ET
-            "args": (),
-        },
-        # 6) Recompute indicators last for next-day use/performance (freshest cache)
-        "recompute-indicators-universe": {
-            "task": "backend.tasks.market_data_tasks.recompute_indicators_universe",
-            "schedule": crontab(hour=3, minute=35),  # 11:35 PM ET
-            "args": (),
-        },
-    },
+    # Beat schedule for periodic tasks (bootstrap defaults; RedBeat may override)
+    beat_schedule={},
 )
 
-# Optional: Only enable beat schedule in production
+# -------------------- Bootstrap static schedules (cleanly grouped) --------------------
+# Note: These serve as defaults when RedBeat is empty (e.g., first boot). With RedBeat,
+# schedules are stored dynamically in Redis and can be created/edited via Admin UI.
+ACCOUNT_BEAT_SCHEDULE = {
+    # Nightly (UTC) – Accounts
+    "ibkr-daily-flex-sync": {
+        "task": "backend.tasks.account_sync.sync_all_ibkr_accounts",
+        "schedule": crontab(hour=2, minute=15),
+        "args": (),
+    },
+}
+
+MARKET_DATA_BEAT_SCHEDULE = {
+    # Nightly (UTC) – Market Data
+    "update-tracked-symbol-cache": {
+        "task": "backend.tasks.market_data_tasks.update_tracked_symbol_cache",
+        "schedule": crontab(hour=2, minute=30),
+        "args": (),
+    },
+    "backfill-new-tracked": {
+        "task": "backend.tasks.market_data_tasks.backfill_new_tracked",
+        "schedule": crontab(hour=2, minute=45),
+        "args": (),
+    },
+    "backfill-last-200": {
+        "task": "backend.tasks.market_data_tasks.backfill_last_200_bars",
+        "schedule": crontab(hour=3, minute=0),
+        "args": (),
+    },
+    "record-daily-history": {
+        "task": "backend.tasks.market_data_tasks.record_daily_history",
+        "schedule": crontab(hour=3, minute=20),
+        "args": (),
+    },
+    "recompute-indicators-universe": {
+        "task": "backend.tasks.market_data_tasks.recompute_indicators_universe",
+        "schedule": crontab(hour=3, minute=35),
+        "args": (),
+    },
+}
+
+# Merge grouped defaults into the bootstrap beat_schedule
+celery_app.conf.beat_schedule.update(ACCOUNT_BEAT_SCHEDULE)
+celery_app.conf.beat_schedule.update(MARKET_DATA_BEAT_SCHEDULE)
+
+# -------------------- RedBeat Scheduler (dynamic schedules) --------------------
+if USE_REDBEAT:
+    # Use RedBeat scheduler backed by Redis for dynamic CRUD of schedules
+    celery_app.conf.beat_scheduler = "redbeat.schedulers:RedBeatScheduler"
+    # Configure RedBeat redis URL; default to CELERY_BROKER_URL or REDIS_URL
+    celery_app.conf.redbeat_redis_url = (
+        os.getenv("REDBEAT_REDIS_URL")
+        or settings.CELERY_BROKER_URL
+        or settings.REDIS_URL
+    )
+    # Optional: lock key and key prefix
+    celery_app.conf.redbeat_key_prefix = "redbeat:"
+
+# Optional: Seed RedBeat from catalog if empty
+if USE_REDBEAT:
+    try:
+        from backend.tasks.job_catalog import seed_redbeat_if_empty
+        seed_redbeat_if_empty(celery_app)
+    except Exception:
+        pass
+
+# Preserve schedule object
 celery_app.conf.beat_schedule = celery_app.conf.beat_schedule

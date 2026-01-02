@@ -64,14 +64,14 @@ import {
   Textarea,
 } from '@chakra-ui/react';
 import {
-  SearchIcon,
-  SettingsIcon,
-  EditIcon,
-  AddIcon,
-  TriangleUpIcon,
-  TriangleDownIcon,
-  ChevronDownIcon
-} from '@chakra-ui/icons';
+  FiArrowDown,
+  FiArrowUp,
+  FiChevronDown,
+  FiEdit2,
+  FiPlus,
+  FiSearch,
+  FiSettings,
+} from 'react-icons/fi';
 import {
   FiPlay as PlayIcon,
   FiPause as PauseIcon,
@@ -269,11 +269,11 @@ const Strategies: React.FC = () => {
               </Badge>
             </HStack>
             <HStack>
-              <Button size="sm" colorScheme="blue" leftIcon={<AddIcon />}>
+              <Button size="sm" colorScheme="blue" leftIcon={<FiPlus />}>
                 New Strategy
               </Button>
               <Menu>
-                <MenuButton as={IconButton} icon={<SettingsIcon />} size="sm" variant="outline" />
+                <MenuButton as={IconButton} icon={<FiSettings />} size="sm" variant="outline" />
                 <MenuList>
                   <MenuItem>Global Settings</MenuItem>
                   <MenuItem>Risk Management</MenuItem>
@@ -313,7 +313,7 @@ const Strategies: React.FC = () => {
                 <StatNumber color="green.500">+34.7%</StatNumber>
                 <StatHelpText>
                   <HStack>
-                    <TriangleUpIcon color="green.500" />
+                    <FiArrowUp color="green.500" />
                     <Text>YTD return</Text>
                   </HStack>
                 </StatHelpText>
@@ -356,7 +356,7 @@ const Strategies: React.FC = () => {
                     <HStack>
                       <InputGroup size="sm" maxW="200px">
                         <InputLeftElement>
-                          <SearchIcon color="gray.400" />
+                          <FiSearch color="gray.400" />
                         </InputLeftElement>
                         <Input
                           placeholder="Search strategies..."
@@ -471,7 +471,7 @@ const Strategies: React.FC = () => {
                               )}
                               <IconButton
                                 aria-label="Edit strategy"
-                                icon={<EditIcon />}
+                                icon={<FiEdit2 />}
                                 size="sm"
                                 variant="outline"
                                 onClick={(e) => {

@@ -2,7 +2,7 @@ import React, { useState } from 'react';
 import { Box, Button, Card, CardBody, FormControl, FormLabel, Input, VStack, Heading, Text, useToast, InputGroup, InputRightElement, IconButton } from '@chakra-ui/react';
 import { useNavigate, Link } from 'react-router-dom';
 import { useAuth } from '../context/AuthContext';
-import { ViewIcon, ViewOffIcon } from '@chakra-ui/icons';
+import { FiEye, FiEyeOff } from 'react-icons/fi';
 
 const Login: React.FC = () => {
   const { login } = useAuth();
@@ -41,7 +41,7 @@ const Login: React.FC = () => {
               <InputGroup>
                 <Input type={showPw ? 'text' : 'password'} value={password} onChange={(e) => setPassword(e.target.value)} placeholder="••••••••" />
                 <InputRightElement>
-                  <IconButton aria-label={showPw ? 'Hide password' : 'Show password'} icon={showPw ? <ViewOffIcon /> : <ViewIcon />} size="sm" variant="ghost" onClick={() => setShowPw(!showPw)} />
+                  <IconButton aria-label={showPw ? 'Hide password' : 'Show password'} icon={showPw ? <FiEyeOff /> : <FiEye />} size="sm" variant="ghost" onClick={() => setShowPw(!showPw)} />
                 </InputRightElement>
               </InputGroup>
             </FormControl>

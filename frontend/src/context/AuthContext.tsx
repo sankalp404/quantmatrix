@@ -7,6 +7,7 @@ type User = {
   email: string;
   full_name?: string | null;
   is_active: boolean;
+  role?: string | null;
 };
 
 type AuthContextValue = {
@@ -42,7 +43,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
         }
       } catch {
         // invalid token -> clear
-        try { localStorage.removeItem('qm_token'); } catch {}
+        try { localStorage.removeItem('qm_token'); } catch { }
         setToken(null);
         setUser(null);
       } finally {

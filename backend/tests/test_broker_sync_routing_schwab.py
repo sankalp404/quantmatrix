@@ -3,38 +3,33 @@ import uuid
 import pytest
 
 from backend.services.portfolio.broker_sync_service import broker_sync_service
-from backend.database import SessionLocal
 from backend.models.broker_account import BrokerAccount, BrokerType, AccountType
 
 
-def _ensure_account() -> BrokerAccount:
-    session = SessionLocal()
-    try:
-        from backend.models.user import User
+def _ensure_account(session) -> BrokerAccount:
+    from backend.models.user import User
 
-        user = session.query(User).filter(User.username == "route_tester").first()
-        if not user:
-            user = User(username="route_tester", email="route_tester@example.com", password_hash="x", is_active=True)
-            session.add(user)
-            session.commit()
-            session.refresh(user)
-        acct = BrokerAccount(
-            user_id=user.id,
-            broker=BrokerType.SCHWAB,
-            account_number=f"S{uuid.uuid4().hex[:6]}",
-            account_name="Route Schwab",
-            account_type=AccountType.TAXABLE,
-            currency="USD",
-        )
-        session.add(acct)
+    user = session.query(User).filter(User.username == "route_tester").first()
+    if not user:
+        user = User(username="route_tester", email="route_tester@example.com", password_hash="x", is_active=True)
+        session.add(user)
         session.commit()
-        session.refresh(acct)
-        return acct
-    finally:
-        session.close()
+        session.refresh(user)
+    acct = BrokerAccount(
+        user_id=user.id,
+        broker=BrokerType.SCHWAB,
+        account_number=f"S{uuid.uuid4().hex[:6]}",
+        account_name="Route Schwab",
+        account_type=AccountType.TAXABLE,
+        currency="USD",
+    )
+    session.add(acct)
+    session.commit()
+    session.refresh(acct)
+    return acct
 
 
-def test_broker_sync_routes_to_schwab(monkeypatch):
+def test_broker_sync_routes_to_schwab(monkeypatch, db_session):
     calls = {"count": 0}
 
     class DummyService:
@@ -47,13 +42,9 @@ def test_broker_sync_routes_to_schwab(monkeypatch):
 
     monkeypatch.setattr(schwab_module, "SchwabSyncService", lambda: DummyService())
 
-    acct = _ensure_account()
-    session = SessionLocal()
-    try:
-        result = broker_sync_service.sync_account(account_id=acct.account_number, db=session, sync_type="comprehensive")
-        assert result["status"] == "success"
-        assert calls["count"] == 1
-    finally:
-        session.close()
+    acct = _ensure_account(db_session)
+    result = broker_sync_service.sync_account(account_id=acct.account_number, db=db_session, sync_type="comprehensive")
+    assert result["status"] == "success"
+    assert calls["count"] == 1
 
 

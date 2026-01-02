@@ -6,6 +6,7 @@ import logging
 from datetime import datetime
 from enum import Enum
 from typing import Any, Dict, List, Optional
+from datetime import timedelta
 
 import finnhub
 import fmpsdk
@@ -13,10 +14,13 @@ import pandas as pd
 import redis
 import yfinance as yf
 from sqlalchemy.orm import Session
+from sqlalchemy import or_
 
 from backend.config import settings
 from backend.database import SessionLocal
 from backend.models import MarketSnapshot
+from backend.models.market_data import PriceData
+from backend.models.index_constituent import IndexConstituent
 from backend.services.market.indicator_engine import (
     calculate_performance_windows,
     classify_ma_bucket_from_ma,
@@ -55,7 +59,7 @@ class MarketDataService:
     """
 
     def __init__(self) -> None:
-        self.redis_client = redis.from_url(settings.REDIS_URL)
+        self._redis_client = None
         self.cache_ttl_seconds = int(getattr(settings, "MARKET_DATA_CACHE_TTL", 300))
 
         # Optional API clients
@@ -82,6 +86,114 @@ class MarketDataService:
             "NASDAQ100": {"fmp": "nasdaq_constituent"},
             "DOW30": {"fmp": "dowjones_constituent"},
         }
+
+    @property
+    def redis_client(self) -> redis.Redis:
+        if self._redis_client is None:
+            url = getattr(settings, "REDIS_URL", None)
+            if not url:
+                raise RuntimeError("REDIS_URL is not configured")
+            self._redis_client = redis.from_url(url)
+        return self._redis_client
+
+    # ---------------------- Internal helpers ----------------------
+    def _visibility_scope(self) -> str:
+        return "all_authenticated" if settings.MARKET_DATA_SECTION_PUBLIC else "admin_only"
+
+    def _snapshot_from_dataframe(self, df: pd.DataFrame) -> Dict[str, Any]:
+        """Common snapshot builder used by DB and provider flows."""
+        if df is None or df.empty or "Close" not in df.columns:
+            return {}
+
+        price = float(df["Close"].iloc[0])
+        data_for_ta = df.iloc[::-1].copy()
+        indicators = compute_core_indicators(data_for_ta)
+        indicators["current_price"] = price
+        indicators.update(compute_atr_matrix_metrics(data_for_ta, indicators))
+        indicators.update(calculate_performance_windows(df))
+
+        sma_50 = indicators.get("sma_50")
+        sma_200 = indicators.get("sma_200")
+        ema_8 = indicators.get("ema_8")
+        ema_21 = indicators.get("ema_21")
+        ema_200 = indicators.get("ema_200")
+        atr = indicators.get("atr")
+
+        def pct_dist(val: Optional[float]) -> Optional[float]:
+            return (price / val - 1.0) * 100.0 if (val and price) else None
+
+        def atr_dist(val: Optional[float]) -> Optional[float]:
+            return ((price - val) / atr) if (val and price and atr and atr != 0) else None
+
+        ma_for_bucket = {
+            "price": price,
+            "sma_5": indicators.get("sma_5"),
+            "sma_8": indicators.get("sma_8"),
+            "sma_21": indicators.get("sma_21"),
+            "sma_50": indicators.get("sma_50"),
+            "sma_100": indicators.get("sma_100"),
+            "sma_200": indicators.get("sma_200"),
+        }
+        bucket = classify_ma_bucket_from_ma(ma_for_bucket).get("bucket")
+
+        snapshot: Dict[str, Any] = {
+            "current_price": price,
+            "rsi": indicators.get("rsi"),
+            "atr_value": atr,
+            "atr_percent": ((atr / price) * 100.0) if (atr and price) else None,
+            "atr_distance": ((price - sma_50) / atr) if (price and sma_50 and atr) else None,
+            "sma_20": indicators.get("sma_20"),
+            "sma_50": sma_50,
+            "sma_100": indicators.get("sma_100"),
+            "sma_200": sma_200,
+            "ema_10": indicators.get("ema_10"),
+            "ema_8": ema_8,
+            "ema_21": ema_21,
+            "ema_200": ema_200,
+            "macd": indicators.get("macd"),
+            "macd_signal": indicators.get("macd_signal"),
+            "perf_1d": indicators.get("perf_1d"),
+            "perf_3d": indicators.get("perf_3d"),
+            "perf_5d": indicators.get("perf_5d"),
+            "perf_20d": indicators.get("perf_20d"),
+            "perf_60d": indicators.get("perf_60d"),
+            "perf_120d": indicators.get("perf_120d"),
+            "perf_252d": indicators.get("perf_252d"),
+            "perf_mtd": indicators.get("perf_mtd"),
+            "perf_qtd": indicators.get("perf_qtd"),
+            "perf_ytd": indicators.get("perf_ytd"),
+            "ma_bucket": bucket,
+            "pct_dist_ema8": pct_dist(ema_8),
+            "pct_dist_ema21": pct_dist(ema_21),
+            "pct_dist_ema200": pct_dist(ema_200 or sma_200),
+            "atr_dist_ema8": atr_dist(ema_8),
+            "atr_dist_ema21": atr_dist(ema_21),
+            "atr_dist_ema200": atr_dist(ema_200 or sma_200),
+        }
+
+        # Chart metrics (TD Sequential, gaps, trendlines)
+        try:
+            df_newest = df.head(120).copy()
+            if not df_newest.empty:
+                td = compute_td_sequential_counts(df_newest["Close"].tolist())
+                snapshot.update(td)
+                snapshot.update(compute_gap_counts(df_newest))
+                snapshot.update(compute_trendline_counts(df_newest.iloc[::-1].copy()))
+        except Exception:
+            pass
+        for key in ("stage_label", "stage_slope_pct", "stage_dist_pct"):
+            snapshot.setdefault(key, None)
+
+        return snapshot
+
+    @staticmethod
+    def _needs_fundamentals(snapshot: Dict[str, Any]) -> bool:
+        return (
+            snapshot.get("sector") is None
+            and snapshot.get("industry") is None
+            and snapshot.get("market_cap") is None
+        )
+
 
     # ---------------------- Provider selection ----------------------
     def _provider_priority(self, data_type: str) -> List[APIProvider]:
@@ -197,8 +309,9 @@ class MarketDataService:
         period: str = "1y",
         interval: str = "1d",
         max_bars: Optional[int] = 270,
-    ) -> Optional[pd.DataFrame]:
-        """Get OHLCV (newest->first index) with provider policy and Redis cache.
+        return_provider: bool = False,
+    ) -> Optional[pd.DataFrame] | tuple[Optional[pd.DataFrame], Optional[str]]:
+        """Get OHLCV (newest->first index) with provider policy, returning provider when requested.
 
         - Trims to max_bars for interval==1d to bound downstream compute
         - Cache TTL: 300s for intraday; 3600s for daily+
@@ -207,16 +320,24 @@ class MarketDataService:
         cached = self.redis_client.get(cache_key)
         if cached:
             try:
-                return pd.read_json(cached, orient="index")
+                df_cached = pd.read_json(cached, orient="index")
+                if return_provider:
+                    return df_cached, None
+                return df_cached
             except Exception:
                 pass
 
+        provider_used: Optional[str] = None
         for provider in self._provider_priority("historical_data"):
             if not self._is_provider_available(provider):
                 continue
             try:
                 if provider == APIProvider.FMP:
-                    df = await self._get_historical_fmp(symbol, period, interval)
+                    # Support daily and intraday (5m) for FMP
+                    if interval == "5m":
+                        df = await self._get_historical_fmp_5m(symbol, period)
+                    else:
+                        df = await self._get_historical_fmp(symbol, period, interval)
                 elif provider == APIProvider.TWELVE_DATA:
                     df = await self._get_historical_twelve_data(symbol, period, interval)
                 elif provider == APIProvider.YFINANCE:
@@ -226,14 +347,17 @@ class MarketDataService:
                 else:
                     df = None
                 if df is not None and not df.empty:
+                    provider_used = provider.value
                     if max_bars and interval == "1d":
                         df = df.head(max_bars)
                     ttl = 300 if interval in ("1m", "5m") else 3600
                     self.redis_client.setex(cache_key, ttl, df.to_json(orient="index"))
+                    if return_provider:
+                        return df, provider_used
                     return df
             except Exception:
                 continue
-        return None
+        return (None, provider_used) if return_provider else None
 
     async def _get_historical_yfinance(
         self, symbol: str, period: str, interval: str
@@ -248,6 +372,39 @@ class MarketDataService:
             if "Volume" not in data.columns:
                 data["Volume"] = 0
             return data[[c for c in ["Open", "High", "Low", "Close", "Volume"] if c in data.columns]].sort_index(ascending=False)
+        except Exception:
+            return None
+
+    async def _get_historical_fmp_5m(self, symbol: str, period: str) -> Optional[pd.DataFrame]:
+        """Fetch intraday 5m bars from FMP historical_chart.
+
+        FMP returns newest-first timestamps. `period` is best-effort: we trim using days.
+        """
+        try:
+            # FMP supports intervals like '5min'
+            data = fmpsdk.historical_chart(
+                apikey=settings.FMP_API_KEY, symbol=symbol, interval="5min"
+            )
+            if not data or not isinstance(data, list):
+                return None
+            df = pd.DataFrame(data)
+            # Normalize columns and index
+            if df.empty or "date" not in df.columns:
+                return None
+            df["date"] = pd.to_datetime(df["date"])
+            df.set_index("date", inplace=True)
+            cols = ["open", "high", "low", "close", "volume"]
+            df = df[[c for c in cols if c in df.columns]]
+            df.columns = ["Open", "High", "Low", "Close", "Volume"][: len(df.columns)]
+            # Best-effort period trim (e.g., '5d', '30d', '60d')
+            try:
+                if isinstance(period, str) and period.endswith("d"):
+                    days = int(period[:-1])
+                    cutoff = pd.Timestamp.utcnow() - pd.Timedelta(days=days)
+                    df = df[df.index >= cutoff]
+            except Exception:
+                pass
+            return df.sort_index(ascending=False)
         except Exception:
             return None
 
@@ -294,9 +451,12 @@ class MarketDataService:
             if interval != "1d":
                 return None
             data = fmpsdk.historical_price_full(apikey=settings.FMP_API_KEY, symbol=symbol)
-            if not data or "historical" not in data:
+            # FMP can return either {"symbol": ..., "historical": [...]} or a plain list
+            if isinstance(data, dict):
+                data = data.get("historical")
+            if not data or not isinstance(data, list):
                 return None
-            df = pd.DataFrame(data["historical"])
+            df = pd.DataFrame(data)
             if df.empty or "date" not in df.columns:
                 return None
             df["date"] = pd.to_datetime(df["date"])
@@ -331,11 +491,14 @@ class MarketDataService:
         # FMP
         if settings.FMP_API_KEY and ep:
             try:
-                data = fmpsdk.__getattr__(ep)(apikey=settings.FMP_API_KEY) if hasattr(fmpsdk, ep) else []
+                fn = getattr(fmpsdk, ep, None)
+                data = fn(apikey=settings.FMP_API_KEY) if callable(fn) else []
             except Exception:
                 data = []
             if isinstance(data, list):
                 symbols = [str(d.get("symbol", "")).strip().upper().replace('.', '-') for d in data if d.get("symbol")]
+        # Track which path we used
+        provider_used = "fmp" if symbols else None
         # Wikipedia fallback
         if not symbols:
             import pandas as _pd
@@ -363,10 +526,19 @@ class MarketDataService:
                             break
             except Exception:
                 symbols = []
+        fallback_used = False if provider_used == "fmp" and symbols else (True if not provider_used else False)
+        provider_used = provider_used or ("wikipedia" if symbols else "none")
         # Normalize and cache
         out = sorted(list({s for s in symbols if s and len(s) <= 5}))
         try:
             self.redis_client.setex(cache_key, 24 * 3600, json.dumps({"symbols": out}))
+            # Store lightweight meta for observability
+            meta_key = f"{cache_key}:meta"
+            self.redis_client.setex(
+                meta_key,
+                24 * 3600,
+                json.dumps({"provider_used": provider_used, "fallback_used": bool(fallback_used), "count": len(out)}),
+            )
         except Exception:
             pass
         return out
@@ -517,95 +689,11 @@ class MarketDataService:
                 "Volume": [int(r[4] or 0) for r in rows],
             }
         )
-        if df.empty or "Close" not in df.columns:
+        snapshot = self._snapshot_from_dataframe(df)
+        if not snapshot:
             return {}
-        price = float(df["Close"].iloc[0])
-        data_for_ta = df.iloc[::-1].copy()
-        indicators = compute_core_indicators(data_for_ta)
-        indicators["current_price"] = price
-        indicators.update(compute_atr_matrix_metrics(data_for_ta, indicators))
-        indicators.update(calculate_performance_windows(df))
-
-        sma_50 = indicators.get("sma_50")
-        sma_200 = indicators.get("sma_200")
-        ema_8 = indicators.get("ema_8")
-        ema_21 = indicators.get("ema_21")
-        ema_200 = indicators.get("ema_200")
-        atr = indicators.get("atr")
-
-        def pct_dist(val: Optional[float]) -> Optional[float]:
-            return (price / val - 1.0) * 100.0 if (val and price) else None
-
-        def atr_dist(val: Optional[float]) -> Optional[float]:
-            return ((price - val) / atr) if (val and price and atr and atr != 0) else None
-
-        ma_for_bucket = {
-            "price": price,
-            "sma_5": indicators.get("sma_5"),
-            "sma_8": indicators.get("sma_8"),
-            "sma_21": indicators.get("sma_21"),
-            "sma_50": indicators.get("sma_50"),
-            "sma_100": indicators.get("sma_100"),
-            "sma_200": indicators.get("sma_200"),
-        }
-        bucket = classify_ma_bucket_from_ma(ma_for_bucket).get("bucket")
-
-        snapshot: Dict[str, Any] = {
-            "current_price": price,
-            "rsi": indicators.get("rsi"),
-            "atr_value": atr,
-            "atr_percent": ((atr / price) * 100.0) if (atr and price) else None,
-            "atr_distance": ((price - sma_50) / atr) if (price and sma_50 and atr) else None,
-            "sma_20": indicators.get("sma_20"),
-            "sma_50": sma_50,
-            "sma_100": indicators.get("sma_100"),
-            "sma_200": sma_200,
-            "ema_10": indicators.get("ema_10"),
-            "ema_8": ema_8,
-            "ema_21": ema_21,
-            "ema_200": ema_200,
-            "macd": indicators.get("macd"),
-            "macd_signal": indicators.get("macd_signal"),
-            "perf_1d": indicators.get("perf_1d"),
-            "perf_3d": indicators.get("perf_3d"),
-            "perf_5d": indicators.get("perf_5d"),
-            "perf_20d": indicators.get("perf_20d"),
-            "perf_60d": indicators.get("perf_60d"),
-            "perf_120d": indicators.get("perf_120d"),
-            "perf_252d": indicators.get("perf_252d"),
-            "perf_mtd": indicators.get("perf_mtd"),
-            "perf_qtd": indicators.get("perf_qtd"),
-            "perf_ytd": indicators.get("perf_ytd"),
-            "ma_bucket": bucket,
-            "pct_dist_ema8": pct_dist(ema_8),
-            "pct_dist_ema21": pct_dist(ema_21),
-            "pct_dist_ema200": pct_dist(ema_200 or sma_200),
-            "atr_dist_ema8": atr_dist(ema_8),
-            "atr_dist_ema21": atr_dist(ema_21),
-            "atr_dist_ema200": atr_dist(ema_200 or sma_200),
-            # Chart metrics placeholders (filled in enrich)
-            "td_buy_setup": None,
-            "td_sell_setup": None,
-            "gaps_unfilled_up": None,
-            "gaps_unfilled_down": None,
-            "trend_up_count": None,
-            "trend_down_count": None,
-            # Stage placeholders (optional separate long-horizon compute)
-            "stage_label": None,
-            "stage_slope_pct": None,
-            "stage_dist_pct": None,
-        }
-        # Inline enrichment for consolidated snapshot (chart metrics) using already loaded df
-        try:
-            df_newest = df.head(120).copy()
-            if not df_newest.empty:
-                td = compute_td_sequential_counts(df_newest["Close"].tolist())
-                snapshot.update(td)
-                snapshot.update(compute_gap_counts(df_newest))
-                snapshot.update(compute_trendline_counts(df_newest.iloc[::-1].copy()))
-        except Exception:
-            pass
         # Fundamentals enrichment (reuse from latest snapshot if present; otherwise fetch once)
+        # Prefer fundamentals from the latest stored snapshot
         try:
             prev_row = (
                 db.query(MarketSnapshot)
@@ -625,13 +713,8 @@ class MarketDataService:
                     snapshot["market_cap"] = prev_row.market_cap
         except Exception:
             pass
-        # If fundamentals still missing, fetch them once via providers (FMP-first, then yfinance)
-        needs_funda = (
-            snapshot.get("sector") is None
-            and snapshot.get("industry") is None
-            and snapshot.get("market_cap") is None
-        )
-        if needs_funda:
+
+        if self._needs_fundamentals(snapshot):
             try:
                 info = self.get_fundamentals_info(symbol)
                 for k in ("sector", "industry", "market_cap"):
@@ -654,89 +737,10 @@ class MarketDataService:
             price_only = await self.get_current_price(symbol)
             return {"current_price": float(price_only)} if price_only else {}
 
-        data_for_ta = data.iloc[::-1].copy()
-        indicators = compute_core_indicators(data_for_ta)
-        price = float(data["Close"].iloc[0])
-        indicators["current_price"] = price
-        indicators.update(compute_atr_matrix_metrics(data_for_ta, indicators))
-        indicators.update(calculate_performance_windows(data))
+        snapshot = self._snapshot_from_dataframe(data)
+        if not snapshot:
+            return {}
 
-        sma_50 = indicators.get("sma_50")
-        sma_200 = indicators.get("sma_200")
-        ema_8 = indicators.get("ema_8")
-        ema_21 = indicators.get("ema_21")
-        ema_200 = indicators.get("ema_200")
-        atr = indicators.get("atr")
-
-        def pct_dist(v: Optional[float]) -> Optional[float]:
-            return (price / v - 1.0) * 100.0 if (v and price) else None
-
-        def atr_dist(v: Optional[float]) -> Optional[float]:
-            return ((price - v) / atr) if (v and price and atr and atr != 0) else None
-
-        ma_for_bucket = {
-            "price": price,
-            "sma_5": indicators.get("sma_5"),
-            "sma_8": indicators.get("sma_8"),
-            "sma_21": indicators.get("sma_21"),
-            "sma_50": indicators.get("sma_50"),
-            "sma_100": indicators.get("sma_100"),
-            "sma_200": indicators.get("sma_200"),
-        }
-        bucket = classify_ma_bucket_from_ma(ma_for_bucket).get("bucket")
-
-        snapshot = {
-            "current_price": price,
-            "rsi": indicators.get("rsi"),
-            "atr_value": atr,
-            "atr_percent": ((atr / price) * 100.0) if (atr and price) else None,
-            "atr_distance": ((price - sma_50) / atr) if (price and sma_50 and atr) else None,
-            "sma_20": indicators.get("sma_20"),
-            "sma_50": sma_50,
-            "sma_100": indicators.get("sma_100"),
-            "sma_200": sma_200,
-            "ema_10": indicators.get("ema_10"),
-            "ema_8": indicators.get("ema_8"),
-            "ema_21": indicators.get("ema_21"),
-            "ema_200": indicators.get("ema_200"),
-            "macd": indicators.get("macd"),
-            "macd_signal": indicators.get("macd_signal"),
-            "perf_1d": indicators.get("perf_1d"),
-            "perf_3d": indicators.get("perf_3d"),
-            "perf_5d": indicators.get("perf_5d"),
-            "perf_20d": indicators.get("perf_20d"),
-            "perf_60d": indicators.get("perf_60d"),
-            "perf_120d": indicators.get("perf_120d"),
-            "perf_252d": indicators.get("perf_252d"),
-            "perf_mtd": indicators.get("perf_mtd"),
-            "perf_qtd": indicators.get("perf_qtd"),
-            "perf_ytd": indicators.get("perf_ytd"),
-            "ma_bucket": bucket,
-            "pct_dist_ema8": pct_dist(ema_8),
-            "pct_dist_ema21": pct_dist(ema_21),
-            "pct_dist_ema200": pct_dist(ema_200 or sma_200),
-            "atr_dist_ema8": atr_dist(ema_8),
-            "atr_dist_ema21": atr_dist(ema_21),
-            "atr_dist_ema200": atr_dist(ema_200 or sma_200),
-            # chart metrics placeholders
-            "td_buy_setup": None,
-            "td_sell_setup": None,
-            "gaps_unfilled_up": None,
-            "gaps_unfilled_down": None,
-            "trend_up_count": None,
-            "trend_down_count": None,
-        }
-        # Inline chart-metrics directly from provider data (avoid extra DB hit)
-        try:
-            df_newest = data.head(120).copy()
-            if not df_newest.empty:
-                td = compute_td_sequential_counts(df_newest["Close"].tolist())
-                snapshot.update(td)
-                snapshot.update(compute_gap_counts(df_newest))
-                snapshot.update(compute_trendline_counts(df_newest.iloc[::-1].copy()))
-        except Exception:
-            pass
-        # Add fundamentals (FMP-first) so callers don't need an extra pass
         try:
             funda = self.get_fundamentals_info(symbol)
             if funda:
@@ -746,6 +750,7 @@ class MarketDataService:
         except Exception:
             pass
         return snapshot
+
 
     def persist_snapshot(
         self,
@@ -851,22 +856,28 @@ class MarketDataService:
                 else close_val
             )
             vol_val = int(row.get("Volume") or 0) if "Volume" in row else 0
-            stmt = (
-                pg_insert(PriceData)
-                .values(
-                    symbol=symbol,
-                    date=pd_date,
-                    open_price=open_val,
-                    high_price=high_val,
-                    low_price=low_val,
-                    close_price=close_val,
-                    adjusted_close=close_val,
-                    volume=vol_val,
-                    interval=interval,
-                    data_source=data_source,
-                    is_adjusted=is_adjusted,
-                )
-                .on_conflict_do_nothing(constraint="uq_symbol_date_interval")
+            stmt = pg_insert(PriceData).values(
+                symbol=symbol,
+                date=pd_date,
+                open_price=open_val,
+                high_price=high_val,
+                low_price=low_val,
+                close_price=close_val,
+                adjusted_close=close_val,
+                volume=vol_val,
+                interval=interval,
+                data_source=data_source,
+                is_adjusted=is_adjusted,
+            )
+            stmt = stmt.on_conflict_do_update(
+                constraint="uq_symbol_date_interval",
+                set_={
+                    "data_source": data_source,
+                },
+                where=or_(
+                    PriceData.data_source.is_(None),
+                    PriceData.data_source.in_(["provider", "fmp_td_yf"]),
+                ),
             )
             db.execute(stmt)
             executed += 1
@@ -896,11 +907,20 @@ class MarketDataService:
             )
         except Exception:
             last_date = None
-        df = await self.get_historical_data(
-            symbol=symbol.upper(), period=lookback_period, interval="1d", max_bars=None
+        df, provider_used = await self.get_historical_data(
+            symbol=symbol.upper(),
+            period=lookback_period,
+            interval="1d",
+            max_bars=None,
+            return_provider=True,
         )
         if df is None or df.empty:
-            return {"status": "empty", "symbol": symbol.upper(), "inserted": 0}
+            return {
+                "status": "empty",
+                "symbol": symbol.upper(),
+                "inserted": 0,
+                "provider": provider_used,
+            }
         # Trim to bounded size for downstream compute
         df = df.tail(max_bars) if max_bars else df
         inserted = self.persist_price_bars(
@@ -908,11 +928,104 @@ class MarketDataService:
             symbol.upper(),
             df,
             interval="1d",
-            data_source="fmp_td_yf",
+            data_source=provider_used or "unknown",
             is_adjusted=True,
             delta_after=last_date,
         )
-        return {"status": "ok", "symbol": symbol.upper(), "inserted": inserted}
+        return {
+            "status": "ok",
+            "symbol": symbol.upper(),
+            "inserted": inserted,
+            "provider": provider_used,
+        }
+
+    async def backfill_intraday_5m(
+        self,
+        db: Session,
+        symbol: str,
+        *,
+        lookback_days: int = 30,
+    ) -> Dict[str, Any]:
+        """Delta backfill last N days of 5m bars for a single symbol using provider policy."""
+        from backend.models import PriceData
+        sym = symbol.upper()
+        # Last stored timestamp for 5m to do delta-only inserts
+        last_ts: Optional[datetime] = (
+            db.query(PriceData.date)
+            .filter(PriceData.symbol == sym, PriceData.interval == "5m")
+            .order_by(PriceData.date.desc())
+            .limit(1)
+            .scalar()
+        )
+        period = f"{max(1, int(lookback_days))}d"
+        df, provider_used = await self.get_historical_data(
+            symbol=sym,
+            period=period,
+            interval="5m",
+            max_bars=None,
+            return_provider=True,
+        )
+        if df is None or df.empty:
+            return {"status": "empty", "symbol": sym, "inserted": 0, "provider": provider_used}
+        inserted = self.persist_price_bars(
+            db,
+            sym,
+            df,
+            interval="5m",
+            data_source=provider_used or "unknown",
+            is_adjusted=True,
+            delta_after=last_ts,
+        )
+        return {"status": "ok", "symbol": sym, "inserted": inserted, "provider": provider_used}
+
+    def get_db_history(
+        self,
+        db: Session,
+        symbol: str,
+        *,
+        interval: str = "1d",
+        start: Optional[datetime] = None,
+        end: Optional[datetime] = None,
+        limit: Optional[int] = None,
+    ) -> pd.DataFrame:
+        """Read OHLCV from price_data (ascending by time) for API consumers."""
+        from backend.models import PriceData
+        q = (
+            db.query(
+                PriceData.date,
+                PriceData.open_price,
+                PriceData.high_price,
+                PriceData.low_price,
+                PriceData.close_price,
+                PriceData.volume,
+            )
+            .filter(PriceData.symbol == symbol.upper(), PriceData.interval == interval)
+        )
+        if start:
+            q = q.filter(PriceData.date >= start)
+        if end:
+            q = q.filter(PriceData.date <= end)
+        q = q.order_by(PriceData.date.asc())
+        if limit:
+            q = q.limit(limit)
+        rows = q.all()
+        if not rows:
+            return pd.DataFrame(columns=["Open", "High", "Low", "Close", "Volume"])
+        df = pd.DataFrame(
+            [
+                {
+                    "date": r[0],
+                    "Open": float(r[1]) if r[1] is not None else float(r[4]),
+                    "High": float(r[2]) if r[2] is not None else float(r[4]),
+                    "Low": float(r[3]) if r[3] is not None else float(r[4]),
+                    "Close": float(r[4]),
+                    "Volume": int(r[5] or 0),
+                }
+                for r in rows
+            ]
+        )
+        df.set_index("date", inplace=True)
+        return df
 
     # ---------------------- High-level TA helpers for tests/integration ----------------------
     async def build_indicator_snapshot(self, symbol: str) -> Dict[str, Any]:
@@ -931,6 +1044,146 @@ class MarketDataService:
     async def get_technical_analysis(self, symbol: str) -> Dict[str, Any]:
         """Compatibility wrapper expected by tests – returns the latest snapshot."""
         return await self.get_snapshot(symbol)
+
+    # ---------------------- Coverage instrumentation ----------------------
+    def coverage_snapshot(self, db: Session) -> Dict[str, Any]:
+        """Compute coverage freshness, stale lists, and tracked stats for instrumentation/UI."""
+        now = datetime.utcnow()
+
+        symbols = [s for (s,) in db.query(PriceData.symbol).distinct().all() if s]
+
+        def bucketize(ts: Optional[datetime]) -> str:
+            if not ts:
+                return "none"
+            age = (now - ts).total_seconds()
+            if age <= 24 * 3600:
+                return "<=24h"
+            if age <= 48 * 3600:
+                return "24-48h"
+            return ">48h"
+
+        def last_map(interval: str) -> Dict[str, str | None]:
+            rows = (
+                db.query(PriceData.symbol, PriceData.date)
+                .filter(PriceData.interval == interval)
+                .order_by(PriceData.symbol.asc(), PriceData.date.desc())
+                .all()
+            )
+            latest: Dict[str, str | None] = {}
+            for sym, ts in rows:
+                if sym not in latest:
+                    latest[sym] = ts.isoformat() if ts else None
+            return latest
+
+        daily_last = last_map("1d")
+        m5_last = last_map("5m")
+
+        def build_buckets(last_dict: Dict[str, str | None]) -> Dict[str, int]:
+            buckets = {"<=24h": 0, "24-48h": 0, ">48h": 0, "none": 0}
+            for iso in last_dict.values():
+                dt = datetime.fromisoformat(iso) if iso else None
+                buckets[bucketize(dt)] += 1
+            return buckets
+
+        stale_limit = int(getattr(settings, "COVERAGE_STALE_SAMPLE", 50))
+
+        def stale_details(last_dict: Dict[str, str | None]) -> List[Dict[str, Any]]:
+            items: List[Dict[str, Any]] = []
+            for sym, iso in last_dict.items():
+                dt = datetime.fromisoformat(iso) if iso else None
+                bucket = bucketize(dt)
+                if bucket in (">48h", "none"):
+                    items.append({"symbol": sym, "last": iso, "bucket": bucket})
+            items.sort(key=lambda item: item.get("last") or "")
+            return items[:stale_limit]
+
+        idx_counts: Dict[str, int] = {}
+        for idx in ("SP500", "NASDAQ100", "DOW30"):
+            idx_counts[idx] = (
+                db.query(IndexConstituent)
+                .filter(IndexConstituent.index_name == idx, IndexConstituent.is_active.is_(True))
+                .count()
+            )
+
+        tracked_symbols: List[str] = []
+        try:
+            raw = self.redis_client.get("tracked:all")
+            tracked_symbols = json.loads(raw) if raw else []
+        except Exception:
+            tracked_symbols = []
+        tracked_symbols = [str(s).upper() for s in tracked_symbols if s]
+        tracked_total = len(set(tracked_symbols))
+        total_symbols = tracked_total or len(set(symbols))
+
+        snapshot = {
+            "generated_at": now.isoformat(),
+            "symbols": total_symbols,
+            "tracked_count": tracked_total,
+            "tracked_sample": tracked_symbols[:10],
+            "indices": idx_counts,
+            "daily": {
+                "count": len(daily_last),
+                "last": daily_last,
+                "freshness": build_buckets(daily_last),
+                "stale": stale_details(daily_last),
+            },
+            "m5": {
+                "count": len(m5_last),
+                "last": m5_last,
+                "freshness": build_buckets(m5_last),
+                "stale": stale_details(m5_last),
+            },
+        }
+        snapshot["status"] = compute_coverage_status(snapshot)
+        return snapshot
+
+def compute_coverage_status(snapshot: Dict[str, Any]) -> Dict[str, Any]:
+    """Derive human-readable coverage state + KPI percentages from a raw snapshot."""
+    total_symbols = int(snapshot.get("symbols") or 0)
+    tracked = int(snapshot.get("tracked_count") or 0)
+
+    daily = snapshot.get("daily", {}) or {}
+    m5 = snapshot.get("m5", {}) or {}
+    daily_count = int(daily.get("count") or 0)
+    m5_count = int(m5.get("count") or 0)
+    stale_daily = len(daily.get("stale") or [])
+    stale_m5 = len(m5.get("stale") or [])
+
+    def pct(count: int) -> float:
+        return round((count / total_symbols) * 100.0, 1) if total_symbols else 0.0
+
+    daily_pct = pct(daily_count)
+    m5_pct = pct(m5_count)
+
+    label = "ok"
+    summary = "Coverage healthy across daily + 5m intervals."
+    if total_symbols == 0:
+        label = "idle"
+        summary = "No symbols discovered yet. Run refresh + tracked tasks."
+    if total_symbols > 0 and daily_pct < 90:
+        label = "degraded"
+        summary = f"Daily coverage {daily_pct}% below 90% SLA."
+    elif stale_daily:
+        label = "degraded"
+        summary = f"{stale_daily} symbols have daily bars older than 48h."
+    elif m5_pct == 0 and total_symbols:
+        label = "degraded"
+        summary = "5m coverage is 0% – run intraday backfill."
+    elif stale_m5:
+        label = "warning"
+        summary = f"{stale_m5} symbols missing 5m data."
+
+    return {
+        "label": label,
+        "summary": summary,
+        "daily_pct": daily_pct,
+        "m5_pct": m5_pct,
+        "stale_daily": stale_daily,
+        "stale_m5": stale_m5,
+        "symbols": total_symbols,
+        "tracked_count": tracked,
+        "thresholds": {"daily_pct": 90, "m5_expectation": ">=1 refresh/day"},
+    }
 
 
 # Global instance

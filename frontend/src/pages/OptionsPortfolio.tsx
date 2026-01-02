@@ -34,7 +34,6 @@ import {
   Icon,
   Tooltip,
   Progress,
-  Divider,
   Menu,
   MenuButton,
   MenuList,
@@ -54,6 +53,7 @@ import {
   TagLabel,
   TagCloseButton,
 } from '@chakra-ui/react';
+import AppDivider from '../components/ui/AppDivider';
 import {
   ResponsiveContainer,
   PieChart,
@@ -70,15 +70,14 @@ import {
   Line,
 } from 'recharts';
 import {
-  SearchIcon,
-  DownloadIcon,
-  ChevronDownIcon,
-  RepeatIcon,
-  InfoIcon,
-  SettingsIcon,
-  TimeIcon,
-  CalendarIcon,
-} from '@chakra-ui/icons';
+  FiCalendar,
+  FiChevronDown,
+  FiDownload,
+  FiInfo,
+  FiRefreshCw,
+  FiSearch,
+  FiSettings,
+} from 'react-icons/fi';
 import {
   FiTrendingUp,
   FiTrendingDown,
@@ -344,7 +343,7 @@ const UnderlyingCard: React.FC<{
           {/* Expanded Details */}
           {isExpanded && (
             <Box mt={4}>
-              <Divider mb={4} />
+              <AppDivider mb={4} />
               <Text fontSize="sm" fontWeight="semibold" mb={3}>All Positions</Text>
 
               <TableContainer>
@@ -692,14 +691,14 @@ const OptionsPortfolio: React.FC = () => {
                   </Badge>
                   {!flexStatus.configured && (
                     <Tooltip label="Open backend /docs to configure FlexQuery token & query id">
-                      <InfoIcon color="gray.500" />
+                      <FiInfo color="gray.500" />
                     </Tooltip>
                   )}
                 </HStack>
               )}
             </VStack>
             <HStack spacing={3}>
-              <Button leftIcon={<RepeatIcon />} size="sm" variant="outline" onClick={handleRefresh}>
+              <Button leftIcon={<FiRefreshCw />} size="sm" variant="outline" onClick={handleRefresh}>
                 Refresh
               </Button>
               <Button
@@ -724,7 +723,7 @@ const OptionsPortfolio: React.FC = () => {
               >
                 Sync Official Tax Lots
               </Button>
-              <Button leftIcon={<DownloadIcon />} size="sm" variant="outline">
+              <Button leftIcon={<FiDownload />} size="sm" variant="outline">
                 Export
               </Button>
             </HStack>
@@ -861,7 +860,7 @@ const OptionsPortfolio: React.FC = () => {
                     <Flex wrap="wrap" gap={4} align="center">
                       <InputGroup maxW="300px">
                         <InputLeftElement pointerEvents="none">
-                          <SearchIcon color="gray.300" />
+                          <FiSearch color="gray.300" />
                         </InputLeftElement>
                         <Input
                           placeholder="Search by symbol..."

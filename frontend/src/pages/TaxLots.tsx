@@ -32,7 +32,6 @@ import {
   AlertIcon,
   useToast,
   Flex,
-  Divider,
   Table,
   Thead,
   Tbody,
@@ -44,8 +43,7 @@ import {
   Tooltip,
   Progress,
 } from '@chakra-ui/react';
-import { SearchIcon, DownloadIcon, RepeatIcon, TimeIcon } from '@chakra-ui/icons';
-import { FiDollarSign, FiTrendingUp, FiTrendingDown, FiCalendar, FiFilter, FiRefreshCw } from 'react-icons/fi';
+import { FiDollarSign, FiTrendingUp, FiTrendingDown, FiCalendar, FiFilter, FiRefreshCw, FiDownload, FiSearch, FiClock } from 'react-icons/fi';
 import { PieChart, Pie, Cell, ResponsiveContainer, Tooltip as RechartsTooltip, Legend, BarChart, Bar, XAxis, YAxis, CartesianGrid } from 'recharts';
 import AccountFilterWrapper from '../components/AccountFilterWrapper';
 import { portfolioApi } from '../services/api';
@@ -290,7 +288,7 @@ const TaxLots: React.FC = () => {
                     <Flex wrap="wrap" gap={4} align="center" width="full">
                       <InputGroup maxW="300px">
                         <InputLeftElement pointerEvents="none">
-                          <SearchIcon color="gray.300" />
+                          <FiSearch color="gray.300" />
                         </InputLeftElement>
                         <Input
                           placeholder="Search symbols..."

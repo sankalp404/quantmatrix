@@ -13,6 +13,7 @@ from backend.database import get_db
 from backend.models.user import User
 from backend.models.user import UserRole
 from backend.api.security import decode_token
+from backend.config import settings
 
 logger = logging.getLogger(__name__)
 
@@ -116,3 +117,24 @@ async def get_optional_user(
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail="Could not validate credentials",
         )
+
+
+async def get_market_data_viewer(
+    optional_user: Optional[User] = Depends(get_optional_user),
+) -> User:
+    """
+    Return a user allowed to view market-data coverage/tracked sections.
+    - When MARKET_DATA_SECTION_PUBLIC is True, any authenticated user suffices.
+    - Otherwise require ADMIN role (same as Admin section).
+    """
+    if optional_user is None:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Authentication required for market data visibility",
+        )
+    if not settings.MARKET_DATA_SECTION_PUBLIC and optional_user.role != UserRole.ADMIN:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Admin privileges required for this section",
+        )
+    return optional_user

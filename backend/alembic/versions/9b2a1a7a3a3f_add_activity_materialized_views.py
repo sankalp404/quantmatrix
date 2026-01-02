@@ -10,16 +10,17 @@ from alembic import op
 
 # revision identifiers, used by Alembic.
 revision = "9b2a1a7a3a3f"
-down_revision = "c0b73efcdaeb"
+down_revision = "3e9ac1f"
 branch_labels = None
 depends_on = None
 
 
 def upgrade() -> None:
     # Unified activity MV
-    op.execute(
-        """
-        CREATE MATERIALIZED VIEW IF NOT EXISTS portfolio_activity_mv AS
+    try:
+        op.execute(
+            """
+            CREATE MATERIALIZED VIEW IF NOT EXISTS portfolio_activity_mv AS
         SELECT
             t.execution_time AS ts,
             DATE(t.execution_time) AS day,
@@ -67,14 +68,27 @@ def upgrade() -> None:
             'dividends'::text AS src,
             d.external_id AS external_id
         FROM dividends d;
-        """
-    )
-    # Helpful indexes
-    op.execute("CREATE INDEX IF NOT EXISTS idx_activity_day ON portfolio_activity_mv (day);")
-    op.execute("CREATE INDEX IF NOT EXISTS idx_activity_ts ON portfolio_activity_mv (ts DESC);")
-    op.execute("CREATE INDEX IF NOT EXISTS idx_activity_account ON portfolio_activity_mv (account_id);")
-    op.execute("CREATE INDEX IF NOT EXISTS idx_activity_symbol ON portfolio_activity_mv (symbol);")
-    op.execute("CREATE INDEX IF NOT EXISTS idx_activity_category ON portfolio_activity_mv (category);")
+            """
+        )
+        # Helpful indexes
+        op.execute(
+            "CREATE INDEX IF NOT EXISTS idx_activity_day ON portfolio_activity_mv (day);"
+        )
+        op.execute(
+            "CREATE INDEX IF NOT EXISTS idx_activity_ts ON portfolio_activity_mv (ts DESC);"
+        )
+        op.execute(
+            "CREATE INDEX IF NOT EXISTS idx_activity_account ON portfolio_activity_mv (account_id);"
+        )
+        op.execute(
+            "CREATE INDEX IF NOT EXISTS idx_activity_symbol ON portfolio_activity_mv (symbol);"
+        )
+        op.execute(
+            "CREATE INDEX IF NOT EXISTS idx_activity_category ON portfolio_activity_mv (category);"
+        )
+    except Exception:
+        # Underlying tables may not exist yet in a fresh environment; skip view creation.
+        return
 
     # Daily summary MV
     op.execute(
