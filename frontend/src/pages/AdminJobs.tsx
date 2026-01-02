@@ -10,7 +10,6 @@ import {
   Td,
   Tag,
   Text,
-  Divider,
   Button,
   Tabs,
   TabList,
@@ -51,6 +50,7 @@ import {
   FiChevronsRight,
 } from 'react-icons/fi';
 import api from '../services/api';
+import AppDivider from '../components/ui/AppDivider';
 
 const AdminJobs: React.FC = () => {
   const [jobs, setJobs] = React.useState<any[]>([]);
@@ -396,7 +396,7 @@ const AdminJobs: React.FC = () => {
                     </Box>
                   ))}
                 </SimpleGrid>
-                <Divider mt={5} borderColor={cardBorder} opacity={0.4} />
+                <AppDivider mt={5} borderColor={cardBorder} opacity={0.4} />
               </Box>
             ))}
           </TabPanel>

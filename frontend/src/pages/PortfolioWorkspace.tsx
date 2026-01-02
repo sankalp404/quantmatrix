@@ -12,7 +12,6 @@ import {
   Card,
   CardBody,
   CardHeader,
-  Divider,
   SimpleGrid,
   Table,
   Thead,
@@ -24,7 +23,7 @@ import {
   Spinner,
   Button,
 } from '@chakra-ui/react';
-import { SearchIcon, RepeatIcon } from '@chakra-ui/icons';
+import { FiRefreshCw, FiSearch } from 'react-icons/fi';
 import PageHeader from '../components/ui/PageHeader';
 import SymbolChartWithMarkers from '../components/SymbolChartWithMarkers';
 import TradingViewChart from '../components/TradingViewChart';
@@ -194,11 +193,11 @@ const PortfolioWorkspace: React.FC = () => {
           <HStack>
             <InputGroup>
               <InputLeftElement pointerEvents="none">
-                <SearchIcon color="gray.400" />
+                <FiSearch color="gray.400" />
               </InputLeftElement>
               <Input placeholder="Search holdings..." value={search} onChange={(e) => setSearch(e.target.value)} />
             </InputGroup>
-            <Button size="sm" leftIcon={<RepeatIcon />} variant="outline" onClick={fetchAll}>
+            <Button size="sm" leftIcon={<FiRefreshCw />} variant="outline" onClick={fetchAll}>
               Refresh
             </Button>
           </HStack>

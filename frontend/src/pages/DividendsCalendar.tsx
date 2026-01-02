@@ -37,7 +37,6 @@ import {
   Icon,
   Tooltip,
   Progress,
-  Divider
 } from '@chakra-ui/react';
 import {
   ResponsiveContainer,
@@ -56,10 +55,11 @@ import {
   Pie,
   Cell
 } from 'recharts';
-import { CalendarIcon, InfoIcon, WarningIcon } from '@chakra-ui/icons';
+import { FiAlertTriangle, FiCalendar, FiInfo } from 'react-icons/fi';
 import { usePortfolio } from '../hooks/usePortfolio';
 import { portfolioApi } from '../services/api';
 import SortableTable, { Column } from '../components/SortableTable';
+import AppDivider from '../components/ui/AppDivider';
 
 // Calendar component for dividend dates
 const DividendCalendar: React.FC<{ dividends: any[], selectedMonth: Date }> = ({ dividends, selectedMonth }) => {
@@ -759,7 +759,7 @@ const DividendsCalendar: React.FC = () => {
                         </Box>
                       </Alert>
 
-                      <Divider />
+                      <AppDivider />
 
                       <Box>
                         <Text fontWeight="semibold" mb={2}>Key Metrics</Text>

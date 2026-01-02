@@ -18,11 +18,11 @@ import {
   ModalBody,
   ModalFooter,
   useDisclosure,
-  Divider,
   useColorModeValue,
 } from '@chakra-ui/react';
 import { FiZap, FiRefreshCw, FiShield, FiLayers } from 'react-icons/fi';
 import { triggerTaskByName } from '../utils/taskActions';
+import AppDivider from '../components/ui/AppDivider';
 
 const runbooks = [
   {
@@ -168,7 +168,7 @@ const AdminRunbook: React.FC = () => {
                 </HStack>
               ))}
             </Stack>
-            <Divider borderColor={cardBorder} opacity={0.5} />
+            <AppDivider borderColor={cardBorder} opacity={0.5} />
             <Button
               colorScheme="brand"
               variant="solid"

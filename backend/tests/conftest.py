@@ -7,6 +7,10 @@ import sys
 import os
 import inspect as pyinspect
 
+from sqlalchemy import text
+
+from backend.utils.db_safety import check_test_database_url
+
 
 @pytest.fixture(autouse=True, scope="session")
 def _enable_fast_test_mode():
@@ -21,7 +25,7 @@ sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
 
 # Fix imports to use correct model names from __init__.py
 try:
-    from backend.models import User, BrokerAccount, Instrument  # Fixed imports
+    from backend.models import Base, User, BrokerAccount, Instrument  # Fixed imports
     from sqlalchemy import inspect
     from sqlalchemy.exc import ProgrammingError
     from sqlalchemy.engine import Engine
@@ -37,8 +41,8 @@ def test_db(request):
 
     Safety:
     - Requires TEST_DATABASE_URL. If missing, skip DB tests.
-    - Refuses to run if TEST_DATABASE_URL == app DATABASE_URL.
-    - Never drops/creates tables on the app engine.
+    - Requires TEST_DATABASE_URL is unambiguously a test DB URL (postgres_test + *_test).
+    - Extra paranoia: requires DATABASE_URL == TEST_DATABASE_URL so accidental engine usage stays isolated.
     """
     if not MODELS_AVAILABLE:
         pytest.skip(
@@ -56,9 +60,21 @@ def test_db(request):
         pytest.skip(
             "TEST_DATABASE_URL not set; skipping DB tests to protect development database"
         )
-    if TEST_DATABASE_URL == APP_DATABASE_URL:
-        pytest.skip(
-            "TEST_DATABASE_URL equals app DATABASE_URL; aborting to avoid destructive operations"
+
+    expected_host = os.getenv("TEST_DB_EXPECTED_HOST", "postgres_test")
+    required_user = os.getenv("POSTGRES_TEST_USER") or None
+    chk = check_test_database_url(
+        TEST_DATABASE_URL, expected_host=expected_host, required_user=required_user
+    )
+    if not chk.ok:
+        raise pytest.UsageError(
+            f"Unsafe TEST_DATABASE_URL ({chk.reason}). "
+            "Refusing to run any DB tests."
+        )
+    if APP_DATABASE_URL != TEST_DATABASE_URL:
+        raise pytest.UsageError(
+            "In tests, DATABASE_URL must equal TEST_DATABASE_URL so accidental engine usage stays isolated. "
+            f"DATABASE_URL={APP_DATABASE_URL!r} TEST_DATABASE_URL={TEST_DATABASE_URL!r}"
         )
 
     test_engine = create_engine(TEST_DATABASE_URL, pool_pre_ping=True)
@@ -69,6 +85,50 @@ def test_db(request):
     # override URL to TEST DB
     cfg.set_main_option("sqlalchemy.url", TEST_DATABASE_URL)
     alembic_command.upgrade(cfg, "heads")
+
+    # Extra safety for test schema completeness:
+    # Some models may exist ahead of Alembic coverage. In tests we prefer a usable schema
+    # (isolated DB) over failing with missing tables during collection.
+    Base.metadata.create_all(bind=test_engine)
+
+    # Canary/sentinel: prove we're on a dedicated test database (and keep it that way).
+    sentinel_marker = os.getenv("TEST_DB_SENTINEL_MARKER", "quantmatrix_pytest_sentinel_v1")
+    # Use Engine.begin() to avoid clashing with SQLAlchemy's autobegin behavior.
+    with test_engine.begin() as conn:
+        dbname = conn.execute(text("SELECT current_database()")).scalar()
+        if not (dbname and str(dbname).endswith("_test")):
+            raise pytest.UsageError(
+                f"Refusing to run: connected database {dbname!r} does not end with '_test'"
+            )
+        conn.execute(
+            text(
+                """
+                CREATE TABLE IF NOT EXISTS quantmatrix_test_sentinel (
+                  id INTEGER PRIMARY KEY,
+                  marker TEXT NOT NULL,
+                  created_at TIMESTAMPTZ NOT NULL DEFAULT now()
+                )
+                """
+            )
+        )
+        conn.execute(
+            text(
+                """
+                INSERT INTO quantmatrix_test_sentinel (id, marker)
+                VALUES (1, :marker)
+                ON CONFLICT (id) DO NOTHING
+                """
+            ),
+            {"marker": sentinel_marker},
+        )
+        marker = conn.execute(
+            text("SELECT marker FROM quantmatrix_test_sentinel WHERE id=1")
+        ).scalar()
+        if marker != sentinel_marker:
+            raise pytest.UsageError(
+                "Test DB sentinel mismatch; refusing to proceed. "
+                f"Expected {sentinel_marker!r}, got {marker!r}"
+            )
 
     try:
         yield test_engine

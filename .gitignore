@@ -5,6 +5,10 @@
 # .env.test.local
 # .env.production.local
 
+# Infra env files (real secrets / machine-specific values)
+infra/env.dev
+infra/env.test
+
 # Python
 __pycache__/
 *.py[cod]

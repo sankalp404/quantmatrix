@@ -90,31 +90,31 @@ def test_link_and_callback_flow(client, monkeypatch, db_session):
         async def get(self, url, params=None, timeout=None):
             return DummyResponse(200)
         async def post(self, url, data=None):
-            return DummyResponse(200, {\"access_token\": \"AT\", \"refresh_token\": \"RT\"})
+            return DummyResponse(200, {"access_token": "AT", "refresh_token": "RT"})
 
     import httpx
-    monkeypatch.setattr(httpx, \"AsyncClient\", DummyClient)
+    monkeypatch.setattr(httpx, "AsyncClient", DummyClient)
 
     # Link -> get URL (probe runs inside)
     r_link = client.post(
-        \"/api/v1/aggregator/schwab/link\",
-        json={\"account_id\": account_id, \"trading\": False},
-        headers={\"Authorization\": f\"Bearer {token}\"},
+        "/api/v1/aggregator/schwab/link",
+        json={"account_id": account_id, "trading": False},
+        headers={"Authorization": f"Bearer {token}"},
     )
     assert r_link.status_code == 200
-    url = r_link.json()[\"url\"]
+    url = r_link.json()["url"]
     # Extract state query param from URL for callback
     import urllib.parse as _up
     qs = _up.urlparse(url).query
     params = dict(_up.parse_qsl(qs))
-    assert \"state\" in params
-    state = params[\"state\"]
+    assert "state" in params
+    state = params["state"]
 
     r_cb = client.get(
-        \"/api/v1/aggregator/schwab/callback\", params={\"code\": \"abc\", \"state\": state}
+        "/api/v1/aggregator/schwab/callback", params={"code": "abc", "state": state}
     )
     assert r_cb.status_code == 200
-    assert r_cb.json().get(\"status\") == \"linked\"
+    assert r_cb.json().get("status") == "linked"
     app.dependency_overrides.pop(get_db, None)
 
 

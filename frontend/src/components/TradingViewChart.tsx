@@ -12,7 +12,7 @@ import {
   IconButton,
   Tooltip,
 } from '@chakra-ui/react';
-import { CloseIcon, ExternalLinkIcon } from '@chakra-ui/icons';
+import { FiExternalLink, FiX } from 'react-icons/fi';
 
 interface TradingViewChartProps {
   symbol: string;
@@ -128,7 +128,7 @@ const TradingViewChart: React.FC<TradingViewChartProps> = ({
                 <Tooltip label="Open in TradingView">
                   <IconButton
                     aria-label="Open in TradingView"
-                    icon={<ExternalLinkIcon />}
+                    icon={<FiExternalLink />}
                     size="sm"
                     variant="ghost"
                     onClick={openInTradingView}
@@ -138,7 +138,7 @@ const TradingViewChart: React.FC<TradingViewChartProps> = ({
                   <Tooltip label="Close chart">
                     <IconButton
                       aria-label="Close chart"
-                      icon={<CloseIcon />}
+                      icon={<FiX />}
                       size="sm"
                       variant="ghost"
                       onClick={onClose}

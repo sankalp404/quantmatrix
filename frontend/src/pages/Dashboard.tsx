@@ -14,7 +14,6 @@ import {
   VStack,
   HStack,
   Badge,
-  Divider,
   SimpleGrid,
   Progress,
   IconButton,
@@ -41,6 +40,7 @@ import { PieChart, Pie, Cell, ResponsiveContainer, Tooltip, Legend } from 'recha
 import { portfolioApi, handleApiError } from '../services/api';
 import AccountFilterWrapper from '../components/AccountFilterWrapper';
 import { transformPortfolioToAccounts } from '../hooks/useAccountFilter';
+import AppDivider from '../components/ui/AppDivider';
 
 interface DashboardData {
   total_value: number;
@@ -407,7 +407,7 @@ const Dashboard: React.FC = () => {
                             colorScheme={(account.unrealized_pnl_pct || 0) >= 0 ? 'green' : 'red'}
                             borderRadius="md"
                           />
-                          {index < dashboardData.accounts_summary.length - 1 && <Divider mt={4} />}
+                          {index < dashboardData.accounts_summary.length - 1 && <AppDivider mt={4} />}
                         </Box>
                       ))}
                     </VStack>

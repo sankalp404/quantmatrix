@@ -1,3 +1,36 @@
+name: CI
+
+on:
+  pull_request:
+  push:
+    branches:
+      - main
+      - master
+
+jobs:
+  backend-tests:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Prepare test env
+        run: |
+          cp infra/env.test.example infra/env.test
+
+      - name: Bring up isolated test deps
+        run: |
+          make test-up
+
+      - name: Run backend tests (isolated DB)
+        run: |
+          make test
+
+      - name: Tear down test stack
+        if: always()
+        run: |
+          make test-down
+
 name: 🧪 QuantMatrix V1 - Continuous Integration
 
 on:

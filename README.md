@@ -9,9 +9,21 @@ Monorepo for the QuantMatrix trading platform.
 
 Quick Start
 -----------
-- docker-compose up -d --build
+- Preferred local entrypoint:
+  - `make up`
+  - `make ps`
 - Backend: http://localhost:8000/docs
 - Frontend: http://localhost:3000
+
+Environment Files
+-----------------
+- Dev stack uses `infra/env.dev` (copy from `infra/env.dev.example`).
+- Test stack uses `infra/env.test` (copy from `infra/env.test.example`) and is physically isolated via the `postgres_test` service.
+- Your legacy `.env` remains local-only; Docker orchestration is standardized on `infra/env.*`.
+
+Tests (Isolated DB)
+-------------------
+- `make test` (brings up isolated test deps, runs pytest, then tears down)
 
 Migrations
 ----------

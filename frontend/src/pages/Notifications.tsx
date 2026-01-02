@@ -32,7 +32,6 @@ import {
   Flex,
   Icon,
   Tooltip,
-  Divider,
   Menu,
   MenuButton,
   MenuList,
@@ -48,19 +47,19 @@ import {
   ListIcon,
 } from '@chakra-ui/react';
 import {
-  SearchIcon,
-  BellIcon,
-  CheckIcon,
-  DeleteIcon,
-  SettingsIcon,
-  StarIcon,
-  WarningIcon,
-  InfoIcon,
-  TriangleUpIcon,
-  TriangleDownIcon,
-  ChevronDownIcon,
-  CalendarIcon
-} from '@chakra-ui/icons';
+  FiAlertTriangle,
+  FiArrowDown,
+  FiArrowUp,
+  FiBell,
+  FiCalendar,
+  FiCheck,
+  FiChevronDown,
+  FiInfo,
+  FiSearch,
+  FiSettings,
+  FiStar,
+  FiTrash2,
+} from 'react-icons/fi';
 import {
   FiDollarSign,
   FiBarChart as BarChart3Icon
@@ -298,15 +297,15 @@ const Notifications: React.FC = () => {
   const getNotificationIcon = (type: string, category: string) => {
     switch (type) {
       case 'SIGNAL':
-        return TriangleUpIcon;
+        return FiArrowUp;
       case 'ALERT':
-        return WarningIcon;
+        return FiAlertTriangle;
       case 'STRATEGY':
         return BarChart3Icon;
       case 'SYSTEM':
-        return InfoIcon;
+        return FiInfo;
       default:
-        return BellIcon;
+        return FiBell;
     }
   };
 
@@ -376,7 +375,7 @@ const Notifications: React.FC = () => {
                 Mark All Read
               </Button>
               <Menu>
-                <MenuButton as={IconButton} icon={<SettingsIcon />} size="sm" variant="outline" />
+                <MenuButton as={IconButton} icon={<FiSettings />} size="sm" variant="outline" />
                 <MenuList>
                   <MenuItem>Notification Settings</MenuItem>
                   <MenuItem>Discord Integration</MenuItem>
@@ -469,7 +468,7 @@ const Notifications: React.FC = () => {
                     <HStack w="full" wrap="wrap" spacing={3}>
                       <InputGroup size="sm" maxW="200px">
                         <InputLeftElement>
-                          <SearchIcon color="gray.400" />
+                          <FiSearch color="gray.400" />
                         </InputLeftElement>
                         <Input
                           placeholder="Search notifications..."
@@ -571,7 +570,7 @@ const Notifications: React.FC = () => {
                                 {!notification.isRead && (
                                   <IconButton
                                     aria-label="Mark as read"
-                                    icon={<CheckIcon />}
+                                    icon={<FiCheck />}
                                     size="sm"
                                     variant="ghost"
                                     onClick={() => markAsRead(notification.id)}
@@ -579,7 +578,7 @@ const Notifications: React.FC = () => {
                                 )}
                                 <IconButton
                                   aria-label="Delete notification"
-                                  icon={<DeleteIcon />}
+                                  icon={<FiTrash2 />}
                                   size="sm"
                                   variant="ghost"
                                   colorScheme="red"
@@ -610,7 +609,7 @@ const Notifications: React.FC = () => {
                       <HStack justify="space-between">
                         <VStack align="start" spacing={2}>
                           <HStack>
-                            <Icon as={TriangleUpIcon} color="green.500" />
+                            <Icon as={FiArrowUp} color="green.500" />
                             <Text fontWeight="semibold">{notification.title}</Text>
                             <Badge colorScheme="green">{notification.category}</Badge>
                           </HStack>
@@ -643,7 +642,7 @@ const Notifications: React.FC = () => {
                       <HStack justify="space-between">
                         <VStack align="start" spacing={2}>
                           <HStack>
-                            <Icon as={WarningIcon} color="orange.500" />
+                            <Icon as={FiAlertTriangle} color="orange.500" />
                             <Text fontWeight="semibold">{notification.title}</Text>
                             <Badge colorScheme="orange">{notification.category}</Badge>
                           </HStack>
@@ -707,7 +706,7 @@ const Notifications: React.FC = () => {
                       <HStack justify="space-between">
                         <VStack align="start" spacing={2}>
                           <HStack>
-                            <Icon as={InfoIcon} color="gray.500" />
+                            <Icon as={FiInfo} color="gray.500" />
                             <Text fontWeight="semibold">{notification.title}</Text>
                             <Badge variant="outline">{notification.category}</Badge>
                           </HStack>

@@ -10,7 +10,6 @@ import {
   useColorMode,
   Avatar,
   Badge,
-  Divider,
   Select,
   Menu,
   MenuButton,
@@ -42,6 +41,7 @@ import { FaChartPie } from 'react-icons/fa';
 import { portfolioApi } from '../../services/api';
 import { useAccountContext } from '../../context/AccountContext';
 import { useAuth } from '../../context/AuthContext';
+import AppDivider from '../ui/AppDivider';
 
 // Navigation items inspired by Snowball Analytics
 const navigationItems = [
@@ -204,7 +204,7 @@ const DashboardLayout: React.FC = () => {
             )}
           </Flex>
 
-          {isSidebarOpen && <Divider />}
+          {isSidebarOpen && <AppDivider />}
 
           {/* Navigation */}
           <VStack spacing={1} px={isSidebarOpen ? 4 : 2} py={4} align="stretch">
@@ -234,7 +234,7 @@ const DashboardLayout: React.FC = () => {
                     {headerStats.sublabel || formatSignedCurrency(totals.dayPnL)}
                   </Text>
                 </HStack>
-                <Divider />
+                <AppDivider />
                 <Text fontSize="xs" fontWeight="semibold" color="gray.500" textTransform="uppercase">
                   Quick Stats
                 </Text>

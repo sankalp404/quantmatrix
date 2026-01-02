@@ -20,10 +20,10 @@ import {
   useColorModeValue,
   Icon,
   Flex,
-  Divider,
   SimpleGrid
 } from '@chakra-ui/react';
 import { FiInfo, FiTrendingUp, FiTrendingDown, FiDollarSign } from 'react-icons/fi';
+import AppDivider from './ui/AppDivider';
 
 interface AccountData {
   account_id: string;
@@ -214,7 +214,7 @@ const AccountSelector: React.FC<AccountSelectorProps> = ({
                   </SimpleGrid>
                 ) : null}
 
-                <Divider />
+                <AppDivider />
 
                 {/* Account Breakdown */}
                 <VStack spacing={2} align="stretch">

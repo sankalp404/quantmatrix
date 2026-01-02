@@ -1,8 +1,8 @@
 import React, { useEffect, useMemo, useState } from 'react';
-import { Box, Text, Card, CardBody, useColorModeValue, VStack, HStack, Input, Select, Button, Table, Thead, Tr, Th, Tbody, Td, Badge, useToast, Link as CLink, Tooltip, Divider, SimpleGrid, Modal, ModalOverlay, ModalContent, ModalHeader, ModalBody, ModalFooter, useDisclosure, InputGroup, InputRightElement, IconButton, Image, useColorMode, AlertDialog, AlertDialogOverlay, AlertDialogContent, AlertDialogHeader, AlertDialogBody, AlertDialogFooter } from '@chakra-ui/react';
+import { Box, Text, Card, CardBody, useColorModeValue, VStack, HStack, Input, Select, Button, Table, Thead, Tr, Th, Tbody, Td, Badge, useToast, Link as CLink, Tooltip, SimpleGrid, Modal, ModalOverlay, ModalContent, ModalHeader, ModalBody, ModalFooter, useDisclosure, InputGroup, InputRightElement, IconButton, Image, useColorMode, AlertDialog, AlertDialogOverlay, AlertDialogContent, AlertDialogHeader, AlertDialogBody, AlertDialogFooter } from '@chakra-ui/react';
 import { accountsApi, aggregatorApi, handleApiError } from '../services/api';
 import { useAuth } from '../context/AuthContext';
-import { ExternalLinkIcon, ViewIcon, ViewOffIcon, DeleteIcon } from '@chakra-ui/icons';
+import { FiExternalLink, FiEye, FiEyeOff, FiTrash2 } from 'react-icons/fi';
 import SchwabLogo from '../assets/logos/schwab.svg';
 import TastytradeLogo from '../assets/logos/tastytrade.svg';
 import IbkrLogo from '../assets/logos/interactive-brokers.svg';
@@ -363,7 +363,7 @@ const Settings: React.FC = () => {
                           {String(a.broker || '').toLowerCase() === 'schwab' && (
                             <Tooltip label={cfg && !cfg.schwabConfigured ? 'Schwab OAuth not configured on server' : ''} isDisabled={!(cfg && !cfg.schwabConfigured)}>
                               <Button size="xs" variant="outline" onClick={() => handleConnectSchwab(a.id)} isDisabled={!!(cfg && !cfg.schwabConfigured)}>
-                                Connect Charles Schwab <ExternalLinkIcon ml={2} />
+                                Connect Charles Schwab <FiExternalLink style={{ marginLeft: 8 }} />
                               </Button>
                             </Tooltip>
                           )}
@@ -384,7 +384,7 @@ const Settings: React.FC = () => {
                             size="xs"
                             variant="ghost"
                             colorScheme="red"
-                            icon={<DeleteIcon />}
+                            icon={<FiTrash2 />}
                             onClick={() => { setDeleteId(a.id); onDeleteOpen(); }}
                           />
                         </HStack>
@@ -470,7 +470,7 @@ const Settings: React.FC = () => {
                   <InputGroup>
                     <Input placeholder="Password" type={showTtPw ? 'text' : 'password'} value={ttForm.password} onChange={(e) => setTtForm({ ...ttForm, password: e.target.value })} onKeyDown={(e) => { if (e.key === 'Enter') submitWizard(); }} />
                     <InputRightElement>
-                      <IconButton aria-label={showTtPw ? 'Hide password' : 'Show password'} icon={showTtPw ? <ViewOffIcon /> : <ViewIcon />} size="sm" variant="ghost" onClick={() => setShowTtPw(!showTtPw)} />
+                      <IconButton aria-label={showTtPw ? 'Hide password' : 'Show password'} icon={showTtPw ? <FiEyeOff /> : <FiEye />} size="sm" variant="ghost" onClick={() => setShowTtPw(!showTtPw)} />
                     </InputRightElement>
                   </InputGroup>
                 </HStack>

@@ -10,6 +10,9 @@ from sqlalchemy.orm import sessionmaker
 import os
 from typing import Generator
 
+# Shared test DB safety checks (used by both app and pytest)
+from backend.utils.db_safety import check_test_database_url
+
 # Database URL from environment or default
 DATABASE_URL = os.getenv(
     "DATABASE_URL", "postgresql://quantmatrix:quantmatrix@localhost:5432/quantmatrix"
@@ -34,7 +37,9 @@ def _assert_test_db_guard():
 
     Rules:
     - If running under pytest (PYTEST_CURRENT_TEST or QUANTMATRIX_TESTING), require TEST_DATABASE_URL.
-    - If TEST_DATABASE_URL equals APP_DATABASE_URL, abort.
+    - Require TEST_DATABASE_URL is an unambiguously-safe test DB (postgres_test + *_test).
+    - Extra paranoia: require DATABASE_URL == TEST_DATABASE_URL so *any* accidental use of
+      backend.database.engine/SessionLocal still targets the test DB.
     """
     is_testing = bool(
         os.getenv("PYTEST_CURRENT_TEST") or os.getenv("QUANTMATRIX_TESTING")
@@ -46,9 +51,23 @@ def _assert_test_db_guard():
         raise RuntimeError(
             "TEST_DATABASE_URL is required for tests; refusing to use APP_DATABASE_URL"
         )
-    if test_db_url == APP_DATABASE_URL:
+
+    expected_host = os.getenv("TEST_DB_EXPECTED_HOST", "postgres_test")
+    required_user = os.getenv("POSTGRES_TEST_USER") or None
+    chk = check_test_database_url(
+        test_db_url,
+        expected_host=expected_host,
+        required_user=required_user,
+    )
+    if not chk.ok:
         raise RuntimeError(
-            "TEST_DATABASE_URL equals APP_DATABASE_URL; aborting to avoid destructive operations"
+            f"Unsafe TEST_DATABASE_URL ({chk.reason}); refusing to run tests"
+        )
+
+    if APP_DATABASE_URL != test_db_url:
+        raise RuntimeError(
+            "In tests, DATABASE_URL must equal TEST_DATABASE_URL so accidental engine usage stays isolated. "
+            f"DATABASE_URL={APP_DATABASE_URL!r} TEST_DATABASE_URL={test_db_url!r}"
         )
 
 

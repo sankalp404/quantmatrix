@@ -29,12 +29,12 @@ import {
   SimpleGrid,
   IconButton,
   Tooltip,
-  Divider,
   Checkbox,
   FormHelperText,
 } from '@chakra-ui/react';
 import { FiDownload, FiUpload, FiEdit3, FiPlay, FiPause, FiTrash2, FiRefreshCw } from 'react-icons/fi';
 import api from '../services/api';
+import AppDivider from '../components/ui/AppDivider';
 
 type CatalogEntry = {
   id: string;
@@ -428,7 +428,7 @@ const AdminSchedules: React.FC = () => {
         Manage Celery schedules stored in RedBeat. Cron + timezone drive execution; metadata controls queue routing, concurrency, and safety limits.
       </Text>
 
-      <Divider my={6} />
+      <AppDivider my={6} />
       {Object.keys(groupedSchedules).length === 0 ? (
         <Text fontSize="sm" color="gray.500">No schedules found. Use Create to add one.</Text>
       ) : (

@@ -13,14 +13,39 @@ depends_on = None
 
 
 def upgrade():
+    bind = op.get_bind()
+    insp = sa.inspect(bind)
+    if not insp.has_table("account_credentials"):
+        return
+    existing = {c["name"] for c in insp.get_columns("account_credentials")}
+
+    cols = [
+        sa.Column(
+            "provider",
+            sa.Enum(
+                "ibkr",
+                "tastytrade",
+                "schwab",
+                "fidelity",
+                "robinhood",
+                "unknown_broker",
+                name="brokertype",
+            ),
+            nullable=True,
+        ),
+        sa.Column("credential_type", sa.String(length=32), nullable=True),
+        sa.Column("username_hint", sa.String(length=255), nullable=True),
+        sa.Column("last_refreshed_at", sa.DateTime(), nullable=True),
+        sa.Column("refresh_token_expires_at", sa.DateTime(), nullable=True),
+        sa.Column("last_error", sa.Text(), nullable=True),
+        sa.Column("rotation_count", sa.Integer(), nullable=True),
+    ]
+    to_add = [c for c in cols if c.name not in existing]
+    if not to_add:
+        return
     with op.batch_alter_table("account_credentials") as batch_op:
-        batch_op.add_column(sa.Column("provider", sa.Enum("ibkr", "tastytrade", "schwab", "fidelity", "robinhood", "unknown_broker", name="brokertype"), nullable=True))
-        batch_op.add_column(sa.Column("credential_type", sa.String(length=32), nullable=True))
-        batch_op.add_column(sa.Column("username_hint", sa.String(length=255), nullable=True))
-        batch_op.add_column(sa.Column("last_refreshed_at", sa.DateTime(), nullable=True))
-        batch_op.add_column(sa.Column("refresh_token_expires_at", sa.DateTime(), nullable=True))
-        batch_op.add_column(sa.Column("last_error", sa.Text(), nullable=True))
-        batch_op.add_column(sa.Column("rotation_count", sa.Integer(), nullable=True))
+        for col in to_add:
+            batch_op.add_column(col)
 
 
 def downgrade():

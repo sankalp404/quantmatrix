@@ -18,6 +18,7 @@ from sqlalchemy import (
 from sqlalchemy.orm import relationship
 from sqlalchemy.sql import func
 import enum
+import sqlalchemy as sa
 
 from . import Base
 
@@ -51,9 +52,17 @@ class User(Base):
     phone = Column(String(20))
 
     # Authentication & Access
-    role = Column(SQLEnum(UserRole), default=UserRole.USER, nullable=False)
-    is_active = Column(Boolean, default=True, nullable=False)
-    is_verified = Column(Boolean, default=False, nullable=False)
+    # Add a DB-level default so raw SQL inserts (and migrations/bulk loads) are safe.
+    role = Column(
+        SQLEnum(UserRole),
+        default=UserRole.USER,
+        # SQLAlchemy Enum(UserRole) stores the *name* (e.g. 'USER') by default.
+        server_default=UserRole.USER.name,
+        nullable=False,
+    )
+    # Add DB-level defaults so raw SQL inserts and bulk loads are safe.
+    is_active = Column(Boolean, default=True, server_default=sa.text("true"), nullable=False)
+    is_verified = Column(Boolean, default=False, server_default=sa.text("false"), nullable=False)
     last_login = Column(TIMESTAMP(timezone=True))
     failed_login_attempts = Column(Integer, default=0)
     locked_until = Column(TIMESTAMP(timezone=True))

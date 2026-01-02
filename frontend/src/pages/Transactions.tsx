@@ -27,7 +27,6 @@ import {
   useToast,
   SimpleGrid,
   Flex,
-  Divider,
   Tooltip,
   Icon,
   Table,
@@ -39,7 +38,6 @@ import {
   TableContainer,
   Progress,
 } from '@chakra-ui/react';
-import { SearchIcon, DownloadIcon, CalendarIcon, RepeatIcon, TimeIcon } from '@chakra-ui/icons';
 import {
   FiDollarSign,
   FiTrendingUp,
@@ -49,6 +47,9 @@ import {
   FiArrowDownLeft,
   FiClock,
   FiCalendar,
+  FiDownload,
+  FiRefreshCw,
+  FiSearch,
 } from 'react-icons/fi';
 import { portfolioApi, handleApiError, activityApi } from '../services/api';
 import AccountFilterWrapper from '../components/AccountFilterWrapper';
@@ -493,10 +494,10 @@ const Transactions: React.FC = () => {
               </Text>
             </VStack>
             <HStack spacing={3}>
-              <Button leftIcon={<RepeatIcon />} size="sm" variant="outline" onClick={() => fetchData(selectedAccountSSR, tableOffset)}>
+              <Button leftIcon={<FiRefreshCw />} size="sm" variant="outline" onClick={() => fetchData(selectedAccountSSR, tableOffset)}>
                 Refresh
               </Button>
-              <Button leftIcon={<DownloadIcon />} size="sm" variant="outline">
+              <Button leftIcon={<FiDownload />} size="sm" variant="outline">
                 Export CSV
               </Button>
               <HStack spacing={1}>
@@ -637,7 +638,7 @@ const Transactions: React.FC = () => {
                       <Flex wrap="wrap" gap={4} align="center" width="full">
                         <InputGroup maxW="300px">
                           <InputLeftElement pointerEvents="none">
-                            <SearchIcon color="gray.300" />
+                            <FiSearch color="gray.300" />
                           </InputLeftElement>
                           <Input
                             placeholder="Search transactions..."

@@ -40,7 +40,6 @@ import {
   Icon,
   Tooltip,
   Progress,
-  Divider,
   CircularProgress,
   CircularProgressLabel,
 } from '@chakra-ui/react';
@@ -61,13 +60,14 @@ import {
   Scatter
 } from 'recharts';
 import {
-  SearchIcon,
-  WarningIcon,
-  InfoIcon,
-  ArrowUpIcon,
-  ArrowDownIcon,
-} from '@chakra-ui/icons';
+  FiAlertTriangle,
+  FiArrowDown,
+  FiArrowUp,
+  FiInfo,
+  FiSearch,
+} from 'react-icons/fi';
 import { usePortfolio } from '../hooks/usePortfolio';
+import AppDivider from '../components/ui/AppDivider';
 
 // Process margin analysis data
 const processMarginData = (portfolioData: any) => {
@@ -430,7 +430,7 @@ const MarginAnalysis: React.FC = () => {
                         <Text fontSize="xs" color="gray.500" mt={1}>Excess liquidity available</Text>
                       </Box>
 
-                      <Divider />
+                      <AppDivider />
 
                       <SimpleGrid columns={2} spacing={4}>
                         <VStack>
@@ -474,7 +474,7 @@ const MarginAnalysis: React.FC = () => {
                     <HStack w="full" spacing={3}>
                       <InputGroup size="sm" maxW="200px">
                         <InputLeftElement>
-                          <SearchIcon color="gray.400" />
+                          <FiSearch color="gray.400" />
                         </InputLeftElement>
                         <Input
                           placeholder="Search positions..."

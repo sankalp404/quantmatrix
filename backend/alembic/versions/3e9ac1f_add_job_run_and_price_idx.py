@@ -11,35 +11,53 @@ import sqlalchemy as sa
 
 # revision identifiers, used by Alembic.
 revision = "3e9ac1f"
-down_revision = "0a1e2f3"
+down_revision = "1b2f_add_credentials_metadata"
 branch_labels = None
 depends_on = None
 
 
 def upgrade():
-    # Create job_run table
-    op.create_table(
-        "job_run",
-        sa.Column("id", sa.Integer(), primary_key=True, nullable=False),
-        sa.Column("task_name", sa.String(length=100), nullable=False),
-        sa.Column("params", sa.JSON(), nullable=True),
-        sa.Column("status", sa.String(length=20), nullable=False),
-        sa.Column("counters", sa.JSON(), nullable=True),
-        sa.Column("error", sa.Text(), nullable=True),
-        sa.Column("started_at", sa.DateTime(timezone=True), server_default=sa.text("CURRENT_TIMESTAMP"), nullable=False),
-        sa.Column("finished_at", sa.DateTime(timezone=True), nullable=True),
-        sa.Column("created_at", sa.DateTime(timezone=True), server_default=sa.text("CURRENT_TIMESTAMP"), nullable=False),
-    )
-    op.create_index("idx_jobrun_task_time", "job_run", ["task_name", "started_at"], unique=False)
-    op.create_index("idx_jobrun_status_time", "job_run", ["status", "started_at"], unique=False)
+    bind = op.get_bind()
+    insp = sa.inspect(bind)
 
-    # Add composite index for price_data if not present
-    # Safe create: some databases support IF NOT EXISTS; Alembic/SA doesn't universally.
-    # We attempt create and ignore if it exists.
-    try:
-        op.create_index("idx_symbol_interval_date", "price_data", ["symbol", "interval", "date"], unique=False)
-    except Exception:
-        pass
+    # Create job_run table only if missing (avoid transactional DDL aborts).
+    if not insp.has_table("job_run"):
+        op.create_table(
+            "job_run",
+            sa.Column("id", sa.Integer(), primary_key=True, nullable=False),
+            sa.Column("task_name", sa.String(length=100), nullable=False),
+            sa.Column("params", sa.JSON(), nullable=True),
+            sa.Column("status", sa.String(length=20), nullable=False),
+            sa.Column("counters", sa.JSON(), nullable=True),
+            sa.Column("error", sa.Text(), nullable=True),
+            sa.Column(
+                "started_at",
+                sa.DateTime(timezone=True),
+                server_default=sa.text("CURRENT_TIMESTAMP"),
+                nullable=False,
+            ),
+            sa.Column("finished_at", sa.DateTime(timezone=True), nullable=True),
+            sa.Column(
+                "created_at",
+                sa.DateTime(timezone=True),
+                server_default=sa.text("CURRENT_TIMESTAMP"),
+                nullable=False,
+            ),
+        )
+
+    # Create indexes idempotently (Postgres supports IF NOT EXISTS).
+    op.execute(
+        "CREATE INDEX IF NOT EXISTS idx_jobrun_task_time ON job_run (task_name, started_at);"
+    )
+    op.execute(
+        "CREATE INDEX IF NOT EXISTS idx_jobrun_status_time ON job_run (status, started_at);"
+    )
+
+    # Add composite index for price_data if present (idempotent).
+    if insp.has_table("price_data"):
+        op.execute(
+            "CREATE INDEX IF NOT EXISTS idx_symbol_interval_date ON price_data (symbol, interval, date);"
+        )
 
 
 def downgrade():

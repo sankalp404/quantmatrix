@@ -37,7 +37,6 @@ import {
   ModalBody,
   ModalCloseButton,
   Flex,
-  Divider,
   Tabs,
   TabList,
   TabPanels,
@@ -75,6 +74,7 @@ import {
   FaPlus,
   FaMinus
 } from 'react-icons/fa';
+import AppDivider from '../components/ui/AppDivider';
 
 interface Holding {
   id: string;
@@ -786,7 +786,7 @@ const MultiPortfolio: React.FC = () => {
                   </Box>
                 </SimpleGrid>
 
-                <Divider />
+                <AppDivider />
 
                 <SimpleGrid columns={3} spacing={4}>
                   <Stat size="sm">
@@ -824,7 +824,7 @@ const MultiPortfolio: React.FC = () => {
 
                 {selectedHolding.type === 'option' && (
                   <>
-                    <Divider />
+                    <AppDivider />
                     <Text fontWeight="bold">Options Details</Text>
                     <SimpleGrid columns={3} spacing={4}>
                       <Box>
