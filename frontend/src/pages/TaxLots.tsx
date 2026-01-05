@@ -6,48 +6,45 @@ import {
   VStack,
   HStack,
   Text,
-  Card,
+  CardRoot,
   CardBody,
   CardHeader,
   SimpleGrid,
   Badge,
   Button,
-  Select,
   Input,
   InputGroup,
-  InputLeftElement,
-  Tabs,
-  TabList,
-  TabPanels,
-  Tab,
-  TabPanel,
-  Stat,
+  InputElement,
+  StatRoot,
   StatLabel,
-  StatNumber,
   StatHelpText,
-  StatArrow,
-  useColorModeValue,
+  StatValueText,
+  StatUpIndicator,
+  StatDownIndicator,
   Spinner,
-  Alert,
-  AlertIcon,
-  useToast,
+  AlertRoot,
+  AlertIndicator,
+  AlertDescription,
   Flex,
-  Table,
-  Thead,
-  Tbody,
-  Tr,
-  Th,
-  Td,
-  TableContainer,
+  TableScrollArea,
   IconButton,
-  Tooltip,
   Progress,
+  TableRoot,
+  TableHeader,
+  TableBody,
+  TableRow,
+  TableColumnHeader,
+  TableCell,
 } from '@chakra-ui/react';
+import hotToast from 'react-hot-toast';
 import { FiDollarSign, FiTrendingUp, FiTrendingDown, FiCalendar, FiFilter, FiRefreshCw, FiDownload, FiSearch, FiClock } from 'react-icons/fi';
 import { PieChart, Pie, Cell, ResponsiveContainer, Tooltip as RechartsTooltip, Legend, BarChart, Bar, XAxis, YAxis, CartesianGrid } from 'recharts';
 import AccountFilterWrapper from '../components/AccountFilterWrapper';
 import { portfolioApi } from '../services/api';
 import { transformPortfolioToAccounts } from '../hooks/useAccountFilter';
+
+// Chakra v3 migration shim: prefer dark values until we reintroduce color-mode properly.
+const useColorModeValue = <T,>(_light: T, dark: T) => dark;
 
 // Interface for tax lot data from API
 interface TaxLot {
@@ -102,7 +99,13 @@ const TaxLots: React.FC = () => {
 
   const cardBg = useColorModeValue('white', 'gray.800');
   const borderColor = useColorModeValue('gray.200', 'gray.700');
-  const toast = useToast();
+  // Temporary shim: preserve legacy `toast({title, status, description})` call sites.
+  const toast = (args: { title: string; description?: string; status?: 'success' | 'error' | 'info' | 'warning'; duration?: number; isClosable?: boolean }) => {
+    const msg = args.description ? `${args.title}: ${args.description}` : args.title;
+    if (args.status === 'success') return hotToast.success(args.title);
+    if (args.status === 'error') return hotToast.error(msg);
+    return hotToast(msg);
+  };
 
   useEffect(() => {
     fetchTaxLots();
@@ -247,17 +250,17 @@ const TaxLots: React.FC = () => {
   if (error) {
     return (
       <Container maxW="container.xl" py={8}>
-        <Alert status="error">
-          <AlertIcon />
-          Error loading tax lots data: {error}
-        </Alert>
+        <AlertRoot status="error">
+          <AlertIndicator />
+          <AlertDescription>Error loading tax lots data: {error}</AlertDescription>
+        </AlertRoot>
       </Container>
     );
   }
 
   return (
     <Container maxW="container.xl" py={8}>
-      <VStack spacing={6} align="stretch">
+      <VStack gap={6} align="stretch">
         {/* Header */}
         <Box>
           <Heading size="lg" mb={2}>Tax Lots Analysis</Heading>
@@ -280,16 +283,20 @@ const TaxLots: React.FC = () => {
           }}
         >
           {(accountFilteredTaxLots, filterState) => (
-            <VStack spacing={6} align="stretch">
+            <VStack gap={6} align="stretch">
               {/* Enhanced Filters */}
-              <Card bg={cardBg} borderColor={borderColor}>
+              <CardRoot bg={cardBg} borderColor={borderColor} borderWidth="1px" borderRadius="xl">
                 <CardBody>
-                  <VStack spacing={4}>
+                  <VStack gap={4}>
                     <Flex wrap="wrap" gap={4} align="center" width="full">
-                      <InputGroup maxW="300px">
-                        <InputLeftElement pointerEvents="none">
-                          <FiSearch color="gray.300" />
-                        </InputLeftElement>
+                      <InputGroup
+                        maxW="300px"
+                        startElement={
+                          <InputElement pointerEvents="none">
+                            <FiSearch color="gray.300" />
+                          </InputElement>
+                        }
+                      >
                         <Input
                           placeholder="Search symbols..."
                           value={searchTerm}
@@ -297,140 +304,139 @@ const TaxLots: React.FC = () => {
                         />
                       </InputGroup>
 
-                      <Select
+                      <select
                         value={filterMethod}
-                        onChange={(e) => setFilterMethod(e.target.value)}
-                        maxW="200px"
+                        onChange={(e: React.ChangeEvent<HTMLSelectElement>) => setFilterMethod(e.target.value)}
+                        style={{ maxWidth: 200, padding: '8px 10px', borderRadius: 10, border: `1px solid ${String(borderColor)}`, background: String(cardBg) }}
                       >
                         <option value="all">All Tax Lots</option>
                         <option value="short_term">Short Term (&lt; 1 year)</option>
                         <option value="long_term">Long Term (&gt; 1 year)</option>
-                      </Select>
+                      </select>
 
-                      <Select
+                      <select
                         value={sortBy}
-                        onChange={(e) => setSortBy(e.target.value)}
-                        maxW="200px"
+                        onChange={(e: React.ChangeEvent<HTMLSelectElement>) => setSortBy(e.target.value)}
+                        style={{ maxWidth: 200, padding: '8px 10px', borderRadius: 10, border: `1px solid ${String(borderColor)}`, background: String(cardBg) }}
                       >
                         <option value="purchase_date">Purchase Date</option>
                         <option value="symbol">Symbol</option>
                         <option value="unrealized_pnl">Unrealized P&L</option>
                         <option value="cost_basis">Cost Basis</option>
-                      </Select>
+                      </select>
 
-                      <Select
+                      <select
                         value={sortOrder}
-                        onChange={(e) => setSortOrder(e.target.value as 'asc' | 'desc')}
-                        maxW="150px"
+                        onChange={(e: React.ChangeEvent<HTMLSelectElement>) => setSortOrder(e.target.value as 'asc' | 'desc')}
+                        style={{ maxWidth: 150, padding: '8px 10px', borderRadius: 10, border: `1px solid ${String(borderColor)}`, background: String(cardBg) }}
                       >
                         <option value="desc">Descending</option>
                         <option value="asc">Ascending</option>
-                      </Select>
+                      </select>
 
                       <Button
-                        leftIcon={<FiRefreshCw />}
                         onClick={fetchTaxLots}
-                        isLoading={loading}
+                        loading={loading}
                         size="sm"
                       >
-                        Refresh
+                        <HStack gap={2}>
+                          <FiRefreshCw />
+                          <Text>Refresh</Text>
+                        </HStack>
                       </Button>
                     </Flex>
 
                     {/* Summary Stats */}
                     {summary && (
-                      <SimpleGrid columns={{ base: 2, md: 4 }} spacing={4} width="full">
-                        <Stat size="sm">
+                      <SimpleGrid columns={{ base: 2, md: 4 }} gap={4} width="full">
+                        <StatRoot size="sm">
                           <StatLabel>Total Lots</StatLabel>
-                          <StatNumber>{summary.total_lots}</StatNumber>
-                        </Stat>
-                        <Stat size="sm">
+                          <StatValueText>{summary.total_lots}</StatValueText>
+                        </StatRoot>
+                        <StatRoot size="sm">
                           <StatLabel>Total Cost Basis</StatLabel>
-                          <StatNumber>{new Intl.NumberFormat('en-US', { style: 'currency', currency: 'USD' }).format(summary.total_cost_basis)}</StatNumber>
-                        </Stat>
-                        <Stat size="sm">
+                          <StatValueText>{new Intl.NumberFormat('en-US', { style: 'currency', currency: 'USD' }).format(summary.total_cost_basis)}</StatValueText>
+                        </StatRoot>
+                        <StatRoot size="sm">
                           <StatLabel>Current Value</StatLabel>
-                          <StatNumber>{new Intl.NumberFormat('en-US', { style: 'currency', currency: 'USD' }).format(summary.total_current_value)}</StatNumber>
-                        </Stat>
-                        <Stat size="sm">
+                          <StatValueText>{new Intl.NumberFormat('en-US', { style: 'currency', currency: 'USD' }).format(summary.total_market_value)}</StatValueText>
+                        </StatRoot>
+                        <StatRoot size="sm">
                           <StatLabel>Unrealized P&L</StatLabel>
-                          <StatNumber color={summary.total_unrealized_pnl >= 0 ? 'green.500' : 'red.500'}>
-                            <StatArrow type={summary.total_unrealized_pnl >= 0 ? 'increase' : 'decrease'} />
+                          <StatValueText color={summary.total_unrealized_pnl >= 0 ? 'green.500' : 'red.500'}>
+                            {summary.total_unrealized_pnl >= 0 ? <StatUpIndicator /> : <StatDownIndicator />}
                             {new Intl.NumberFormat('en-US', { style: 'currency', currency: 'USD' }).format(Math.abs(summary.total_unrealized_pnl))}
-                          </StatNumber>
+                          </StatValueText>
                           <StatHelpText>
-                            {summary.unrealized_pnl_pct.toFixed(2)}%
+                            {summary.total_unrealized_pnl_pct.toFixed(2)}%
                           </StatHelpText>
-                        </Stat>
+                        </StatRoot>
                       </SimpleGrid>
                     )}
                   </VStack>
                 </CardBody>
-              </Card>
+              </CardRoot>
 
               {/* Tax Lots Table */}
-              <Card bg={cardBg} borderColor={borderColor}>
+              <CardRoot bg={cardBg} borderColor={borderColor} borderWidth="1px" borderRadius="xl">
                 <CardHeader>
                   <Heading size="md">Tax Lots Detail</Heading>
                 </CardHeader>
                 <CardBody>
-                  <Box overflowX="auto">
-                    <Table variant="simple" size="sm">
-                      <Thead>
-                        <Tr>
-                          <Th>Symbol</Th>
-                          <Th>Account</Th>
-                          <Th>Purchase Date</Th>
-                          <Th isNumeric>Shares</Th>
-                          <Th isNumeric>Purchase Price</Th>
-                          <Th isNumeric>Current Price</Th>
-                          <Th isNumeric>Cost Basis</Th>
-                          <Th isNumeric>Market Value</Th>
-                          <Th isNumeric>Unrealized P&L</Th>
-                          <Th isNumeric>P&L %</Th>
-                          <Th>Holding Period</Th>
-                          <Th>Tax Status</Th>
-                          <Th>Flags</Th>
-                        </Tr>
-                      </Thead>
-                      <Tbody>
+                  <TableScrollArea>
+                    <TableRoot variant="line" size="sm">
+                      <TableHeader>
+                        <TableRow>
+                          <TableColumnHeader>Symbol</TableColumnHeader>
+                          <TableColumnHeader>Account</TableColumnHeader>
+                          <TableColumnHeader>Purchase Date</TableColumnHeader>
+                          <TableColumnHeader textAlign="end">Shares</TableColumnHeader>
+                          <TableColumnHeader textAlign="end">Purchase Price</TableColumnHeader>
+                          <TableColumnHeader textAlign="end">Current Price</TableColumnHeader>
+                          <TableColumnHeader textAlign="end">Cost Basis</TableColumnHeader>
+                          <TableColumnHeader textAlign="end">Market Value</TableColumnHeader>
+                          <TableColumnHeader textAlign="end">Unrealized P&amp;L</TableColumnHeader>
+                          <TableColumnHeader textAlign="end">P&amp;L %</TableColumnHeader>
+                          <TableColumnHeader>Holding Period</TableColumnHeader>
+                          <TableColumnHeader>Tax Status</TableColumnHeader>
+                          <TableColumnHeader>Flags</TableColumnHeader>
+                        </TableRow>
+                      </TableHeader>
+                      <TableBody>
                         {filteredAndSortedTaxLots.slice(0, 50).map(lot => (
-                          <Tr key={lot.id}>
-                            <Td fontWeight="semibold">{lot.symbol}</Td>
-                            <Td>{lot.account_id}</Td>
-                            <Td>{lot.purchase_date}</Td>
-                            <Td isNumeric>{lot.shares_purchased.toLocaleString()}</Td>
-                            <Td isNumeric>${lot.cost_per_share.toFixed(2)}</Td>
-                            <Td isNumeric>${lot.current_price.toFixed(2)}</Td>
-                            <Td isNumeric>${lot.cost_basis.toLocaleString('en-US', { minimumFractionDigits: 0, maximumFractionDigits: 0 })}</Td>
-                            <Td isNumeric>${lot.market_value.toLocaleString('en-US', { minimumFractionDigits: 0, maximumFractionDigits: 0 })}</Td>
-                            <Td isNumeric color={lot.unrealized_pnl >= 0 ? 'green.500' : 'red.500'}>
+                          <TableRow key={lot.id}>
+                            <TableCell fontWeight="semibold">{lot.symbol}</TableCell>
+                            <TableCell>{lot.account_id}</TableCell>
+                            <TableCell>{lot.purchase_date}</TableCell>
+                            <TableCell textAlign="end">{lot.shares_purchased.toLocaleString()}</TableCell>
+                            <TableCell textAlign="end">${lot.cost_per_share.toFixed(2)}</TableCell>
+                            <TableCell textAlign="end">${lot.current_price.toFixed(2)}</TableCell>
+                            <TableCell textAlign="end">${lot.cost_basis.toLocaleString('en-US', { minimumFractionDigits: 0, maximumFractionDigits: 0 })}</TableCell>
+                            <TableCell textAlign="end">${lot.market_value.toLocaleString('en-US', { minimumFractionDigits: 0, maximumFractionDigits: 0 })}</TableCell>
+                            <TableCell textAlign="end" color={lot.unrealized_pnl >= 0 ? 'green.500' : 'red.500'}>
                               {lot.unrealized_pnl >= 0 ? '+' : ''}${lot.unrealized_pnl.toLocaleString('en-US', { minimumFractionDigits: 0, maximumFractionDigits: 0 })}
-                            </Td>
-                            <Td isNumeric color={lot.unrealized_pnl_pct >= 0 ? 'green.500' : 'red.500'}>
+                            </TableCell>
+                            <TableCell textAlign="end" color={lot.unrealized_pnl_pct >= 0 ? 'green.500' : 'red.500'}>
                               {lot.unrealized_pnl_pct >= 0 ? '+' : ''}{lot.unrealized_pnl_pct.toFixed(2)}%
-                            </Td>
-                            <Td>{lot.holding_days} days</Td>
-                            <Td>
+                            </TableCell>
+                            <TableCell>{lot.holding_days} days</TableCell>
+                            <TableCell>
                               <Badge colorScheme={lot.is_long_term ? 'green' : 'orange'}>
                                 {lot.is_long_term ? 'Long-term' : 'Short-term'}
                               </Badge>
-                            </Td>
-                            <Td>
+                            </TableCell>
+                            <TableCell>
                               {lot.is_wash_sale && (
-                                <Tooltip label="Potential wash sale risk">
-                                  <Badge colorScheme="red" variant="outline">
-                                    {/* WarningIcon is not imported, using a placeholder or removing if not needed */}
-                                    {/* <Icon as={WarningIcon} boxSize={3} /> */}
-                                  </Badge>
-                                </Tooltip>
+                                <Badge title="Potential wash sale risk" colorScheme="red" variant="outline">
+                                  WS
+                                </Badge>
                               )}
-                            </Td>
-                          </Tr>
+                            </TableCell>
+                          </TableRow>
                         ))}
-                      </Tbody>
-                    </Table>
-                  </Box>
+                      </TableBody>
+                    </TableRoot>
+                  </TableScrollArea>
 
                   {filteredAndSortedTaxLots.length > 50 && (
                     <Text mt={4} fontSize="sm" color="gray.600">
@@ -438,11 +444,11 @@ const TaxLots: React.FC = () => {
                     </Text>
                   )}
                 </CardBody>
-              </Card>
+              </CardRoot>
 
               {/* Holding Period Analysis */}
-              <SimpleGrid columns={{ base: 1, lg: 2 }} spacing={6}>
-                <Card bg={cardBg} borderColor={borderColor}>
+              <SimpleGrid columns={{ base: 1, lg: 2 }} gap={6}>
+                <CardRoot bg={cardBg} borderColor={borderColor} borderWidth="1px" borderRadius="xl">
                   <CardHeader>
                     <Heading size="md">Holdings by Period</Heading>
                   </CardHeader>
@@ -462,70 +468,70 @@ const TaxLots: React.FC = () => {
                       </BarChart>
                     </ResponsiveContainer>
                   </CardBody>
-                </Card>
+                </CardRoot>
 
-                <Card bg={cardBg} borderColor={borderColor}>
+                <CardRoot bg={cardBg} borderColor={borderColor} borderWidth="1px" borderRadius="xl">
                   <CardHeader>
                     <Heading size="md">Tax Status Breakdown</Heading>
                   </CardHeader>
                   <CardBody>
-                    <VStack spacing={4}>
-                      <SimpleGrid columns={2} spacing={4} w="full">
-                        <Stat textAlign="center">
+                    <VStack gap={4}>
+                      <SimpleGrid columns={2} gap={4} w="full">
+                        <StatRoot textAlign="center">
                           <StatLabel>Long-term</StatLabel>
-                          <StatNumber color="green.500">{summary?.long_term_lots || 0}</StatNumber>
+                          <StatValueText color="green.500">{summary?.long_term_lots || 0}</StatValueText>
                           <StatHelpText>positions</StatHelpText>
-                        </Stat>
-                        <Stat textAlign="center">
+                        </StatRoot>
+                        <StatRoot textAlign="center">
                           <StatLabel>Short-term</StatLabel>
-                          <StatNumber color="orange.500">{summary?.short_term_lots || 0}</StatNumber>
+                          <StatValueText color="orange.500">{summary?.short_term_lots || 0}</StatValueText>
                           <StatHelpText>positions</StatHelpText>
-                        </Stat>
+                        </StatRoot>
                       </SimpleGrid>
 
-                      <Alert status="info" variant="left-accent">
-                        <AlertIcon />
+                      <AlertRoot status="info" borderRadius="md">
+                        <AlertIndicator />
                         <Box>
                           <Text fontWeight="semibold">Tax Efficiency Tip</Text>
                           <Text fontSize="sm">
                             Hold positions for 365+ days to qualify for long-term capital gains tax rates (typically 0%, 15%, or 20% vs ordinary income rates for short-term).
                           </Text>
                         </Box>
-                      </Alert>
+                      </AlertRoot>
                     </VStack>
                   </CardBody>
-                </Card>
+                </CardRoot>
               </SimpleGrid>
 
               {/* Tax Planning */}
-              <VStack spacing={6}>
-                <Card bg={cardBg} borderColor={borderColor} w="full">
+              <VStack gap={6}>
+                <CardRoot bg={cardBg} borderColor={borderColor} borderWidth="1px" borderRadius="xl" w="full">
                   <CardHeader>
                     <Heading size="md">Tax Planning Summary</Heading>
                   </CardHeader>
                   <CardBody>
-                    <SimpleGrid columns={{ base: 1, md: 2 }} spacing={6}>
-                      <VStack align="stretch" spacing={4}>
+                    <SimpleGrid columns={{ base: 1, md: 2 }} gap={6}>
+                      <VStack align="stretch" gap={4}>
                         <Text fontWeight="semibold">Long-term Capital Gains/Losses</Text>
-                        <Stat>
-                          <StatNumber color={(summary?.long_term_value || 0) >= 0 ? 'green.500' : 'red.500'}>
+                        <StatRoot>
+                          <StatValueText color={(summary?.long_term_value || 0) >= 0 ? 'green.500' : 'red.500'}>
                             {(summary?.long_term_value || 0) >= 0 ? '+' : ''}${(summary?.long_term_value || 0).toLocaleString('en-US', { minimumFractionDigits: 0, maximumFractionDigits: 0 })}
-                          </StatNumber>
+                          </StatValueText>
                           <StatHelpText>If realized today</StatHelpText>
-                        </Stat>
+                        </StatRoot>
 
                         <Text fontWeight="semibold">Short-term Capital Gains/Losses</Text>
-                        <Stat>
-                          <StatNumber color={(summary?.short_term_value || 0) >= 0 ? 'green.500' : 'red.500'}>
+                        <StatRoot>
+                          <StatValueText color={(summary?.short_term_value || 0) >= 0 ? 'green.500' : 'red.500'}>
                             {(summary?.short_term_value || 0) >= 0 ? '+' : ''}${(summary?.short_term_value || 0).toLocaleString('en-US', { minimumFractionDigits: 0, maximumFractionDigits: 0 })}
-                          </StatNumber>
+                          </StatValueText>
                           <StatHelpText>If realized today</StatHelpText>
-                        </Stat>
+                        </StatRoot>
                       </VStack>
 
-                      <VStack align="stretch" spacing={4}>
-                        <Alert status="warning" variant="left-accent">
-                          <AlertIcon />
+                      <VStack align="stretch" gap={4}>
+                        <AlertRoot status="warning" borderRadius="md">
+                          <AlertIndicator />
                           <Box>
                             <Text fontWeight="semibold">Wash Sale Risk</Text>
                             <Text fontSize="sm">
@@ -533,26 +539,26 @@ const TaxLots: React.FC = () => {
                               Avoid repurchasing within 30 days of realizing losses.
                             </Text>
                           </Box>
-                        </Alert>
+                        </AlertRoot>
 
-                        <Alert status="info" variant="left-accent">
-                          <AlertIcon />
+                        <AlertRoot status="info" borderRadius="md">
+                          <AlertIndicator />
                           <Box>
                             <Text fontWeight="semibold">Tax Loss Harvesting</Text>
                             <Text fontSize="sm">
                               Consider realizing losses to offset gains. Current unrealized losses can offset up to $3,000 of ordinary income annually.
                             </Text>
                           </Box>
-                        </Alert>
+                        </AlertRoot>
                       </VStack>
                     </SimpleGrid>
                   </CardBody>
-                </Card>
+                </CardRoot>
               </VStack>
 
               {/* Charts & Visualization */}
-              <SimpleGrid columns={{ base: 1, lg: 2 }} spacing={6}>
-                <Card bg={cardBg} borderColor={borderColor}>
+              <SimpleGrid columns={{ base: 1, lg: 2 }} gap={6}>
+                <CardRoot bg={cardBg} borderColor={borderColor} borderWidth="1px" borderRadius="xl">
                   <CardHeader>
                     <Heading size="md">Gain/Loss Distribution</Heading>
                   </CardHeader>
@@ -569,27 +575,20 @@ const TaxLots: React.FC = () => {
                       </BarChart>
                     </ResponsiveContainer>
                   </CardBody>
-                </Card>
+                </CardRoot>
 
-                <Card bg={cardBg} borderColor={borderColor}>
+                <CardRoot bg={cardBg} borderColor={borderColor} borderWidth="1px" borderRadius="xl">
                   <CardHeader>
                     <Heading size="md">Portfolio Value by Holding Period</Heading>
                   </CardHeader>
                   <CardBody>
-                    <ResponsiveContainer width="100%" height={300}>
-                      {/* AreaChart is not imported, using a placeholder or removing if not needed */}
-                      {/* <AreaChart data={holdingPeriodData}>
-                        <CartesianGrid strokeDasharray="3 3" />
-                        <XAxis dataKey="period" />
-                        <YAxis />
-                        <RechartsTooltip
-                          formatter={(value) => [`$${Number(value).toLocaleString()}`, 'Value']}
-                        />
-                        <Area type="monotone" dataKey="value" stroke="#4299E1" fill="#4299E1" fillOpacity={0.6} />
-                      </AreaChart> */}
-                    </ResponsiveContainer>
+                    <Box p={6}>
+                      <Text color="gray.500" fontSize="sm">
+                        Portfolio value-by-holding-period visualization coming soon.
+                      </Text>
+                    </Box>
                   </CardBody>
-                </Card>
+                </CardRoot>
               </SimpleGrid>
             </VStack>
           )}

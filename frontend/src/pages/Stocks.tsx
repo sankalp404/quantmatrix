@@ -7,28 +7,27 @@ import {
   Heading,
   Input,
   InputGroup,
-  InputLeftElement,
+  InputElement,
   Select,
   Grid,
   GridItem,
   Card,
   CardBody,
   Badge,
-  Stat,
+  StatRoot,
   StatLabel,
-  StatNumber,
   StatHelpText,
-  StatArrow,
-  useColorModeValue,
+  StatValueText,
+  StatUpIndicator,
+  StatDownIndicator,
   useBreakpointValue,
-  Alert,
-  AlertIcon,
+  AlertRoot,
+  AlertIndicator,
   Button,
   Collapse,
   useDisclosure,
   IconButton,
   Flex,
-  useToast
 } from '@chakra-ui/react';
 import { FiSearch, FiFilter, FiTrendingUp, FiTrendingDown, FiX, FiExternalLink } from 'react-icons/fi';
 import { portfolioApi, handleApiError } from '../services/api';
@@ -37,6 +36,10 @@ import TradingViewChart from '../components/TradingViewChart';
 import ErrorBoundary from '../components/ErrorBoundary';
 import { HoldingsTableSkeleton, LoadingSpinner } from '../components/LoadingStates';
 import PageHeader from '../components/ui/PageHeader';
+import toast from 'react-hot-toast';
+
+// Chakra v3 migration shim: prefer dark values until we reintroduce color-mode properly.
+const useColorModeValue = <T,>(_light: T, dark: T) => dark;
 import EmptyState from '../components/ui/EmptyState';
 import { useAccountContext } from '../context/AccountContext';
 
@@ -255,20 +258,20 @@ const HoldingCard: React.FC<{
             </VStack>
           </HStack>
           <Grid templateColumns="repeat(3, 1fr)" gap={4}>
-            <Stat size="sm">
+            <StatRoot size="sm">
               <StatLabel fontSize="xs">Current Price</StatLabel>
-              <StatNumber fontSize="md">{holding.current_price.toLocaleString('en-US', { style: 'currency', currency: 'USD' })}</StatNumber>
-            </Stat>
-            <Stat size="sm">
+              <StatValueText fontSize="md">{holding.current_price.toLocaleString('en-US', { style: 'currency', currency: 'USD' })}</StatValueText>
+            </StatRoot>
+            <StatRoot size="sm">
               <StatLabel fontSize="xs">Avg Cost</StatLabel>
-              <StatNumber fontSize="md">{holding.average_cost.toLocaleString('en-US', { style: 'currency', currency: 'USD' })}</StatNumber>
-            </Stat>
-            <Stat size="sm">
+              <StatValueText fontSize="md">{holding.average_cost.toLocaleString('en-US', { style: 'currency', currency: 'USD' })}</StatValueText>
+            </StatRoot>
+            <StatRoot size="sm">
               <StatLabel fontSize="xs">Day P&L</StatLabel>
-              <StatNumber fontSize="md" color={dayProfitColor}>
+              <StatValueText fontSize="md" color={dayProfitColor}>
                 {holding.day_pnl.toLocaleString('en-US', { style: 'currency', currency: 'USD' })}
-              </StatNumber>
-            </Stat>
+              </StatValueText>
+            </StatRoot>
           </Grid>
           <Box>
             <Button
@@ -286,8 +289,8 @@ const HoldingCard: React.FC<{
             <Collapse in={isTaxLotsOpen} animateOpacity>
               <VStack spacing={3} mt={3} align="stretch">
                 {taxLotDiscrepancy?.hasDiscrepancy && (
-                  <Alert status="warning" size="sm" borderRadius="md">
-                    <AlertIcon />
+                  <AlertRoot status="warning" size="sm" borderRadius="md">
+                    <AlertIndicator />
                     <Box flex="1">
                       <Text fontSize="sm" fontWeight="bold">Tax Lot Discrepancy</Text>
                       <Text fontSize="xs">
@@ -296,7 +299,7 @@ const HoldingCard: React.FC<{
                         Difference: {taxLotDiscrepancy.difference.toFixed(2)}
                       </Text>
                     </Box>
-                  </Alert>
+                  </AlertRoot>
                 )}
                 {taxLotsError ? (
                   <Text fontSize="sm" color="red.500">{taxLotsError}</Text>
@@ -388,7 +391,6 @@ const Stocks: React.FC = () => {
 
   const bgColor = useColorModeValue('white', 'gray.800');
   const borderColor = useColorModeValue('gray.200', 'gray.600');
-  const toast = useToast();
   const isMobile = useBreakpointValue({ base: true, lg: false });
   const chartPosition = useBreakpointValue({ base: 'top', lg: 'side' });
 
@@ -405,12 +407,7 @@ const Stocks: React.FC = () => {
     setError(null);
     try {
       if (isRetry && retryCount > 0) {
-        toast({
-          title: 'Retrying...',
-          description: `Attempt ${retryCount + 1}`,
-          status: 'info',
-          duration: 2000,
-        });
+        toast(`Retrying… Attempt ${retryCount + 1}`);
       }
       const portfolioResult = await portfolioApi.getLive();
       setPortfolioData(portfolioResult.data);
@@ -428,13 +425,7 @@ const Stocks: React.FC = () => {
       console.error('Error fetching holdings data:', err);
       const errorMessage = handleApiError(err);
       setError(errorMessage);
-      toast({
-        title: 'Error Loading Stocks',
-        description: errorMessage,
-        status: 'error',
-        duration: 5000,
-        isClosable: true,
-      });
+      toast.error(errorMessage);
     } finally {
       setLoading(false);
     }
@@ -449,12 +440,7 @@ const Stocks: React.FC = () => {
         fetchHoldingsData(true);
       }, delay);
     } else {
-      toast({
-        title: 'Max Retries Reached',
-        description: 'Please check your connection and try again later.',
-        status: 'warning',
-        duration: 5000,
-      });
+      toast.error('Max retries reached. Please check your connection and try again later.');
     }
   };
 
@@ -491,8 +477,8 @@ const Stocks: React.FC = () => {
               Error loading stocks
             </Text>
           </Box>
-          <Alert status="error" borderRadius="md">
-            <AlertIcon />
+          <AlertRoot status="error" borderRadius="md">
+            <AlertIndicator />
             <Box flex="1">
               <Text fontWeight="bold">Failed to load stocks</Text>
               <Text fontSize="sm">{error}</Text>
@@ -507,7 +493,7 @@ const Stocks: React.FC = () => {
                 </Button>
               )}
             </VStack>
-          </Alert>
+          </AlertRoot>
         </VStack>
       </Box>
     );
@@ -609,10 +595,13 @@ const Stocks: React.FC = () => {
                   {summaryBar}
                   <HStack spacing={4} wrap="wrap">
                     <Box flex="1" minW="200px">
-                      <InputGroup>
-                        <InputLeftElement pointerEvents="none">
-                          <FiSearch color="gray.300" />
-                        </InputLeftElement>
+                      <InputGroup
+                        startElement={
+                          <InputElement pointerEvents="none">
+                            <FiSearch color="gray.300" />
+                          </InputElement>
+                        }
+                      >
                         <Input
                           placeholder="Search stocks..."
                           value={searchTerm}

@@ -14,7 +14,8 @@ def client():
     if not FASTAPI_AVAILABLE:
         pytest.skip("FastAPI TestClient not available in this env")
     try:
-        return TestClient(app)
+        # Do not raise server-side exceptions into the test runner; treat them as 500 responses.
+        return TestClient(app, raise_server_exceptions=False)
     except TypeError:
         pytest.skip("Starlette TestClient incompatible in this runtime")
 

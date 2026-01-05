@@ -8,25 +8,22 @@ import {
   HStack,
   Spinner,
   Text,
-  useColorModeValue,
-  Card,
+  CardRoot,
   CardBody,
   Grid,
   GridItem,
   Flex,
-  Progress
+  Progress,
 } from '@chakra-ui/react';
 
 // Portfolio summary loading skeleton
 export const PortfolioSummarySkeleton: React.FC = () => {
-  const cardBg = useColorModeValue('white', 'gray.800');
-
   return (
     <Grid templateColumns="repeat(auto-fit, minmax(250px, 1fr))" gap={6}>
       {[1, 2, 3, 4].map((i) => (
-        <Card key={i} bg={cardBg}>
+        <CardRoot key={i} bg="bg.card" borderWidth="1px" borderColor="border.subtle" borderRadius="xl">
           <CardBody>
-            <VStack align="start" spacing={3}>
+            <VStack align="start" gap={3}>
               <Skeleton height="20px" width="60%" />
               <Skeleton height="32px" width="80%" />
               <HStack>
@@ -35,7 +32,7 @@ export const PortfolioSummarySkeleton: React.FC = () => {
               </HStack>
             </VStack>
           </CardBody>
-        </Card>
+        </CardRoot>
       ))}
     </Grid>
   );
@@ -43,12 +40,10 @@ export const PortfolioSummarySkeleton: React.FC = () => {
 
 // Holdings table loading skeleton
 export const HoldingsTableSkeleton: React.FC<{ rows?: number }> = ({ rows = 10 }) => {
-  const cardBg = useColorModeValue('white', 'gray.800');
-
   return (
-    <Card bg={cardBg}>
+    <CardRoot bg="bg.card" borderWidth="1px" borderColor="border.subtle" borderRadius="xl">
       <CardBody>
-        <VStack spacing={4} align="stretch">
+        <VStack gap={4} align="stretch">
           {/* Header skeleton */}
           <HStack justify="space-between">
             <Skeleton height="24px" width="150px" />
@@ -56,7 +51,7 @@ export const HoldingsTableSkeleton: React.FC<{ rows?: number }> = ({ rows = 10 }
           </HStack>
 
           {/* Table header */}
-          <HStack spacing={4} py={2}>
+          <HStack gap={4} py={2}>
             <Skeleton height="16px" width="80px" />
             <Skeleton height="16px" width="60px" />
             <Skeleton height="16px" width="80px" />
@@ -66,9 +61,9 @@ export const HoldingsTableSkeleton: React.FC<{ rows?: number }> = ({ rows = 10 }
 
           {/* Table rows */}
           {Array.from({ length: rows }).map((_, i) => (
-            <HStack key={i} spacing={4} py={3} borderBottom="1px" borderColor="gray.100">
+            <HStack key={i} gap={4} py={3} borderBottom="1px" borderColor="border.subtle">
               <SkeletonCircle size="8" />
-              <VStack align="start" flex={1} spacing={1}>
+              <VStack align="start" flex={1} gap={1}>
                 <Skeleton height="16px" width="60px" />
                 <Skeleton height="12px" width="40px" />
               </VStack>
@@ -79,20 +74,18 @@ export const HoldingsTableSkeleton: React.FC<{ rows?: number }> = ({ rows = 10 }
           ))}
         </VStack>
       </CardBody>
-    </Card>
+    </CardRoot>
   );
 };
 
 // Transaction list loading skeleton
 export const TransactionsSkeleton: React.FC<{ rows?: number }> = ({ rows = 15 }) => {
-  const cardBg = useColorModeValue('white', 'gray.800');
-
   return (
-    <Card bg={cardBg}>
+    <CardRoot bg="bg.card" borderWidth="1px" borderColor="border.subtle" borderRadius="xl">
       <CardBody>
-        <VStack spacing={3} align="stretch">
+        <VStack gap={3} align="stretch">
           {/* Filter controls skeleton */}
-          <HStack spacing={4} mb={4}>
+          <HStack gap={4} mb={4}>
             <Skeleton height="32px" width="150px" />
             <Skeleton height="32px" width="120px" />
             <Skeleton height="32px" width="100px" />
@@ -100,15 +93,15 @@ export const TransactionsSkeleton: React.FC<{ rows?: number }> = ({ rows = 15 })
 
           {/* Transaction rows */}
           {Array.from({ length: rows }).map((_, i) => (
-            <HStack key={i} justify="space-between" p={3} borderRadius="md" border="1px" borderColor="gray.100">
-              <HStack spacing={3}>
+            <HStack key={i} justify="space-between" p={3} borderRadius="lg" border="1px" borderColor="border.subtle">
+              <HStack gap={3}>
                 <SkeletonCircle size="6" />
-                <VStack align="start" spacing={1}>
+                <VStack align="start" gap={1}>
                   <Skeleton height="16px" width="80px" />
                   <Skeleton height="12px" width="120px" />
                 </VStack>
               </HStack>
-              <VStack align="end" spacing={1}>
+              <VStack align="end" gap={1}>
                 <Skeleton height="16px" width="60px" />
                 <Skeleton height="12px" width="40px" />
               </VStack>
@@ -116,33 +109,31 @@ export const TransactionsSkeleton: React.FC<{ rows?: number }> = ({ rows = 15 })
           ))}
         </VStack>
       </CardBody>
-    </Card>
+    </CardRoot>
   );
 };
 
 // Options portfolio loading skeleton
 export const OptionsPortfolioSkeleton: React.FC = () => {
-  const cardBg = useColorModeValue('white', 'gray.800');
-
   return (
-    <VStack spacing={6} align="stretch">
+    <VStack gap={6} align="stretch">
       {/* Summary cards */}
       <PortfolioSummarySkeleton />
 
       {/* Options positions */}
-      <Card bg={cardBg}>
+      <CardRoot bg="bg.card" borderWidth="1px" borderColor="border.subtle" borderRadius="xl">
         <CardBody>
-          <VStack spacing={4} align="stretch">
+          <VStack gap={4} align="stretch">
             <Skeleton height="24px" width="200px" />
 
             {[1, 2, 3, 4, 5].map((i) => (
-              <Box key={i} p={4} borderRadius="md" border="1px" borderColor="gray.100">
+              <Box key={i} p={4} borderRadius="md" borderWidth="1px" borderColor="border.subtle" bg="bg.panel">
                 <HStack justify="space-between" mb={3}>
-                  <VStack align="start" spacing={1}>
+                  <VStack align="start" gap={1}>
                     <Skeleton height="18px" width="100px" />
                     <Skeleton height="14px" width="150px" />
                   </VStack>
-                  <VStack align="end" spacing={1}>
+                  <VStack align="end" gap={1}>
                     <Skeleton height="16px" width="80px" />
                     <Skeleton height="14px" width="60px" />
                   </VStack>
@@ -158,71 +149,69 @@ export const OptionsPortfolioSkeleton: React.FC = () => {
             ))}
           </VStack>
         </CardBody>
-      </Card>
+      </CardRoot>
     </VStack>
   );
 };
 
 // Tax lots loading skeleton
 export const TaxLotsSkeleton: React.FC = () => {
-  const cardBg = useColorModeValue('white', 'gray.800');
-
   return (
-    <VStack spacing={6} align="stretch">
+    <VStack gap={6} align="stretch">
       {/* Summary */}
-      <Card bg={cardBg}>
+      <CardRoot bg="bg.card" borderWidth="1px" borderColor="border.subtle" borderRadius="xl">
         <CardBody>
           <HStack justify="space-between">
-            <VStack align="start" spacing={2}>
+            <VStack align="start" gap={2}>
               <Skeleton height="20px" width="120px" />
               <Skeleton height="32px" width="100px" />
             </VStack>
-            <VStack align="end" spacing={2}>
+            <VStack align="end" gap={2}>
               <Skeleton height="20px" width="140px" />
               <Skeleton height="32px" width="120px" />
             </VStack>
           </HStack>
         </CardBody>
-      </Card>
+      </CardRoot>
 
       {/* Tax lots list */}
-      <Card bg={cardBg}>
+      <CardRoot bg="bg.card" borderWidth="1px" borderColor="border.subtle" borderRadius="xl">
         <CardBody>
-          <VStack spacing={4} align="stretch">
+          <VStack gap={4} align="stretch">
             {[1, 2, 3, 4, 5, 6].map((i) => (
-              <Box key={i} p={4} borderRadius="md" border="1px" borderColor="gray.100">
+              <Box key={i} p={4} borderRadius="md" borderWidth="1px" borderColor="border.subtle" bg="bg.panel">
                 <HStack justify="space-between" mb={3}>
-                  <HStack spacing={3}>
+                  <HStack gap={3}>
                     <SkeletonCircle size="10" />
-                    <VStack align="start" spacing={1}>
+                    <VStack align="start" gap={1}>
                       <Skeleton height="18px" width="60px" />
                       <Skeleton height="14px" width="80px" />
                     </VStack>
                   </HStack>
-                  <VStack align="end" spacing={1}>
+                  <VStack align="end" gap={1}>
                     <Skeleton height="16px" width="80px" />
                     <Skeleton height="14px" width="60px" />
                   </VStack>
                 </HStack>
 
                 <Grid templateColumns="repeat(5, 1fr)" gap={4}>
-                  <VStack spacing={1}>
+                  <VStack gap={1}>
                     <Skeleton height="12px" width="40px" />
                     <Skeleton height="16px" width="60px" />
                   </VStack>
-                  <VStack spacing={1}>
+                  <VStack gap={1}>
                     <Skeleton height="12px" width="40px" />
                     <Skeleton height="16px" width="60px" />
                   </VStack>
-                  <VStack spacing={1}>
+                  <VStack gap={1}>
                     <Skeleton height="12px" width="40px" />
                     <Skeleton height="16px" width="60px" />
                   </VStack>
-                  <VStack spacing={1}>
+                  <VStack gap={1}>
                     <Skeleton height="12px" width="40px" />
                     <Skeleton height="16px" width="60px" />
                   </VStack>
-                  <VStack spacing={1}>
+                  <VStack gap={1}>
                     <Skeleton height="12px" width="40px" />
                     <Skeleton height="16px" width="60px" />
                   </VStack>
@@ -231,7 +220,7 @@ export const TaxLotsSkeleton: React.FC = () => {
             ))}
           </VStack>
         </CardBody>
-      </Card>
+      </CardRoot>
     </VStack>
   );
 };
@@ -245,15 +234,15 @@ export const LoadingSpinner: React.FC<{
 }> = ({ message = 'Loading...', size = 'lg', showProgress = false, progress = 0 }) => {
   return (
     <Flex direction="column" align="center" justify="center" py={12} px={6} minH="200px">
-      <VStack spacing={4}>
-        <Spinner size={size} color="blue.500" thickness="3px" speed="0.8s" />
-        <Text fontSize="lg" color="gray.600" textAlign="center">
+      <VStack gap={4}>
+        <Spinner size={size} color="brand.500" thickness="3px" speed="0.8s" />
+        <Text fontSize="lg" color="fg.muted" textAlign="center">
           {message}
         </Text>
         {showProgress && (
           <Box w="200px">
             <Progress value={progress} colorScheme="blue" size="sm" borderRadius="full" />
-            <Text fontSize="sm" color="gray.500" textAlign="center" mt={1}>
+            <Text fontSize="sm" color="fg.muted" textAlign="center" mt={1}>
               {progress}%
             </Text>
           </Box>
@@ -268,8 +257,6 @@ export const LoadingOverlay: React.FC<{
   message?: string;
   isVisible: boolean;
 }> = ({ message = 'Loading...', isVisible }) => {
-  const overlayBg = useColorModeValue('rgba(255, 255, 255, 0.9)', 'rgba(26, 32, 44, 0.9)');
-
   if (!isVisible) return null;
 
   return (
@@ -279,7 +266,8 @@ export const LoadingOverlay: React.FC<{
       left={0}
       right={0}
       bottom={0}
-      bg={overlayBg}
+      bg="bg.canvas"
+      opacity={0.92}
       display="flex"
       alignItems="center"
       justifyContent="center"

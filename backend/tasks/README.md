@@ -49,4 +49,7 @@ Notes & Troubleshooting
 -----------------------
 - Providers: prefer FMP/TwelveData; fallback yfinance. Cache in Redis; compute locally from `price_data`.
 - Retention: ~270 daily bars support SMA200/252d windows; increase if needed.
-- Worker offline or tasks pending: check `docker compose logs celery_worker`, verify includes, restart worker/beat; requeue tasks.
+- Worker offline or tasks pending: check logs (Docker dev):
+  - `make logs` (recommended), or
+  - `docker compose --env-file infra/env.dev -f infra/compose.dev.yaml logs celery_worker`
+  Then verify includes, restart worker/beat; requeue tasks.

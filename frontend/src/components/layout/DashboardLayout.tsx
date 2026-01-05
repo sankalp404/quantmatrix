@@ -6,17 +6,17 @@ import {
   VStack,
   IconButton,
   Text,
-  useColorModeValue,
-  useColorMode,
-  Avatar,
   Badge,
-  Select,
-  Menu,
-  MenuButton,
-  MenuList,
+  DialogRoot,
+  DialogBackdrop,
+  DialogPositioner,
+  DialogContent,
+  MenuRoot,
+  MenuTrigger,
+  MenuContent,
   MenuItem,
   Button,
-  useBreakpointValue,
+  useMediaQuery,
 } from '@chakra-ui/react';
 import { Outlet, useLocation, useNavigate } from 'react-router-dom';
 import {
@@ -72,11 +72,11 @@ interface NavItemProps {
 }
 
 const NavItem: React.FC<NavItemProps> = ({ icon: Icon, label, isActive, onClick, badge, showLabel = true }) => {
-  const bg = useColorModeValue('gray.100', 'rgba(255,255,255,0.05)');
-  const activeBg = useColorModeValue('rgba(59,130,246,0.15)', 'brand.500');
-  const activeColor = useColorModeValue('brand.600', 'white');
-  const color = useColorModeValue('gray.600', 'gray.300');
-  const hoverColor = useColorModeValue('gray.900', 'white');
+  const bg = 'gray.800';
+  const activeBg = 'gray.700';
+  const activeColor = 'white';
+  const color = 'gray.300';
+  const hoverColor = 'white';
 
   return (
     <Flex
@@ -128,15 +128,15 @@ const NavItem: React.FC<NavItemProps> = ({ icon: Icon, label, isActive, onClick,
 const DashboardLayout: React.FC = () => {
   const location = useLocation();
   const navigate = useNavigate();
-  const sidebarBg = useColorModeValue('white', '#05070F');
-  const headerBg = useColorModeValue('white', '#0B1424');
-  const borderColor = useColorModeValue('gray.200', 'rgba(255,255,255,0.08)');
-  const appBg = useColorModeValue('surface.base', '#0F172A');
-  const { colorMode, toggleColorMode } = useColorMode();
+  const sidebarBg = 'gray.900';
+  const headerBg = 'gray.950';
+  const borderColor = 'gray.800';
+  const appBg = 'gray.950';
   const { accounts, loading: accountsLoading, selected, setSelected } = useAccountContext();
   const { user, logout } = useAuth();
-  const isDesktop = useBreakpointValue({ base: false, lg: true });
   const [isSidebarOpen, setIsSidebarOpen] = useState<boolean>(true);
+  const [isMobileNavOpen, setIsMobileNavOpen] = useState(false);
+  const [isDesktop] = useMediaQuery(['(min-width: 48em)']);
   const [totals, setTotals] = useState<{ value: number; dayPnL: number; positions: number }>({ value: 0, dayPnL: 0, positions: 0 });
   const [headerStats, setHeaderStats] = useState<{ label: string; sublabel: string }>({ label: 'Combined Portfolio', sublabel: '' });
 
@@ -161,12 +161,6 @@ const DashboardLayout: React.FC = () => {
     load();
   }, []);
 
-  useEffect(() => {
-    if (typeof isDesktop === 'boolean') {
-      setIsSidebarOpen(isDesktop);
-    }
-  }, [isDesktop]);
-
   const formatCurrency = (amount: number) =>
     new Intl.NumberFormat('en-US', { style: 'currency', currency: 'USD', maximumFractionDigits: 0 }).format(amount || 0);
   const formatSignedCurrency = (amount: number) => {
@@ -176,94 +170,151 @@ const DashboardLayout: React.FC = () => {
 
   const sidebarWidth = isSidebarOpen ? 64 : 16;
 
+  const renderNav = (opts: { showLabel: boolean; px: any }) => (
+    <VStack gap={1} px={opts.px} py={4} align="stretch">
+      {navigationItems.map((item) => (
+        <NavItem
+          key={item.path}
+          icon={item.icon}
+          label={item.label}
+          path={item.path}
+          isActive={location.pathname === item.path}
+          onClick={() => {
+            navigate(item.path);
+            setIsMobileNavOpen(false);
+          }}
+          badge={item.label === 'Notifications' ? 5 : undefined}
+          showLabel={opts.showLabel}
+        />
+      ))}
+    </VStack>
+  );
+
   return (
-    <Flex h="100vh" bg={appBg}>
-      {/* Sidebar */}
-      <Box
-        w={sidebarWidth}
-        bg={sidebarBg}
-        borderRight="1px"
-        borderColor={borderColor}
-        pos="fixed"
-        h="full"
-        overflowY="auto"
-        transition="width 0.2s ease"
-      >
-        <VStack spacing={0} align="stretch">
-          {/* Logo/Brand */}
-          <Flex align="center" px={isSidebarOpen ? 6 : 3} py={4} borderBottom="1px" borderColor={borderColor}>
-            <Box w={8} h={8} bg="brand.500" borderRadius="lg" display="flex" alignItems="center" justifyContent="center" mr={isSidebarOpen ? 3 : 0}>
-              <Text color="white" fontWeight="bold" fontSize="sm">
-                Q
-              </Text>
-            </Box>
-            {isSidebarOpen && (
-              <Text fontSize="lg" fontWeight="bold" color="brand.500">
-                QuantMatrix
-              </Text>
-            )}
-          </Flex>
-
-          {isSidebarOpen && <AppDivider />}
-
-          {/* Navigation */}
-          <VStack spacing={1} px={isSidebarOpen ? 4 : 2} py={4} align="stretch">
-            {navigationItems.map((item) => (
-              <NavItem
-                key={item.path}
-                icon={item.icon}
-                label={item.label}
-                path={item.path}
-                isActive={location.pathname === item.path}
-                onClick={() => navigate(item.path)}
-                badge={item.label === 'Notifications' ? 5 : undefined}
-                showLabel={isSidebarOpen}
-              />
-            ))}
-          </VStack>
-
-          {/* Quick Stats */}
-          {isSidebarOpen && (
-            <Box px={4} py={4} mt="auto">
-              <VStack spacing={2} align="stretch">
-                <HStack justify="space-between">
-                  <Text fontSize="xs" fontWeight="semibold" color="gray.500">
-                    {headerStats.label}
-                  </Text>
-                  <Text fontSize="xs" fontWeight="semibold" color="gray.200">
-                    {headerStats.sublabel || formatSignedCurrency(totals.dayPnL)}
-                  </Text>
-                </HStack>
-                <AppDivider />
-                <Text fontSize="xs" fontWeight="semibold" color="gray.500" textTransform="uppercase">
-                  Quick Stats
+    <Flex h="100vh" w="100vw" bg={appBg} overflow="hidden">
+      {/* Desktop rail */}
+      {isDesktop ? (
+        <Box
+          w={sidebarWidth}
+          flexShrink={0}
+          bg={sidebarBg}
+          borderRight="1px"
+          borderColor={borderColor}
+          h="100vh"
+          overflowY="auto"
+          transition="width 0.2s ease"
+        >
+          <VStack gap={0} align="stretch">
+            {/* Logo/Brand */}
+            <Flex align="center" px={isSidebarOpen ? 6 : 3} py={4} borderBottom="1px" borderColor={borderColor}>
+              <Box
+                w={8}
+                h={8}
+                bg="brand.500"
+                borderRadius="lg"
+                display="flex"
+                alignItems="center"
+                justifyContent="center"
+                mr={isSidebarOpen ? 3 : 0}
+              >
+                <Text color="white" fontWeight="bold" fontSize="sm">
+                  Q
                 </Text>
-                <HStack justify="space-between">
-                  <Text fontSize="xs" color="gray.500">Day P&L</Text>
-                  <Text fontSize="xs" fontWeight="semibold" color={totals.dayPnL >= 0 ? 'green.400' : 'red.400'}>
-                    {formatSignedCurrency(totals.dayPnL)}
+              </Box>
+              {isSidebarOpen ? (
+                <Text fontSize="lg" fontWeight="bold" color="brand.500">
+                  QuantMatrix
+                </Text>
+              ) : null}
+            </Flex>
+
+            {isSidebarOpen ? <AppDivider /> : null}
+
+            {/* Navigation */}
+            {renderNav({ showLabel: isSidebarOpen, px: isSidebarOpen ? 4 : 2 })}
+
+            {/* Quick Stats */}
+            {isSidebarOpen && (
+              <Box px={4} py={4} mt="auto">
+                <VStack gap={2} align="stretch">
+                  <HStack justify="space-between">
+                    <Text fontSize="xs" fontWeight="semibold" color="gray.500">
+                      {headerStats.label}
+                    </Text>
+                    <Text fontSize="xs" fontWeight="semibold" color="gray.200">
+                      {headerStats.sublabel || formatSignedCurrency(totals.dayPnL)}
+                    </Text>
+                  </HStack>
+                  <AppDivider />
+                  <Text fontSize="xs" fontWeight="semibold" color="gray.500" textTransform="uppercase">
+                    Quick Stats
                   </Text>
-                </HStack>
-                <HStack justify="space-between">
-                  <Text fontSize="xs" color="gray.500">Positions</Text>
-                  <Text fontSize="xs" fontWeight="semibold">
-                    {totals.positions}
+                  <HStack justify="space-between">
+                    <Text fontSize="xs" color="gray.500">Day P&L</Text>
+                    <Text fontSize="xs" fontWeight="semibold" color={totals.dayPnL >= 0 ? 'green.400' : 'red.400'}>
+                      {formatSignedCurrency(totals.dayPnL)}
+                    </Text>
+                  </HStack>
+                  <HStack justify="space-between">
+                    <Text fontSize="xs" color="gray.500">Positions</Text>
+                    <Text fontSize="xs" fontWeight="semibold">
+                      {totals.positions}
+                    </Text>
+                  </HStack>
+                  <HStack justify="space-between">
+                    <Text fontSize="xs" color="gray.500">Margin Used</Text>
+                    <Text fontSize="xs" fontWeight="semibold" color="orange.400">
+                      23%
+                    </Text>
+                  </HStack>
+                </VStack>
+              </Box>
+            )}
+          </VStack>
+        </Box>
+      ) : null}
+
+      {/* Mobile overlay nav */}
+      {!isDesktop ? (
+        <DialogRoot open={isMobileNavOpen} onOpenChange={(d) => setIsMobileNavOpen(Boolean(d.open))}>
+          <DialogBackdrop />
+          <DialogPositioner inset={0} justifyContent="flex-start" alignItems="stretch" p={0} m={0}>
+            <DialogContent
+              position="fixed"
+              top={0}
+              left={0}
+              w="280px"
+              maxW="80vw"
+              h="100vh"
+              borderRadius={0}
+              bg={sidebarBg}
+              borderRight="1px"
+              borderColor={borderColor}
+              m={0}
+            >
+              <VStack gap={0} align="stretch" h="full">
+                <Flex align="center" px={6} py={4} borderBottom="1px" borderColor={borderColor}>
+                  <Box w={8} h={8} bg="brand.500" borderRadius="lg" display="flex" alignItems="center" justifyContent="center" mr={3}>
+                    <Text color="white" fontWeight="bold" fontSize="sm">
+                      Q
+                    </Text>
+                  </Box>
+                  <Text fontSize="lg" fontWeight="bold" color="brand.500">
+                    QuantMatrix
                   </Text>
-                </HStack>
-                <HStack justify="space-between">
-                  <Text fontSize="xs" color="gray.500">Margin Used</Text>
-                  <Text fontSize="xs" fontWeight="semibold" color="orange.400">
-                    23%
-                  </Text>
-                </HStack>
+                </Flex>
+                <AppDivider />
+                <Box flex={1} overflowY="auto">
+                  {renderNav({ showLabel: true, px: 4 })}
+                </Box>
               </VStack>
-            </Box>
-          )}
-        </VStack>
-      </Box>
+            </DialogContent>
+          </DialogPositioner>
+        </DialogRoot>
+      ) : null}
 
       {/* Main Content */}
-      <Box flex={1} ml={sidebarWidth} transition="margin-left 0.2s ease">
+      <Box flex={1} minW={0} overflowX="hidden">
         {/* Header */}
         <Flex
           h={16}
@@ -274,25 +325,37 @@ const DashboardLayout: React.FC = () => {
           borderBottom="1px"
           borderColor={borderColor}
         >
-          <HStack spacing={4}>
+          <HStack gap={4}>
             <IconButton
               size="md"
               variant="ghost"
               aria-label="Menu"
-              icon={<FiMenu />}
               position="relative"
               zIndex={2}
-              onClick={() => setIsSidebarOpen((v) => !v)}
-            />
+              onClick={() => {
+                if (isDesktop) {
+                  setIsSidebarOpen((v) => !v);
+                } else {
+                  setIsMobileNavOpen(true);
+                }
+              }}
+            >
+              <FiMenu />
+            </IconButton>
             {/* Global Account Selection */}
-            <Select
-              size="sm"
-              w="260px"
+            <select
               value={selected}
               onChange={(e) => setSelected(e.target.value)}
-              bg={useColorModeValue('white', 'gray.700')}
-              borderColor={borderColor}
-              isDisabled={accountsLoading}
+              disabled={accountsLoading}
+              style={{
+                width: 260,
+                fontSize: 12,
+                padding: '6px 8px',
+                borderRadius: 8,
+                border: '1px solid #2d3748',
+                background: '#111827',
+                color: '#e5e7eb',
+              }}
             >
               <option value="all">All Accounts</option>
               <option value="taxable">Taxable</option>
@@ -302,25 +365,13 @@ const DashboardLayout: React.FC = () => {
                   {a.account_name || a.account_number}
                 </option>
               ))}
-            </Select>
+            </select>
             {/* REMOVED: Redundant page name display */}
           </HStack>
 
-          <HStack spacing={4}>
-            <IconButton
-              size="md"
-              variant="ghost"
-              aria-label="Toggle color mode"
-              icon={colorMode === 'light' ? <FiMoon /> : <FiSun />}
-              onClick={toggleColorMode}
-            />
-            <IconButton
-              size="md"
-              variant="ghost"
-              aria-label="Notifications"
-              icon={<FiBell />}
-              position="relative"
-            >
+          <HStack gap={4}>
+            <IconButton size="md" variant="ghost" aria-label="Notifications" position="relative">
+              <FiBell />
               <Badge
                 position="absolute"
                 top="6px"
@@ -331,25 +382,31 @@ const DashboardLayout: React.FC = () => {
                 h={2}
               />
             </IconButton>
-            <Menu>
-              <MenuButton as={Button} size="sm" variant="ghost" rightIcon={<FiMenu />}>
-                <HStack spacing={2}>
-                  <Avatar size="sm" name={user?.username || 'User'} bg="brand.500" />
-                  <Text fontSize="sm">{user?.username || 'Account'}</Text>
-                </HStack>
-              </MenuButton>
-              <MenuList>
-                <MenuItem onClick={() => navigate('/settings')}>Account Settings</MenuItem>
-                <MenuItem onClick={() => navigate('/portfolio')}>Portfolio</MenuItem>
-                <MenuItem onClick={() => navigate('/workspace')}>Workspace</MenuItem>
-                <MenuItem onClick={() => { logout(); navigate('/login'); }}>Logout</MenuItem>
-              </MenuList>
-            </Menu>
+            <MenuRoot>
+              <MenuTrigger asChild>
+                <Button size="sm" variant="ghost">
+                  <HStack gap={2}>
+                    <Box w={8} h={8} borderRadius="full" bg="brand.500" display="flex" alignItems="center" justifyContent="center">
+                      <Text fontSize="xs" fontWeight="bold" color="white">
+                        {(user?.username || 'U').slice(0, 1).toUpperCase()}
+                      </Text>
+                    </Box>
+                    <Text fontSize="sm">{user?.username || 'Account'}</Text>
+                  </HStack>
+                </Button>
+              </MenuTrigger>
+              <MenuContent>
+                <MenuItem value="settings" onClick={() => navigate('/settings')}>Account Settings</MenuItem>
+                <MenuItem value="portfolio" onClick={() => navigate('/portfolio')}>Portfolio</MenuItem>
+                <MenuItem value="workspace" onClick={() => navigate('/workspace')}>Workspace</MenuItem>
+                <MenuItem value="logout" onClick={() => { logout(); navigate('/login'); }}>Logout</MenuItem>
+              </MenuContent>
+            </MenuRoot>
           </HStack>
         </Flex>
 
         {/* Page Content */}
-        <Box p={6} h="calc(100vh - 4rem)" overflowY="auto">
+        <Box p={6} h="calc(100vh - 4rem)" overflowY="auto" overflowX="hidden" minW={0}>
           <Outlet />
         </Box>
       </Box>

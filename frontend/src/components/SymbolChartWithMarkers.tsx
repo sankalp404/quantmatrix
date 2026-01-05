@@ -1,5 +1,6 @@
 import React, { useEffect, useRef } from 'react';
-import { Box, useColorModeValue } from '@chakra-ui/react';
+import { Box } from '@chakra-ui/react';
+import { useColorMode } from '../theme/colorMode';
 
 type Bar = { time: string; open: number; high: number; low: number; close: number; volume?: number };
 type TradeMarker = { time: string; price: number; type: 'BUY' | 'SELL'; label?: string };
@@ -39,9 +40,11 @@ const loadScript = (src: string) =>
 
 const SymbolChartWithMarkers: React.FC<Props> = ({ height = 520, bars, buys, sells, dividends, showTrades = true, showDividends = true, onHoverDaySec, onClickDaySec, showLine = false, avgPrice, pinnedDaySec, zoomYears }) => {
   const ref = useRef<HTMLDivElement>(null);
-  const bg = useColorModeValue('#ffffff', '#0f172a');
-  const text = useColorModeValue('#1f2937', '#e5e7eb');
-  const grid = useColorModeValue('#e5e7eb', '#1f2937');
+  const { colorMode } = useColorMode();
+  const isDark = colorMode === 'dark';
+  const bg = isDark ? '#070B12' : '#FFFFFF';
+  const text = isDark ? '#E5E7EB' : '#0B1220';
+  const grid = isDark ? '#1F2937' : '#E5E7EB';
 
   useEffect(() => {
     let chart: any;

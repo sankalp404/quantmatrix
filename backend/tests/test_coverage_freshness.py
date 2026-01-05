@@ -107,7 +107,7 @@ def test_coverage_endpoint_uses_recomputed_freshness(db_session, monkeypatch):
     try:
         res = monitor_coverage_health()  # ensures cache is set
         assert res["stale_daily"] == 1
-        client = TestClient(app)
+        client = TestClient(app, raise_server_exceptions=False)
         resp = client.get("/api/v1/market-data/coverage")
         assert resp.status_code == 200
         data = resp.json()

@@ -21,7 +21,7 @@ import {
   Tr,
   Th,
   Td,
-  TableContainer,
+  TableScrollArea,
   Progress,
   Stat,
   StatLabel,
@@ -47,9 +47,9 @@ import {
   AlertDescription,
   useToast,
   Tooltip,
-  Menu,
-  MenuButton,
-  MenuList,
+  MenuRoot,
+  MenuTrigger,
+  MenuContent,
   MenuItem,
   Switch,
   FormControl,
@@ -652,7 +652,7 @@ const MultiPortfolio: React.FC = () => {
         {/* Holdings Table */}
         <Card>
           <CardBody>
-            <TableContainer>
+            <TableScrollArea>
               <Table variant="simple" size="sm">
                 <Thead>
                   <Tr>
@@ -749,7 +749,7 @@ const MultiPortfolio: React.FC = () => {
                   ))}
                 </Tbody>
               </Table>
-            </TableContainer>
+            </TableScrollArea>
           </CardBody>
         </Card>
       </VStack>

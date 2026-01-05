@@ -28,7 +28,6 @@ import {
   Spinner,
   Alert,
   AlertIcon,
-  useColorModeValue,
   Flex,
   Icon,
   Switch,
@@ -42,10 +41,10 @@ import {
   Tr,
   Th,
   Td,
-  TableContainer,
-  Menu,
-  MenuButton,
-  MenuList,
+  TableScrollArea,
+  MenuRoot,
+  MenuTrigger,
+  MenuContent,
   MenuItem,
   IconButton,
   Modal,
@@ -199,8 +198,8 @@ const Strategies: React.FC = () => {
   const { isOpen, onOpen, onClose } = useDisclosure();
   const [editingStrategy, setEditingStrategy] = useState<any>(null);
 
-  const bgColor = useColorModeValue('white', 'gray.800');
-  const borderColor = useColorModeValue('gray.200', 'gray.600');
+  const bgColor = 'gray.800';
+  const borderColor = 'gray.600';
 
   const filteredStrategies = strategies.filter(strategy => {
     const matchesSearch = strategy.name.toLowerCase().includes(searchTerm.toLowerCase()) ||
@@ -272,15 +271,17 @@ const Strategies: React.FC = () => {
               <Button size="sm" colorScheme="blue" leftIcon={<FiPlus />}>
                 New Strategy
               </Button>
-              <Menu>
-                <MenuButton as={IconButton} icon={<FiSettings />} size="sm" variant="outline" />
-                <MenuList>
-                  <MenuItem>Global Settings</MenuItem>
-                  <MenuItem>Risk Management</MenuItem>
-                  <MenuItem>Backtesting Config</MenuItem>
-                  <MenuItem>Export Results</MenuItem>
-                </MenuList>
-              </Menu>
+              <MenuRoot>
+                <MenuTrigger asChild>
+                  <IconButton aria-label="Strategy menu" icon={<FiSettings />} size="sm" variant="outline" />
+                </MenuTrigger>
+                <MenuContent>
+                  <MenuItem value="global">Global Settings</MenuItem>
+                  <MenuItem value="risk">Risk Management</MenuItem>
+                  <MenuItem value="backtesting">Backtesting Config</MenuItem>
+                  <MenuItem value="export">Export Results</MenuItem>
+                </MenuContent>
+              </MenuRoot>
             </HStack>
           </HStack>
           <Text color="gray.600">
@@ -383,7 +384,7 @@ const Strategies: React.FC = () => {
                         border="1px solid"
                         borderColor={borderColor}
                         borderRadius="md"
-                        bg={strategy.id === selectedStrategy ? useColorModeValue('blue.50', 'blue.900') : bgColor}
+                        bg={strategy.id === selectedStrategy ? 'blue.900' : bgColor}
                         cursor="pointer"
                         onClick={() => setSelectedStrategy(strategy.id)}
                       >
@@ -612,7 +613,7 @@ const Strategies: React.FC = () => {
                 </CardHeader>
                 <CardBody>
                   {currentStrategy.recentSignals.length > 0 ? (
-                    <TableContainer>
+                    <TableScrollArea>
                       <Table variant="simple" size="sm">
                         <Thead>
                           <Tr>
@@ -660,7 +661,7 @@ const Strategies: React.FC = () => {
                           ))}
                         </Tbody>
                       </Table>
-                    </TableContainer>
+                    </TableScrollArea>
                   ) : (
                     <Alert status="info">
                       <AlertIcon />

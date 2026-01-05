@@ -2,12 +2,13 @@ import React, { useState, useEffect } from 'react';
 import {
   Box,
   Grid,
-  Stat,
+  StatRoot,
   StatLabel,
-  StatNumber,
   StatHelpText,
-  StatArrow,
-  Card,
+  StatValueText,
+  StatUpIndicator,
+  StatDownIndicator,
+  CardRoot,
   CardHeader,
   CardBody,
   Text,
@@ -17,22 +18,20 @@ import {
   SimpleGrid,
   Progress,
   IconButton,
-  useColorModeValue,
   Select,
   Spinner,
-  Alert,
-  AlertIcon,
+  AlertRoot,
+  AlertIndicator,
   AlertDescription,
-  useToast,
   Button,
   Flex,
-  TableContainer,
-  Table,
-  Thead,
-  Tbody,
-  Tr,
-  Th,
-  Td,
+  TableScrollArea,
+  TableRoot,
+  TableHeader,
+  TableBody,
+  TableRow,
+  TableColumnHeader,
+  TableCell,
   Heading,
 } from '@chakra-ui/react';
 import { FiTrendingUp, FiTrendingDown, FiDollarSign, FiPieChart, FiActivity, FiRefreshCw, FiFilter } from 'react-icons/fi';
@@ -41,6 +40,7 @@ import { portfolioApi, handleApiError } from '../services/api';
 import AccountFilterWrapper from '../components/AccountFilterWrapper';
 import { transformPortfolioToAccounts } from '../hooks/useAccountFilter';
 import AppDivider from '../components/ui/AppDivider';
+import toast from 'react-hot-toast';
 
 interface DashboardData {
   total_value: number;
@@ -98,9 +98,8 @@ const Dashboard: React.FC = () => {
   const [error, setError] = useState<string | null>(null);
   const [selectedBrokerage, setSelectedBrokerage] = useState<string>('all');
 
-  const cardBg = useColorModeValue('white', 'gray.800');
-  const borderColor = useColorModeValue('gray.200', 'gray.700');
-  const toast = useToast();
+  const cardBg = 'bg.card';
+  const borderColor = 'border.subtle';
 
   useEffect(() => {
     fetchDashboardData();
@@ -138,26 +137,14 @@ const Dashboard: React.FC = () => {
         throw new Error(result.detail || 'Failed to sync portfolio data');
       }
 
-      toast({
-        title: 'Portfolio Synced',
-        description: 'Portfolio data has been synced successfully',
-        status: 'success',
-        duration: 3000,
-        isClosable: true,
-      });
+      toast.success('Portfolio data has been synced successfully');
 
       // Refresh the dashboard data after sync
       await fetchDashboardData();
 
     } catch (err: any) {
       console.error('Error syncing portfolio data:', err);
-      toast({
-        title: 'Sync Failed',
-        description: err.message || 'Failed to sync portfolio data',
-        status: 'error',
-        duration: 5000,
-        isClosable: true,
-      });
+      toast.error(err.message || 'Failed to sync portfolio data');
     } finally {
       setSyncing(false);
     }
@@ -200,12 +187,10 @@ const Dashboard: React.FC = () => {
   if (error) {
     return (
       <Box p={6}>
-        <Alert status="error" borderRadius="md" mb={4}>
-          <AlertIcon />
-          <AlertDescription>
-            {error}
-          </AlertDescription>
-        </Alert>
+        <AlertRoot status="error" borderRadius="md" mb={4}>
+          <AlertIndicator />
+          <AlertDescription>{error}</AlertDescription>
+        </AlertRoot>
         <HStack spacing={3}>
           <Button onClick={fetchDashboardData} leftIcon={<FiRefreshCw />}>
             Retry
@@ -256,88 +241,88 @@ const Dashboard: React.FC = () => {
               {/* Main Dashboard Content */}
               <Grid templateColumns={{ base: "1fr", md: "repeat(2, 1fr)", lg: "repeat(4, 1fr)" }} gap={6}>
                 {/* Total Portfolio Value */}
-                <Card bg={cardBg} borderColor={borderColor}>
+                <CardRoot bg={cardBg} borderColor={borderColor} borderWidth="1px" borderRadius="xl">
                   <CardBody>
-                    <Stat>
+                    <StatRoot>
                       <StatLabel>
                         <HStack>
                           <FiDollarSign />
                           <Text>Total Value</Text>
                         </HStack>
                       </StatLabel>
-                      <StatNumber>{formatCurrency(dashboardData.total_value)}</StatNumber>
+                      <StatValueText>{formatCurrency(dashboardData.total_value)}</StatValueText>
                       <StatHelpText>
-                        <StatArrow type={dashboardData.day_change >= 0 ? 'increase' : 'decrease'} />
+                        {dashboardData.day_change >= 0 ? <StatUpIndicator /> : <StatDownIndicator />}
                         {formatPercent(dashboardData.day_change_pct)} today
                       </StatHelpText>
-                    </Stat>
+                    </StatRoot>
                   </CardBody>
-                </Card>
+                </CardRoot>
 
                 {/* Unrealized P&L */}
-                <Card bg={cardBg} borderColor={borderColor}>
+                <CardRoot bg={cardBg} borderColor={borderColor} borderWidth="1px" borderRadius="xl">
                   <CardBody>
-                    <Stat>
+                    <StatRoot>
                       <StatLabel>
                         <HStack>
                           <FiTrendingUp />
                           <Text>Unrealized P&L</Text>
                         </HStack>
                       </StatLabel>
-                      <StatNumber color={getChangeColor(dashboardData.total_unrealized_pnl)}>
+                      <StatValueText color={getChangeColor(dashboardData.total_unrealized_pnl)}>
                         {formatCurrency(dashboardData.total_unrealized_pnl)}
-                      </StatNumber>
+                      </StatValueText>
                       <StatHelpText>
                         {formatPercent(dashboardData.total_unrealized_pnl_pct)} total return
                       </StatHelpText>
-                    </Stat>
+                    </StatRoot>
                   </CardBody>
-                </Card>
+                </CardRoot>
 
                 {/* Day Change */}
-                <Card bg={cardBg} borderColor={borderColor}>
+                <CardRoot bg={cardBg} borderColor={borderColor} borderWidth="1px" borderRadius="xl">
                   <CardBody>
-                    <Stat>
+                    <StatRoot>
                       <StatLabel>
                         <HStack>
                           <FiActivity />
                           <Text>Day Change</Text>
                         </HStack>
                       </StatLabel>
-                      <StatNumber color={getChangeColor(dashboardData.day_change)}>
+                      <StatValueText color={getChangeColor(dashboardData.day_change)}>
                         {formatCurrency(dashboardData.day_change)}
-                      </StatNumber>
+                      </StatValueText>
                       <StatHelpText>
-                        <StatArrow type={dashboardData.day_change >= 0 ? 'increase' : 'decrease'} />
+                        {dashboardData.day_change >= 0 ? <StatUpIndicator /> : <StatDownIndicator />}
                         {formatPercent(dashboardData.day_change_pct)}
                       </StatHelpText>
-                    </Stat>
+                    </StatRoot>
                   </CardBody>
-                </Card>
+                </CardRoot>
 
                 {/* Holdings Count */}
-                <Card bg={cardBg} borderColor={borderColor}>
+                <CardRoot bg={cardBg} borderColor={borderColor} borderWidth="1px" borderRadius="xl">
                   <CardBody>
-                    <Stat>
+                    <StatRoot>
                       <StatLabel>
                         <HStack>
                           <FiPieChart />
                           <Text>Holdings</Text>
                         </HStack>
                       </StatLabel>
-                      <StatNumber>{dashboardData.holdings_count}</StatNumber>
+                      <StatValueText>{dashboardData.holdings_count}</StatValueText>
                       <StatHelpText>
                         {dashboardData.accounts_count} accounts
                       </StatHelpText>
-                    </Stat>
+                    </StatRoot>
                   </CardBody>
-                </Card>
+                </CardRoot>
               </Grid>
 
               {/* Secondary metrics and charts */}
               <Grid templateColumns={{ base: "1fr", lg: "2fr 1fr" }} gap={6}>
                 {/* Sector Allocation */}
-                <Card bg={cardBg} borderColor={borderColor}>
+                <CardRoot bg={cardBg} borderColor={borderColor} borderWidth="1px" borderRadius="xl">
                   <CardHeader>
                     <Heading size="md">Sector Allocation</Heading>
                   </CardHeader>
@@ -369,10 +354,10 @@ const Dashboard: React.FC = () => {
                       </Box>
                     )}
                   </CardBody>
-                </Card>
+                </CardRoot>
 
                 {/* Account Summary */}
-                <Card bg={cardBg} borderColor={borderColor}>
+                <CardRoot bg={cardBg} borderColor={borderColor} borderWidth="1px" borderRadius="xl">
                   <CardHeader>
                     <Heading size="md">Account Summary</Heading>
                   </CardHeader>
@@ -412,13 +397,13 @@ const Dashboard: React.FC = () => {
                       ))}
                     </VStack>
                   </CardBody>
-                </Card>
+                </CardRoot>
               </Grid>
 
               {/* Top Performers and Losers */}
               <Grid templateColumns={{ base: "1fr", lg: "1fr 1fr" }} gap={6}>
                 {/* Top Performers */}
-                <Card bg={cardBg} borderColor={borderColor}>
+                <CardRoot bg={cardBg} borderColor={borderColor} borderWidth="1px" borderRadius="xl">
                   <CardHeader>
                     <HStack justify="space-between">
                       <Heading size="md">Top Performers</Heading>
@@ -429,40 +414,40 @@ const Dashboard: React.FC = () => {
                   </CardHeader>
                   <CardBody>
                     {dashboardData.top_performers.length > 0 ? (
-                      <TableContainer>
-                        <Table size="sm">
-                          <Thead>
-                            <Tr>
-                              <Th>Symbol</Th>
-                              <Th isNumeric>Value</Th>
-                              <Th isNumeric>P&L %</Th>
-                            </Tr>
-                          </Thead>
-                          <Tbody>
+                      <TableScrollArea>
+                        <TableRoot size="sm" variant="line">
+                          <TableHeader>
+                            <TableRow>
+                              <TableColumnHeader>Symbol</TableColumnHeader>
+                              <TableColumnHeader textAlign="end">Value</TableColumnHeader>
+                              <TableColumnHeader textAlign="end">P&amp;L %</TableColumnHeader>
+                            </TableRow>
+                          </TableHeader>
+                          <TableBody>
                             {dashboardData.top_performers.map((holding, index) => (
-                              <Tr key={index}>
-                                <Td fontWeight="medium">{holding.symbol}</Td>
-                                <Td isNumeric>{formatCurrency(holding.market_value)}</Td>
-                                <Td isNumeric>
+                              <TableRow key={index}>
+                                <TableCell fontWeight="medium">{holding.symbol}</TableCell>
+                                <TableCell textAlign="end">{formatCurrency(holding.market_value)}</TableCell>
+                                <TableCell textAlign="end">
                                   <Text color="green.500" fontWeight="medium">
                                     +{formatPercent(holding.unrealized_pnl_pct)}
                                   </Text>
-                                </Td>
-                              </Tr>
+                                </TableCell>
+                              </TableRow>
                             ))}
-                          </Tbody>
-                        </Table>
-                      </TableContainer>
+                          </TableBody>
+                        </TableRoot>
+                      </TableScrollArea>
                     ) : (
                       <Box textAlign="center" py={4}>
                         <Text color="gray.500" fontSize="sm">No performance data available</Text>
                       </Box>
                     )}
                   </CardBody>
-                </Card>
+                </CardRoot>
 
                 {/* Top Losers */}
-                <Card bg={cardBg} borderColor={borderColor}>
+                <CardRoot bg={cardBg} borderColor={borderColor} borderWidth="1px" borderRadius="xl">
                   <CardHeader>
                     <HStack justify="space-between">
                       <Heading size="md">Biggest Losers</Heading>
@@ -473,37 +458,37 @@ const Dashboard: React.FC = () => {
                   </CardHeader>
                   <CardBody>
                     {dashboardData.top_losers.length > 0 ? (
-                      <TableContainer>
-                        <Table size="sm">
-                          <Thead>
-                            <Tr>
-                              <Th>Symbol</Th>
-                              <Th isNumeric>Value</Th>
-                              <Th isNumeric>P&L %</Th>
-                            </Tr>
-                          </Thead>
-                          <Tbody>
+                      <TableScrollArea>
+                        <TableRoot size="sm" variant="line">
+                          <TableHeader>
+                            <TableRow>
+                              <TableColumnHeader>Symbol</TableColumnHeader>
+                              <TableColumnHeader textAlign="end">Value</TableColumnHeader>
+                              <TableColumnHeader textAlign="end">P&amp;L %</TableColumnHeader>
+                            </TableRow>
+                          </TableHeader>
+                          <TableBody>
                             {dashboardData.top_losers.map((holding, index) => (
-                              <Tr key={index}>
-                                <Td fontWeight="medium">{holding.symbol}</Td>
-                                <Td isNumeric>{formatCurrency(holding.market_value)}</Td>
-                                <Td isNumeric>
+                              <TableRow key={index}>
+                                <TableCell fontWeight="medium">{holding.symbol}</TableCell>
+                                <TableCell textAlign="end">{formatCurrency(holding.market_value)}</TableCell>
+                                <TableCell textAlign="end">
                                   <Text color="red.500" fontWeight="medium">
                                     {formatPercent(holding.unrealized_pnl_pct)}
                                   </Text>
-                                </Td>
-                              </Tr>
+                                </TableCell>
+                              </TableRow>
                             ))}
-                          </Tbody>
-                        </Table>
-                      </TableContainer>
+                          </TableBody>
+                        </TableRoot>
+                      </TableScrollArea>
                     ) : (
                       <Box textAlign="center" py={4}>
                         <Text color="gray.500" fontSize="sm">No performance data available</Text>
                       </Box>
                     )}
                   </CardBody>
-                </Card>
+                </CardRoot>
               </Grid>
             </>
           )}

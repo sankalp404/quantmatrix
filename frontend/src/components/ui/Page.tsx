@@ -1,0 +1,39 @@
+import React from "react";
+import { Box, HStack, Heading, Text, type BoxProps } from "@chakra-ui/react";
+
+export function Page({ children, ...props }: BoxProps & { children: React.ReactNode }) {
+  return (
+    <Box w="full" maxW="1200px" mx="auto" px={{ base: 4, md: 6 }} py={{ base: 6, md: 8 }} {...props}>
+      {children}
+    </Box>
+  );
+}
+
+export function PageHeader({
+  title,
+  subtitle,
+  actions,
+  ...props
+}: {
+  title: string;
+  subtitle?: string;
+  actions?: React.ReactNode;
+} & BoxProps) {
+  return (
+    <HStack align="flex-start" justify="space-between" gap={4} mb={6} {...props}>
+      <Box>
+        <Heading size="lg" letterSpacing="-0.02em" color="fg.default">
+          {title}
+        </Heading>
+        {subtitle ? (
+          <Text mt={1} fontSize="sm" color="fg.muted">
+            {subtitle}
+          </Text>
+        ) : null}
+      </Box>
+      {actions ? <Box>{actions}</Box> : null}
+    </HStack>
+  );
+}
+
+

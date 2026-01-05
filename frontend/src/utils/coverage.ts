@@ -140,8 +140,9 @@ export const buildCoverageKpis = (
   if (Array.isArray(metaKpis) && metaKpis.length > 0) {
     return metaKpis;
   }
-  const totalSymbols = Number(snapshot?.symbols ?? 0);
   const statusInfo = status || {};
+  const staleM5 = Number(statusInfo.stale_m5 ?? 0);
+  const totalSymbols = Number(snapshot?.symbols ?? 0);
   const dailyCount = Number(snapshot?.daily?.count ?? 0);
   const m5Count = Number(snapshot?.m5?.count ?? 0);
   return [
@@ -169,7 +170,7 @@ export const buildCoverageKpis = (
       id: 'stale_daily',
       label: 'Stale (>48h)',
       value: statusInfo.stale_daily ?? 0,
-      help: `${statusInfo.stale_m5 ?? 0} missing 5m`,
+      help: staleM5 === 0 ? 'All 5m covered' : `${staleM5} missing 5m`,
     },
   ];
 };
@@ -220,7 +221,14 @@ const formatRelativeAge = (seconds?: number | null): string => {
 export const formatCoverageHero = (snapshot?: any, staleThresholdSeconds = 1800): CoverageHeroMeta => {
   const status = snapshot?.status || {};
   const label = (status.label || 'unknown').toString().toUpperCase();
-  const summary = status.summary || 'No summary yet.';
+  const staleDaily = Number(status.stale_daily ?? 0);
+  const staleM5 = Number(status.stale_m5 ?? 0);
+  const summary =
+    staleDaily > 0
+      ? `${staleDaily} symbols have daily bars older than 48h.`
+      : staleM5 > 0
+        ? `${staleM5} symbols missing 5m data.`
+        : status.summary || 'Coverage healthy across daily + 5m intervals.';
   const color = getCoverageStatusColor(status.label);
   const updatedAtIso = snapshot?.meta?.updated_at || snapshot?.generated_at;
   const updatedDisplay = updatedAtIso ? new Date(updatedAtIso).toLocaleString() : '—';

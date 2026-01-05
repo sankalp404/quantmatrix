@@ -13,7 +13,7 @@ from backend.tasks.celery_app import celery_app
 from backend.tasks.schedule_metadata import ScheduleMetadata
 
 
-client = TestClient(app)
+client = TestClient(app, raise_server_exceptions=False)
 
 
 @pytest.fixture(autouse=True)

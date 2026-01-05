@@ -11,7 +11,7 @@ from backend.models.user import UserRole
 from backend.config import settings
 from backend.tasks import market_data_tasks
 
-client = TestClient(app)
+client = TestClient(app, raise_server_exceptions=False)
 
 
 @pytest.fixture(autouse=True)

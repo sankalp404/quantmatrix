@@ -4,6 +4,7 @@ import { MemoryRouter } from 'react-router-dom';
 import { ChakraProvider } from '@chakra-ui/react';
 import { render, screen, fireEvent, waitFor } from '@testing-library/react';
 import Settings from '../../pages/Settings';
+import { system } from '../../theme/system';
 
 vi.mock('../../services/api', () => {
   return {
@@ -42,7 +43,7 @@ vi.mock('../../context/AuthContext', async () => {
 describe('Brokerages wizard', () => {
   it('opens modal and shows broker logos', async () => {
     render(
-      <ChakraProvider>
+      <ChakraProvider value={system}>
         <MemoryRouter>
           <Settings />
         </MemoryRouter>

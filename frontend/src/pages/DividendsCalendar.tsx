@@ -32,7 +32,6 @@ import {
   Spinner,
   Alert,
   AlertIcon,
-  useColorModeValue,
   Flex,
   Icon,
   Tooltip,
@@ -60,6 +59,9 @@ import { usePortfolio } from '../hooks/usePortfolio';
 import { portfolioApi } from '../services/api';
 import SortableTable, { Column } from '../components/SortableTable';
 import AppDivider from '../components/ui/AppDivider';
+
+// Chakra v3 migration shim: prefer dark values until we reintroduce color-mode properly.
+const useColorModeValue = <T,>(_light: T, dark: T) => dark;
 
 // Calendar component for dividend dates
 const DividendCalendar: React.FC<{ dividends: any[], selectedMonth: Date }> = ({ dividends, selectedMonth }) => {

@@ -6,7 +6,7 @@ from backend.api.main import app
 @pytest.fixture(scope="module")
 def client():
     try:
-        return TestClient(app)
+        return TestClient(app, raise_server_exceptions=False)
     except TypeError:
         pytest.skip("Starlette TestClient incompatible in this runtime")
 

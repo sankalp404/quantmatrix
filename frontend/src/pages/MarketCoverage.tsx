@@ -17,8 +17,8 @@ const MarketCoverage: React.FC = () => {
 
   return (
     <Box p={4}>
-      <Stack spacing={6}>
-        <Stack spacing={2}>
+      <Stack gap={6}>
+        <Stack gap={2}>
           <Heading size="md">Market Coverage</Heading>
           <Text color="gray.400">
             Shows how many tracked symbols have fresh prices. Daily should stay above 95%, and 5m bars should refresh at least once per trading day.

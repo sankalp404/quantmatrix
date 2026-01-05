@@ -1,5 +1,15 @@
 import React from 'react';
-import { Stat, StatLabel, StatNumber, StatHelpText, StatArrow, HStack, Icon, Text } from '@chakra-ui/react';
+import {
+  StatRoot,
+  StatLabel,
+  StatValueText,
+  StatHelpText,
+  StatUpIndicator,
+  StatDownIndicator,
+  HStack,
+  Icon,
+  Text,
+} from '@chakra-ui/react';
 
 interface KPIStatCardProps {
   label: string;
@@ -12,21 +22,22 @@ interface KPIStatCardProps {
 
 const KPIStatCard: React.FC<KPIStatCardProps> = ({ label, value, helpText, arrow, icon, color }) => {
   return (
-    <Stat>
+    <StatRoot>
       <StatLabel>
         <HStack>
           {icon && <Icon as={icon} />}
           <Text>{label}</Text>
         </HStack>
       </StatLabel>
-      <StatNumber color={color}>{value}</StatNumber>
+      <StatValueText color={color}>{value}</StatValueText>
       {helpText !== undefined && (
         <StatHelpText>
-          {arrow && <StatArrow type={arrow} />}
+          {arrow === 'increase' ? <StatUpIndicator /> : null}
+          {arrow === 'decrease' ? <StatDownIndicator /> : null}
           {helpText}
         </StatHelpText>
       )}
-    </Stat>
+    </StatRoot>
   );
 };
 

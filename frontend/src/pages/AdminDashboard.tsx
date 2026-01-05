@@ -1,5 +1,6 @@
 import React from 'react';
-import { Box, Heading, Button, HStack, Text, useToast, Switch } from '@chakra-ui/react';
+import { Box, Heading, Button, Text } from '@chakra-ui/react';
+import toast from 'react-hot-toast';
 import api from '../services/api';
 import { triggerTaskByName } from '../utils/taskActions';
 import useCoverageSnapshot from '../hooks/useCoverageSnapshot';
@@ -14,7 +15,6 @@ import {
 const AdminDashboard: React.FC = () => {
   const [backfill5mEnabled, setBackfill5mEnabled] = React.useState<boolean>(true);
   const [toggling5m, setToggling5m] = React.useState<boolean>(false);
-  const toast = useToast();
   const { snapshot: coverage, refresh: refreshCoverage, sparkline, kpis, actions: coverageActions, hero } = useCoverageSnapshot();
 
   React.useEffect(() => {
@@ -33,30 +33,19 @@ const AdminDashboard: React.FC = () => {
           cron: '0 * * * *',
           timezone: 'UTC',
         });
-        toast({
-          title: 'Coverage monitor scheduled (hourly)',
-          status: 'success',
-          duration: 3000,
-          isClosable: true,
-        });
+        toast.success('Coverage monitor scheduled (hourly)');
         await refreshCoverage();
       } catch (err: any) {
-        toast({
-          title: 'Failed to schedule monitor',
-          description: err?.response?.data?.detail || err?.message || 'Unknown error',
-          status: 'error',
-          duration: 4000,
-          isClosable: true,
-        });
+        toast.error(err?.response?.data?.detail || err?.message || 'Failed to schedule monitor');
       }
       return;
     }
     try {
       await triggerTaskByName(taskName);
-      toast({ title: label || taskName, description: 'Task triggered', status: 'success', duration: 3000, isClosable: true });
+      toast.success(label || taskName);
       await refreshCoverage();
     } catch (err: any) {
-      toast({ title: `Failed to run ${label || taskName}`, description: err?.message || 'Unknown error', status: 'error', duration: 4000, isClosable: true });
+      toast.error(err?.message || `Failed to run ${label || taskName}`);
     }
   };
 
@@ -68,21 +57,10 @@ const AdminDashboard: React.FC = () => {
       const res = await api.post('/market-data/admin/coverage/backfill-5m-toggle', { enabled: next });
       const flag = res?.data?.backfill_5m_enabled ?? next;
       setBackfill5mEnabled(Boolean(flag));
-      toast({
-        title: `5m backfill ${flag ? 'enabled' : 'disabled'}`,
-        status: 'success',
-        duration: 2500,
-        isClosable: true,
-      });
+      toast.success(`5m backfill ${flag ? 'enabled' : 'disabled'}`);
       await refreshCoverage();
     } catch (err: any) {
-      toast({
-        title: 'Failed to update 5m backfill toggle',
-        description: err?.response?.data?.detail || err?.message || 'Unknown error',
-        status: 'error',
-        duration: 4000,
-        isClosable: true,
-      });
+      toast.error(err?.response?.data?.detail || err?.message || 'Failed to update 5m backfill toggle');
     } finally {
       setToggling5m(false);
     }
@@ -97,13 +75,12 @@ const AdminDashboard: React.FC = () => {
           <CoverageKpiGrid kpis={kpis} variant="stat" />
           <CoverageTrendGrid sparkline={sparkline} />
           <CoverageBucketsGrid groups={hero?.buckets || []} />
-          <HStack spacing={3} mt={3} align="center">
-            <Switch
-              isChecked={backfill5mEnabled}
-              onChange={toggleBackfill5m}
-              isDisabled={toggling5m}
-              colorScheme="teal"
-              size="md"
+          <Box mt={3} display="flex" alignItems="center" gap={3}>
+            <input
+              type="checkbox"
+              checked={backfill5mEnabled}
+              onChange={() => void toggleBackfill5m()}
+              disabled={toggling5m}
             />
             <Box>
               <Text fontSize="sm" fontWeight="medium">
@@ -113,7 +90,7 @@ const AdminDashboard: React.FC = () => {
                 Daily backfill always runs. Toggle disables 5m tasks.
               </Text>
             </Box>
-          </HStack>
+          </Box>
         </CoverageSummaryCard>
       )}
 
@@ -122,7 +99,7 @@ const AdminDashboard: React.FC = () => {
         actions={coverageActions}
         onRun={runNamedTask}
         buttonRenderer={(action, handleClick) => (
-          <Button size="sm" onClick={handleClick} isDisabled={action.disabled}>
+          <Button size="sm" onClick={handleClick} disabled={action.disabled}>
             {action.label}
           </Button>
         )}

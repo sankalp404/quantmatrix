@@ -1,14 +1,13 @@
 import React, { Component, ErrorInfo, ReactNode } from 'react';
 import {
   Box,
-  Alert,
-  AlertIcon,
+  AlertRoot,
+  AlertIndicator,
   AlertTitle,
   AlertDescription,
   Button,
   VStack,
   Text,
-  useColorModeValue,
   Code,
   Collapse,
   useDisclosure
@@ -98,8 +97,8 @@ const ErrorFallback: React.FC<{
   onReload: () => void;
 }> = ({ error, errorInfo, onRetry, onReload }) => {
   const { isOpen, onToggle } = useDisclosure();
-  const bgColor = useColorModeValue('white', 'gray.800');
-  const borderColor = useColorModeValue('gray.200', 'gray.600');
+  const bgColor = 'bg.card';
+  const borderColor = 'border.subtle';
 
   return (
     <Box
@@ -112,15 +111,15 @@ const ErrorFallback: React.FC<{
       borderColor={borderColor}
       shadow="lg"
     >
-      <Alert status="error" borderRadius="md" mb={6}>
-        <AlertIcon />
+      <AlertRoot status="error" borderRadius="md" mb={6}>
+        <AlertIndicator />
         <Box>
           <AlertTitle>Something went wrong!</AlertTitle>
           <AlertDescription>
             An unexpected error occurred. Please try refreshing the page or contact support if the problem persists.
           </AlertDescription>
         </Box>
-      </Alert>
+      </AlertRoot>
 
       <VStack spacing={4} align="stretch">
         <Box>

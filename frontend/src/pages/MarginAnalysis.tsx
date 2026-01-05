@@ -35,7 +35,6 @@ import {
   Spinner,
   Alert,
   AlertIcon,
-  useColorModeValue,
   Flex,
   Icon,
   Tooltip,
@@ -67,6 +66,9 @@ import {
   FiSearch,
 } from 'react-icons/fi';
 import { usePortfolio } from '../hooks/usePortfolio';
+
+// Chakra v3 migration shim: prefer dark values until we reintroduce color-mode properly.
+const useColorModeValue = <T,>(_light: T, dark: T) => dark;
 import AppDivider from '../components/ui/AppDivider';
 
 // Process margin analysis data

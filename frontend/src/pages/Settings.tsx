@@ -1,5 +1,41 @@
 import React, { useEffect, useMemo, useState } from 'react';
-import { Box, Text, Card, CardBody, useColorModeValue, VStack, HStack, Input, Select, Button, Table, Thead, Tr, Th, Tbody, Td, Badge, useToast, Link as CLink, Tooltip, SimpleGrid, Modal, ModalOverlay, ModalContent, ModalHeader, ModalBody, ModalFooter, useDisclosure, InputGroup, InputRightElement, IconButton, Image, useColorMode, AlertDialog, AlertDialogOverlay, AlertDialogContent, AlertDialogHeader, AlertDialogBody, AlertDialogFooter } from '@chakra-ui/react';
+import {
+  Box,
+  Text,
+  CardRoot,
+  CardBody,
+  VStack,
+  HStack,
+  Input,
+  Button,
+  Badge,
+  Link as CLink,
+  TooltipRoot,
+  TooltipTrigger,
+  TooltipPositioner,
+  TooltipContent,
+  SimpleGrid,
+  useDisclosure,
+  InputGroup,
+  IconButton,
+  Image,
+  TableScrollArea,
+  TableRoot,
+  TableHeader,
+  TableBody,
+  TableRow,
+  TableColumnHeader,
+  TableCell,
+  DialogRoot,
+  DialogBackdrop,
+  DialogContent,
+  DialogHeader,
+  DialogBody,
+  DialogFooter,
+  DialogTitle,
+  DialogDescription,
+} from '@chakra-ui/react';
+import hotToast from 'react-hot-toast';
 import { accountsApi, aggregatorApi, handleApiError } from '../services/api';
 import { useAuth } from '../context/AuthContext';
 import { FiExternalLink, FiEye, FiEyeOff, FiTrash2 } from 'react-icons/fi';
@@ -7,10 +43,20 @@ import SchwabLogo from '../assets/logos/schwab.svg';
 import TastytradeLogo from '../assets/logos/tastytrade.svg';
 import IbkrLogo from '../assets/logos/interactive-brokers.svg';
 
+// Chakra v3 migration shims (dark-first for now).
+const useColorModeValue = <T,>(_light: T, dark: T) => dark;
+const useColorMode = () => ({ colorMode: 'dark' as const, toggleColorMode: () => { } });
+
 const Settings: React.FC = () => {
   const cardBg = useColorModeValue('white', 'gray.800');
   const borderColor = useColorModeValue('gray.200', 'gray.700');
-  const toast = useToast();
+  // Temporary shim: preserve legacy `useToast()` call sites while migrating to `react-hot-toast`.
+  const toast = (args: { title: string; description?: string; status?: 'success' | 'error' | 'info' | 'warning' }) => {
+    const msg = args.description ? `${args.title}: ${args.description}` : args.title;
+    if (args.status === 'success') return hotToast.success(args.title);
+    if (args.status === 'error') return hotToast.error(msg);
+    return hotToast(msg);
+  };
   const { user } = useAuth();
   const [accounts, setAccounts] = useState<any[]>([]);
   const [loading, setLoading] = useState(false);
@@ -31,7 +77,7 @@ const Settings: React.FC = () => {
   const [deleteId, setDeleteId] = useState<number | null>(null);
   const [deleteLoading, setDeleteLoading] = useState(false);
   const {
-    isOpen: isDeleteOpen,
+    open: isDeleteOpen,
     onOpen: onDeleteOpen,
     onClose: onDeleteClose,
   } = useDisclosure();
@@ -313,9 +359,9 @@ const Settings: React.FC = () => {
 
   return (
     <Box p={2}>
-      <Card bg={cardBg} border="1px" borderColor={borderColor} mb={6}>
+      <CardRoot bg={cardBg} border="1px" borderColor={borderColor} mb={6}>
         <CardBody>
-          <VStack align="stretch" spacing={4}>
+          <VStack align="stretch" gap={4}>
             <HStack justify="space-between">
               <Text fontWeight="bold">Brokerages</Text>
               <Button onClick={startWizard}>+ New connection</Button>
@@ -323,10 +369,10 @@ const Settings: React.FC = () => {
             <Text color="gray.500" fontSize="sm">Use the wizard to add new connections. Connected portfolios appear below.</Text>
           </VStack>
         </CardBody>
-      </Card>
-      <Card bg={cardBg} border="1px" borderColor={borderColor}>
+      </CardRoot>
+      <CardRoot bg={cardBg} border="1px" borderColor={borderColor}>
         <CardBody>
-          <VStack align="stretch" spacing={4}>
+          <VStack align="stretch" gap={4}>
             <HStack justify="space-between">
               <Text fontWeight="bold">Linked Accounts</Text>
               <Button size="sm" onClick={loadAccounts}>Refresh</Button>
@@ -336,114 +382,138 @@ const Settings: React.FC = () => {
                 <Text fontSize="sm" color="gray.500">No accounts yet. Add a brokerage account to get started.</Text>
               </Box>
             )}
-            <Table size="sm">
-              <Thead>
-                <Tr>
-                  <Th>Broker</Th>
-                  <Th>Account</Th>
-                  <Th>Type</Th>
-                  <Th>Status</Th>
-                  <Th>Actions</Th>
-                </Tr>
-              </Thead>
-              <Tbody>
-                {accounts.map((a) => {
-                  return (
-                    <Tr key={a.id}>
-                      <Td>{brokerDisplayName(String(a.broker))}</Td>
-                      <Td>{a.account_name || a.account_number}</Td>
-                      <Td>{a.account_type}</Td>
-                      <Td>
-                        <Badge colorScheme={a.is_enabled ? 'green' : 'gray'}>{a.status}</Badge>
-                        {' '}
-                        {a.sync_status && <Badge variant="outline">{a.sync_status}</Badge>}
-                      </Td>
-                      <Td>
-                        <HStack>
-                          {String(a.broker || '').toLowerCase() === 'schwab' && (
-                            <Tooltip label={cfg && !cfg.schwabConfigured ? 'Schwab OAuth not configured on server' : ''} isDisabled={!(cfg && !cfg.schwabConfigured)}>
-                              <Button size="xs" variant="outline" onClick={() => handleConnectSchwab(a.id)} isDisabled={!!(cfg && !cfg.schwabConfigured)}>
-                                Connect Charles Schwab <FiExternalLink style={{ marginLeft: 8 }} />
-                              </Button>
-                            </Tooltip>
-                          )}
-                          <Button size="xs" isLoading={syncingId === a.id} onClick={() => handleSync(a.id)}>Sync</Button>
-                          <Button size="xs" variant="outline" onClick={async () => {
-                            try {
-                              await accountsApi.remove?.(a.id);
-                              toast({ title: 'Account disabled', status: 'success' });
-                              loadAccounts();
-                            } catch (e) {
-                              toast({ title: 'Disable failed', description: handleApiError(e), status: 'error' });
-                            }
-                          }}>
-                            Disable
-                          </Button>
-                          <IconButton
-                            aria-label="Delete account"
-                            size="xs"
-                            variant="ghost"
-                            colorScheme="red"
-                            icon={<FiTrash2 />}
-                            onClick={() => { setDeleteId(a.id); onDeleteOpen(); }}
-                          />
-                        </HStack>
-                      </Td>
-                    </Tr>
-                  );
-                })}
-              </Tbody>
-            </Table>
+            <TableScrollArea>
+              <TableRoot size="sm" variant="line">
+                <TableHeader>
+                  <TableRow>
+                    <TableColumnHeader>Broker</TableColumnHeader>
+                    <TableColumnHeader>Account</TableColumnHeader>
+                    <TableColumnHeader>Type</TableColumnHeader>
+                    <TableColumnHeader>Status</TableColumnHeader>
+                    <TableColumnHeader>Actions</TableColumnHeader>
+                  </TableRow>
+                </TableHeader>
+                <TableBody>
+                  {accounts.map((a) => {
+                    return (
+                      <TableRow key={a.id}>
+                        <TableCell>{brokerDisplayName(String(a.broker))}</TableCell>
+                        <TableCell>{a.account_name || a.account_number}</TableCell>
+                        <TableCell>{a.account_type}</TableCell>
+                        <TableCell>
+                          <Badge colorScheme={a.is_enabled ? 'green' : 'gray'}>{a.status}</Badge>
+                          {' '}
+                          {a.sync_status && <Badge variant="outline">{a.sync_status}</Badge>}
+                        </TableCell>
+                        <TableCell>
+                          <HStack>
+                            {String(a.broker || '').toLowerCase() === 'schwab' && (
+                              (cfg && !cfg.schwabConfigured) ? (
+                                <TooltipRoot>
+                                  <TooltipTrigger asChild>
+                                    <Button size="xs" variant="outline" onClick={() => handleConnectSchwab(a.id)} disabled>
+                                      Connect Charles Schwab <FiExternalLink style={{ marginLeft: 8 }} />
+                                    </Button>
+                                  </TooltipTrigger>
+                                  <TooltipPositioner>
+                                    <TooltipContent>
+                                      Schwab OAuth not configured on server
+                                    </TooltipContent>
+                                  </TooltipPositioner>
+                                </TooltipRoot>
+                              ) : (
+                                <Button size="xs" variant="outline" onClick={() => handleConnectSchwab(a.id)}>
+                                  Connect Charles Schwab <FiExternalLink style={{ marginLeft: 8 }} />
+                                </Button>
+                              )
+                            )}
+                            <Button size="xs" loading={syncingId === a.id} onClick={() => handleSync(a.id)}>Sync</Button>
+                            <Button size="xs" variant="outline" onClick={async () => {
+                              try {
+                                await accountsApi.remove?.(a.id);
+                                toast({ title: 'Account disabled', status: 'success' });
+                                loadAccounts();
+                              } catch (e) {
+                                toast({ title: 'Disable failed', description: handleApiError(e), status: 'error' });
+                              }
+                            }}>
+                              Disable
+                            </Button>
+                            <IconButton
+                              aria-label="Delete account"
+                              size="xs"
+                              variant="ghost"
+                              colorScheme="red"
+                              onClick={() => { setDeleteId(a.id); onDeleteOpen(); }}
+                            >
+                              <FiTrash2 />
+                            </IconButton>
+                          </HStack>
+                        </TableCell>
+                      </TableRow>
+                    );
+                  })}
+                </TableBody>
+              </TableRoot>
+            </TableScrollArea>
           </VStack>
         </CardBody>
-      </Card>
-      <AlertDialog
-        isOpen={isDeleteOpen}
-        leastDestructiveRef={cancelRef}
-        onClose={() => { if (!deleteLoading) { onDeleteClose(); setDeleteId(null); } }}
+      </CardRoot>
+      <DialogRoot
+        open={isDeleteOpen}
+        onOpenChange={(d) => {
+          if (!d.open && !deleteLoading) {
+            onDeleteClose();
+            setDeleteId(null);
+          }
+        }}
       >
-        <AlertDialogOverlay>
-          <AlertDialogContent>
-            <AlertDialogHeader fontSize="lg" fontWeight="bold">
-              Delete Broker Account
-            </AlertDialogHeader>
-            <AlertDialogBody>
+        <DialogBackdrop />
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>Delete Broker Account</DialogTitle>
+          </DialogHeader>
+          <DialogBody>
+            <DialogDescription>
               This will permanently remove the broker account connection and stored credentials for this user. You can re-connect later. Continue?
-            </AlertDialogBody>
-            <AlertDialogFooter>
-              <Button ref={cancelRef} onClick={() => { if (!deleteLoading) { onDeleteClose(); setDeleteId(null); } }}>
-                Cancel
-              </Button>
-              <Button colorScheme="red" ml={3} isLoading={deleteLoading} onClick={async () => {
-                if (!deleteId) return;
-                setDeleteLoading(true);
-                try {
-                  await accountsApi.remove?.(deleteId);
-                  toast({ title: 'Account deleted', status: 'success' });
-                  await loadAccounts();
-                } catch (e) {
-                  toast({ title: 'Delete failed', description: handleApiError(e), status: 'error' });
-                } finally {
-                  setDeleteLoading(false);
-                  setDeleteId(null);
-                  onDeleteClose();
-                }
-              }}>
-                Delete
-              </Button>
-            </AlertDialogFooter>
-          </AlertDialogContent>
-        </AlertDialogOverlay>
-      </AlertDialog>
-      <Modal isOpen={wizard.isOpen} onClose={wizard.onClose} size="xl">
-        <ModalOverlay />
-        <ModalContent>
-          <ModalHeader>New Brokerage Connection</ModalHeader>
-          <ModalBody>
+            </DialogDescription>
+          </DialogBody>
+          <DialogFooter>
+            <Button ref={cancelRef} onClick={() => { if (!deleteLoading) { onDeleteClose(); setDeleteId(null); } }}>
+              Cancel
+            </Button>
+            <Button colorScheme="red" ml={3} loading={deleteLoading} onClick={async () => {
+              if (!deleteId) return;
+              setDeleteLoading(true);
+              try {
+                await accountsApi.remove?.(deleteId);
+                toast({ title: 'Account deleted', status: 'success' });
+                await loadAccounts();
+              } catch (e) {
+                toast({ title: 'Delete failed', description: handleApiError(e), status: 'error' });
+              } finally {
+                setDeleteLoading(false);
+                setDeleteId(null);
+                onDeleteClose();
+              }
+            }}>
+              Delete
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </DialogRoot>
+
+      <DialogRoot open={wizard.open} onOpenChange={(d) => { if (!d.open) wizard.onClose(); }}>
+        <DialogBackdrop />
+        <DialogContent maxW="xl">
+          <DialogHeader>
+            <DialogTitle>New Brokerage Connection</DialogTitle>
+          </DialogHeader>
+          <DialogBody>
             {step === 1 && (
-              <VStack align="stretch" spacing={4}>
+              <VStack align="stretch" gap={4}>
                 <Text color="gray.500">Choose a broker to connect</Text>
-                <SimpleGrid columns={{ base: 3, md: 3 }} spacing={6}>
+                <SimpleGrid columns={{ base: 3, md: 3 }} gap={6}>
                   <LogoTile label="Charles Schwab" srcs={[SchwabLogo]} selected={broker === 'SCHWAB'} onClick={() => setBroker('SCHWAB')} wide />
                   <LogoTile label="Tastytrade" srcs={[TastytradeLogo]} selected={broker === 'TASTYTRADE'} onClick={() => setBroker('TASTYTRADE')} wide />
                   <LogoTile label="Interactive Brokers" srcs={[IbkrLogo]} selected={broker === 'IBKR'} onClick={() => setBroker('IBKR')} wide />
@@ -452,7 +522,7 @@ const Settings: React.FC = () => {
               </VStack>
             )}
             {step === 2 && broker === 'SCHWAB' && (
-              <VStack align="stretch" spacing={3}>
+              <VStack align="stretch" gap={3}>
                 <Text fontWeight="semibold">Schwab OAuth</Text>
                 <Text fontSize="sm" color="gray.500">We’ll create a placeholder account and send you to Schwab to authorize. Ensure your redirect URI matches the portal exactly.</Text>
                 <HStack>
@@ -463,15 +533,23 @@ const Settings: React.FC = () => {
               </VStack>
             )}
             {step === 2 && broker === 'TASTYTRADE' && (
-              <VStack align="stretch" spacing={3}>
+              <VStack align="stretch" gap={3}>
                 <Text fontWeight="semibold">Tastytrade Credentials</Text>
                 <HStack>
                   <Input placeholder="Username" value={ttForm.username} onChange={(e) => setTtForm({ ...ttForm, username: e.target.value })} onKeyDown={(e) => { if (e.key === 'Enter') submitWizard(); }} />
-                  <InputGroup>
+                  <InputGroup
+                    endElement={
+                      <IconButton
+                        aria-label={showTtPw ? 'Hide password' : 'Show password'}
+                        size="sm"
+                        variant="ghost"
+                        onClick={() => setShowTtPw(!showTtPw)}
+                      >
+                        {showTtPw ? <FiEyeOff /> : <FiEye />}
+                      </IconButton>
+                    }
+                  >
                     <Input placeholder="Password" type={showTtPw ? 'text' : 'password'} value={ttForm.password} onChange={(e) => setTtForm({ ...ttForm, password: e.target.value })} onKeyDown={(e) => { if (e.key === 'Enter') submitWizard(); }} />
-                    <InputRightElement>
-                      <IconButton aria-label={showTtPw ? 'Hide password' : 'Show password'} icon={showTtPw ? <FiEyeOff /> : <FiEye />} size="sm" variant="ghost" onClick={() => setShowTtPw(!showTtPw)} />
-                    </InputRightElement>
                   </InputGroup>
                 </HStack>
                 <Input placeholder="MFA Code (if prompted)" value={ttForm.mfa_code} onChange={(e) => setTtForm({ ...ttForm, mfa_code: e.target.value })} onKeyDown={(e) => { if (e.key === 'Enter') submitWizard(); }} />
@@ -479,23 +557,23 @@ const Settings: React.FC = () => {
               </VStack>
             )}
             {step === 2 && broker === 'IBKR' && (
-              <VStack align="stretch" spacing={3}>
+              <VStack align="stretch" gap={3}>
                 <Text fontWeight="semibold">IBKR Flex Query</Text>
                 <Input placeholder="Flex Token" value={ibkrForm.flex_token} onChange={(e) => setIbkrForm({ ...ibkrForm, flex_token: e.target.value })} onKeyDown={(e) => { if (e.key === 'Enter') submitWizard(); }} />
                 <Input placeholder="Query ID" value={ibkrForm.query_id} onChange={(e) => setIbkrForm({ ...ibkrForm, query_id: e.target.value })} onKeyDown={(e) => { if (e.key === 'Enter') submitWizard(); }} />
                 <Text fontSize="xs" color="gray.500">Use FlexQuery token and query ID for read-only import.</Text>
               </VStack>
             )}
-          </ModalBody>
-          <ModalFooter>
+          </DialogBody>
+          <DialogFooter>
             <HStack>
               {step > 1 && <Button variant="ghost" onClick={() => setStep(step - 1)}>Back</Button>}
-              {step < 2 && <Button onClick={() => broker ? setStep(2) : null} isDisabled={!broker}>Next</Button>}
-              {step === 2 && <Button isLoading={busy} onClick={submitWizard}>Connect</Button>}
+              {step < 2 && <Button onClick={() => broker ? setStep(2) : null} disabled={!broker}>Next</Button>}
+              {step === 2 && <Button loading={busy} onClick={submitWizard}>Connect</Button>}
             </HStack>
-          </ModalFooter>
-        </ModalContent>
-      </Modal>
+          </DialogFooter>
+        </DialogContent>
+      </DialogRoot>
     </Box>
   );
 };

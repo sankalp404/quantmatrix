@@ -5,21 +5,22 @@ import {
   SimpleGrid,
   Text,
   Button,
-  Stack,
-  useToast,
+  VStack,
   HStack,
-  Tag,
+  Badge,
   Icon,
-  Modal,
-  ModalOverlay,
-  ModalContent,
-  ModalHeader,
-  ModalCloseButton,
-  ModalBody,
-  ModalFooter,
   useDisclosure,
-  useColorModeValue,
+  DialogRoot,
+  DialogBackdrop,
+  DialogPositioner,
+  DialogContent,
+  DialogHeader,
+  DialogBody,
+  DialogFooter,
+  DialogTitle,
+  DialogDescription,
 } from '@chakra-ui/react';
+import hotToast from 'react-hot-toast';
 import { FiZap, FiRefreshCw, FiShield, FiLayers } from 'react-icons/fi';
 import { triggerTaskByName } from '../utils/taskActions';
 import AppDivider from '../components/ui/AppDivider';
@@ -78,15 +79,20 @@ const AdminRunbook: React.FC = () => {
   const [running, setRunning] = React.useState<string | null>(null);
   const [selectedRunbook, setSelectedRunbook] = React.useState<any>(null);
   const confirmModal = useDisclosure();
-  const toast = useToast();
-  const cardBg = useColorModeValue('surface.card', 'surface.base');
-  const cardBorder = useColorModeValue('surface.border', 'surface.border');
-  const chipBg = useColorModeValue('gray.200', 'rgba(255,255,255,0.08)');
-  const chipColor = useColorModeValue('gray.700', 'gray.200');
-  const metaText = useColorModeValue('gray.700', 'gray.300');
-  const headingColor = useColorModeValue('gray.900', 'gray.100');
-  const stepLabelColor = useColorModeValue('gray.800', 'gray.100');
-  const taskIdColor = useColorModeValue('gray.600', 'gray.400');
+  const toast = (args: { title: string; description?: string; status?: 'success' | 'error' | 'info' | 'warning'; duration?: number; isClosable?: boolean }) => {
+    const msg = args.description ? `${args.title}: ${args.description}` : args.title;
+    if (args.status === 'success') return hotToast.success(args.title);
+    if (args.status === 'error') return hotToast.error(msg);
+    return hotToast(msg);
+  };
+  const cardBg = 'bg.card';
+  const cardBorder = 'border.subtle';
+  const chipBg = 'bg.muted';
+  const chipColor = 'fg.muted';
+  const metaText = 'fg.muted';
+  const headingColor = 'fg.default';
+  const stepLabelColor = 'fg.default';
+  const taskIdColor = 'fg.muted';
 
   const runSequence = async (title: string, steps: { label: string; task: string }[]) => {
     setRunning(title);
@@ -125,7 +131,7 @@ const AdminRunbook: React.FC = () => {
       <Text color={metaText} mb={6}>
         Guided flows for the most common operational tasks. Review the steps, then trigger the full sequence from a single modal.
       </Text>
-      <SimpleGrid columns={{ base: 1, md: 2, xl: 3 }} spacing={4}>
+      <SimpleGrid columns={{ base: 1, md: 2, xl: 3 }} gap={4}>
         {runbooks.map((book) => (
           <Box
             key={book.title}
@@ -138,7 +144,7 @@ const AdminRunbook: React.FC = () => {
             flexDirection="column"
             gap={3}
           >
-            <HStack spacing={3}>
+            <HStack gap={3}>
               <Box
                 borderRadius="full"
                 bg={chipBg}
@@ -155,19 +161,19 @@ const AdminRunbook: React.FC = () => {
                 <Text fontSize="sm" color={metaText}>{book.description}</Text>
               </Box>
             </HStack>
-            <Stack spacing={2}>
+            <VStack align="stretch" gap={2}>
               {book.steps.map((step, idx) => (
-                <HStack key={step.task} spacing={3}>
-                  <Tag size="sm" borderRadius="full" bg={chipBg} color={chipColor}>
+                <HStack key={step.task} gap={3}>
+                  <Badge borderRadius="full" bg={chipBg} color={chipColor} px={2} py={1} fontSize="xs">
                     {idx + 1}
-                  </Tag>
+                  </Badge>
                   <Box flex="1">
                     <Text fontWeight="medium" color={stepLabelColor}>{step.label}</Text>
                     <Text fontSize="xs" color={taskIdColor}>{step.task}</Text>
                   </Box>
                 </HStack>
               ))}
-            </Stack>
+            </VStack>
             <AppDivider borderColor={cardBorder} opacity={0.5} />
             <Button
               colorScheme="brand"
@@ -180,41 +186,44 @@ const AdminRunbook: React.FC = () => {
         ))}
       </SimpleGrid>
 
-      <Modal isOpen={confirmModal.isOpen} onClose={confirmModal.onClose} size="lg">
-        <ModalOverlay />
-        <ModalContent>
-          <ModalHeader>{selectedRunbook?.title}</ModalHeader>
-          <ModalCloseButton />
-          <ModalBody>
-            <Text fontSize="sm" color="gray.500" mb={4}>
-              {selectedRunbook?.description}
-            </Text>
-            <Stack spacing={3}>
-              {selectedRunbook?.steps.map((step: any, idx: number) => (
-                <HStack key={step.task} spacing={3}>
-                  <Tag size="sm" variant="subtle" colorScheme="purple">
-                    {idx + 1}
-                  </Tag>
-                  <Box>
-                    <Text fontWeight="medium">{step.label}</Text>
-                    <Text fontSize="xs" color="gray.500">{step.task}</Text>
-                  </Box>
-                </HStack>
-              ))}
-            </Stack>
-          </ModalBody>
-          <ModalFooter>
-            <Button mr={3} onClick={confirmModal.onClose}>Cancel</Button>
-            <Button
-              colorScheme="brand"
-              isLoading={running === selectedRunbook?.title}
-              onClick={executeRunbook}
-            >
-              Run sequence
-            </Button>
-          </ModalFooter>
-        </ModalContent>
-      </Modal>
+      <DialogRoot open={confirmModal.open} onOpenChange={(d) => { if (!d.open) confirmModal.onClose(); }}>
+        <DialogBackdrop />
+        <DialogPositioner>
+          <DialogContent maxW="min(760px, calc(100vw - 32px))" w="full">
+            <DialogHeader>
+              <DialogTitle>{selectedRunbook?.title}</DialogTitle>
+            </DialogHeader>
+            <DialogBody>
+              <DialogDescription>
+                {selectedRunbook?.description}
+              </DialogDescription>
+              <VStack align="stretch" gap={3} mt={4}>
+                {selectedRunbook?.steps?.map((step: any, idx: number) => (
+                  <HStack key={step.task} gap={3}>
+                    <Badge borderRadius="full" px={2} py={1} fontSize="xs" bg={chipBg} color={chipColor}>
+                      {idx + 1}
+                    </Badge>
+                    <Box>
+                      <Text fontWeight="medium">{step.label}</Text>
+                      <Text fontSize="xs" color="fg.muted">{step.task}</Text>
+                    </Box>
+                  </HStack>
+                ))}
+              </VStack>
+            </DialogBody>
+            <DialogFooter>
+              <Button mr={3} onClick={confirmModal.onClose}>Cancel</Button>
+              <Button
+                colorScheme="brand"
+                loading={running === selectedRunbook?.title}
+                onClick={executeRunbook}
+              >
+                Run sequence
+              </Button>
+            </DialogFooter>
+          </DialogContent>
+        </DialogPositioner>
+      </DialogRoot>
     </Box>
   );
 };

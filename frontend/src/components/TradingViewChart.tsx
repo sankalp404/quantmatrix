@@ -1,13 +1,12 @@
 import React, { useEffect, useRef } from 'react';
 import {
   Box,
-  Card,
   CardBody,
   CardHeader,
+  CardRoot,
   Text,
   Button,
   HStack,
-  useColorModeValue,
   Badge,
   IconButton,
   Tooltip,
@@ -39,8 +38,6 @@ const TradingViewChart: React.FC<TradingViewChartProps> = ({
   hideSymbolSearch = false,
   autosize = true,
 }) => {
-  const cardBg = useColorModeValue('white', 'gray.800');
-  const borderColor = useColorModeValue('gray.200', 'gray.600');
   const chartRef = useRef<HTMLDivElement>(null);
   const containerRef = useRef<HTMLDivElement>(null);
 
@@ -105,9 +102,9 @@ const TradingViewChart: React.FC<TradingViewChartProps> = ({
   };
 
   return (
-    <Card
-      bg={cardBg}
-      borderColor={borderColor}
+    <CardRoot
+      bg="bg.card"
+      borderColor="border.subtle"
       borderWidth="1px"
       ref={containerRef}
       h={`${height}px`}
@@ -116,7 +113,7 @@ const TradingViewChart: React.FC<TradingViewChartProps> = ({
       shadow="lg"
     >
       {showHeader && (
-        <CardHeader py={3} px={4} borderBottom="1px solid" borderColor={borderColor}>
+        <CardHeader py={3} px={4} borderBottom="1px solid" borderColor="border.subtle">
           <HStack justify="space-between" align="center">
             <HStack spacing={3}>
               <Text fontWeight="bold" fontSize="lg">{symbol}</Text>
@@ -128,21 +125,23 @@ const TradingViewChart: React.FC<TradingViewChartProps> = ({
                 <Tooltip label="Open in TradingView">
                   <IconButton
                     aria-label="Open in TradingView"
-                    icon={<FiExternalLink />}
                     size="sm"
                     variant="ghost"
                     onClick={openInTradingView}
-                  />
+                  >
+                    <FiExternalLink />
+                  </IconButton>
                 </Tooltip>
                 {onClose && (
                   <Tooltip label="Close chart">
                     <IconButton
                       aria-label="Close chart"
-                      icon={<FiX />}
                       size="sm"
                       variant="ghost"
                       onClick={onClose}
-                    />
+                    >
+                      <FiX />
+                    </IconButton>
                   </Tooltip>
                 )}
               </HStack>
@@ -156,10 +155,10 @@ const TradingViewChart: React.FC<TradingViewChartProps> = ({
           ref={chartRef}
           h="full"
           w="full"
-          bg={useColorModeValue('white', 'gray.900')}
+          bg="bg.canvas"
         />
       </CardBody>
-    </Card>
+    </CardRoot>
   );
 };
 

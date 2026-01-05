@@ -1,23 +1,22 @@
 import React from 'react';
 import {
   Box,
-  Select,
   HStack,
   VStack,
   Text,
   Badge,
-  Stat,
+  StatRoot,
   StatLabel,
-  StatNumber,
   StatHelpText,
-  StatArrow,
-  Card,
+  StatValueText,
+  StatUpIndicator,
+  StatDownIndicator,
+  CardRoot,
   CardBody,
-  Popover,
+  PopoverRoot,
   PopoverTrigger,
   PopoverContent,
   PopoverBody,
-  useColorModeValue,
   Icon,
   Flex,
   SimpleGrid
@@ -60,9 +59,9 @@ const AccountSelector: React.FC<AccountSelectorProps> = ({
   size = 'md',
   variant = 'detailed'
 }) => {
-  const bgColor = useColorModeValue('white', 'gray.800');
-  const borderColor = useColorModeValue('gray.200', 'gray.600');
-  const hoverBg = useColorModeValue('gray.50', 'gray.700');
+  const bgColor = 'bg.card';
+  const borderColor = 'border.subtle';
+  const hoverBg = 'bg.panel';
 
   // Calculate totals
   const totalValue = accounts.reduce((sum, acc) => sum + acc.total_value, 0);
@@ -93,11 +92,18 @@ const AccountSelector: React.FC<AccountSelectorProps> = ({
 
   if (variant === 'simple') {
     return (
-      <Select
+      <select
         value={selectedAccount}
-        onChange={(e) => onAccountChange(e.target.value)}
-        size={size}
-        maxW="250px"
+        onChange={(e: React.ChangeEvent<HTMLSelectElement>) => onAccountChange(e.target.value)}
+        disabled={!accounts.length}
+        style={{
+          maxWidth: 250,
+          padding: '8px 10px',
+          borderRadius: 10,
+          border: '1px solid #e5e7eb',
+          background: 'white',
+          fontSize: 14,
+        }}
       >
         {showAllOption && (
           <option value="all">All Accounts ({accounts.length})</option>
@@ -107,25 +113,30 @@ const AccountSelector: React.FC<AccountSelectorProps> = ({
             {account.account_name} - {formatCurrency(account.total_value)}
           </option>
         ))}
-      </Select>
+      </select>
     );
   }
 
   return (
-    <VStack spacing={4} align="stretch">
+    <VStack gap={4} align="stretch">
       {/* Account Selector */}
-      <HStack spacing={4}>
+      <HStack gap={4}>
         <Box>
           <Text fontSize="sm" fontWeight="medium" mb={2}>
             Portfolio View
           </Text>
-          <Select
+          <select
             value={selectedAccount}
-            onChange={(e) => onAccountChange(e.target.value)}
-            size={size}
-            minW="300px"
-            bg={bgColor}
-            borderColor={borderColor}
+            onChange={(e: React.ChangeEvent<HTMLSelectElement>) => onAccountChange(e.target.value)}
+            disabled={!accounts.length}
+            style={{
+              minWidth: 300,
+              padding: '8px 10px',
+              borderRadius: 10,
+              border: `1px solid ${String(borderColor)}`,
+              background: String(bgColor),
+              fontSize: 14,
+            }}
           >
             {showAllOption && (
               <option value="all">
@@ -137,78 +148,78 @@ const AccountSelector: React.FC<AccountSelectorProps> = ({
                 {account.account_name} • {formatCurrency(account.total_value)} • {formatPercentage(account.unrealized_pnl_pct)}
               </option>
             ))}
-          </Select>
+          </select>
         </Box>
 
         {/* Quick Info Popover */}
-        <Popover trigger="hover" placement="bottom-start">
-          <PopoverTrigger>
+        <PopoverRoot positioning={{ placement: 'bottom-start' }}>
+          <PopoverTrigger asChild>
             <Box cursor="pointer" p={2} borderRadius="md" _hover={{ bg: hoverBg }}>
               <Icon as={FiInfo} color="gray.500" />
             </Box>
           </PopoverTrigger>
           <PopoverContent width="400px">
             <PopoverBody>
-              <VStack spacing={3} align="stretch">
+              <VStack gap={3} align="stretch">
                 <Text fontWeight="bold" fontSize="md">
                   {selectedAccount === 'all' ? 'Combined Portfolio' : selectedAccountData?.account_name}
                 </Text>
 
                 {selectedAccount === 'all' ? (
-                  <SimpleGrid columns={2} spacing={4}>
-                    <Stat size="sm">
+                  <SimpleGrid columns={2} gap={4}>
+                    <StatRoot size="sm">
                       <StatLabel>Total Value</StatLabel>
-                      <StatNumber fontSize="md">{formatCurrency(totalValue)}</StatNumber>
-                    </Stat>
-                    <Stat size="sm">
+                      <StatValueText fontSize="md">{formatCurrency(totalValue)}</StatValueText>
+                    </StatRoot>
+                    <StatRoot size="sm">
                       <StatLabel>Total P&L</StatLabel>
-                      <StatNumber fontSize="md" color={getChangeColor(totalPnL)}>
-                        <StatArrow type={totalPnL >= 0 ? 'increase' : 'decrease'} />
+                      <StatValueText fontSize="md" color={getChangeColor(totalPnL)}>
+                        {totalPnL >= 0 ? <StatUpIndicator /> : <StatDownIndicator />}
                         {formatCurrency(Math.abs(totalPnL))}
-                      </StatNumber>
+                      </StatValueText>
                       <StatHelpText>{formatPercentage(totalPnLPct)}</StatHelpText>
-                    </Stat>
-                    <Stat size="sm">
+                    </StatRoot>
+                    <StatRoot size="sm">
                       <StatLabel>Accounts</StatLabel>
-                      <StatNumber fontSize="md">{accounts.length}</StatNumber>
-                    </Stat>
-                    <Stat size="sm">
+                      <StatValueText fontSize="md">{accounts.length}</StatValueText>
+                    </StatRoot>
+                    <StatRoot size="sm">
                       <StatLabel>Total Positions</StatLabel>
-                      <StatNumber fontSize="md">{totalPositions}</StatNumber>
-                    </Stat>
+                      <StatValueText fontSize="md">{totalPositions}</StatValueText>
+                    </StatRoot>
                   </SimpleGrid>
                 ) : selectedAccountData ? (
-                  <SimpleGrid columns={2} spacing={4}>
-                    <Stat size="sm">
+                  <SimpleGrid columns={2} gap={4}>
+                    <StatRoot size="sm">
                       <StatLabel>Account Value</StatLabel>
-                      <StatNumber fontSize="md">{formatCurrency(selectedAccountData?.total_value || 0)}</StatNumber>
-                    </Stat>
-                    <Stat size="sm">
+                      <StatValueText fontSize="md">{formatCurrency(selectedAccountData?.total_value || 0)}</StatValueText>
+                    </StatRoot>
+                    <StatRoot size="sm">
                       <StatLabel>Unrealized P&L</StatLabel>
-                      <StatNumber fontSize="md" color={getChangeColor(selectedAccountData?.unrealized_pnl)}>
-                        <StatArrow type={(selectedAccountData?.unrealized_pnl || 0) >= 0 ? 'increase' : 'decrease'} />
+                      <StatValueText fontSize="md" color={getChangeColor(selectedAccountData?.unrealized_pnl)}>
+                        {(selectedAccountData?.unrealized_pnl || 0) >= 0 ? <StatUpIndicator /> : <StatDownIndicator />}
                         {formatCurrency(Math.abs(selectedAccountData?.unrealized_pnl || 0))}
-                      </StatNumber>
+                      </StatValueText>
                       <StatHelpText>{formatPercentage(selectedAccountData.unrealized_pnl_pct)}</StatHelpText>
-                    </Stat>
-                    <Stat size="sm">
+                    </StatRoot>
+                    <StatRoot size="sm">
                       <StatLabel>Positions</StatLabel>
-                      <StatNumber fontSize="md">{selectedAccountData?.positions_count || 0}</StatNumber>
-                    </Stat>
-                    <Stat size="sm">
+                      <StatValueText fontSize="md">{selectedAccountData?.positions_count || 0}</StatValueText>
+                    </StatRoot>
+                    <StatRoot size="sm">
                       <StatLabel>Allocation</StatLabel>
-                      <StatNumber fontSize="md">{((selectedAccountData?.allocation_pct ?? 0).toFixed(1))}%</StatNumber>
-                    </Stat>
+                      <StatValueText fontSize="md">{((selectedAccountData?.allocation_pct ?? 0).toFixed(1))}%</StatValueText>
+                    </StatRoot>
                     {(selectedAccountData?.buying_power != null) && (
                       <>
-                        <Stat size="sm">
+                        <StatRoot size="sm">
                           <StatLabel>Buying Power</StatLabel>
-                          <StatNumber fontSize="md">{formatCurrency(selectedAccountData?.buying_power || 0)}</StatNumber>
-                        </Stat>
-                        <Stat size="sm">
+                          <StatValueText fontSize="md">{formatCurrency(selectedAccountData?.buying_power || 0)}</StatValueText>
+                        </StatRoot>
+                        <StatRoot size="sm">
                           <StatLabel>Available Funds</StatLabel>
-                          <StatNumber fontSize="md">{formatCurrency(selectedAccountData.available_funds || 0)}</StatNumber>
-                        </Stat>
+                          <StatValueText fontSize="md">{formatCurrency(selectedAccountData.available_funds || 0)}</StatValueText>
+                        </StatRoot>
                       </>
                     )}
                   </SimpleGrid>
@@ -217,7 +228,7 @@ const AccountSelector: React.FC<AccountSelectorProps> = ({
                 <AppDivider />
 
                 {/* Account Breakdown */}
-                <VStack spacing={2} align="stretch">
+                <VStack gap={2} align="stretch">
                   <Text fontSize="sm" fontWeight="medium">Account Breakdown:</Text>
                   {accounts.map((account, index) => (
                     <HStack key={`${account.account_id}-${index}`} justify="space-between" fontSize="sm">
@@ -239,67 +250,67 @@ const AccountSelector: React.FC<AccountSelectorProps> = ({
               </VStack>
             </PopoverBody>
           </PopoverContent>
-        </Popover>
+        </PopoverRoot>
       </HStack>
 
       {/* Summary Cards (optional) */}
       {showSummary && (
-        <Card bg={bgColor} borderColor={borderColor} size="sm">
+        <CardRoot bg={bgColor} borderColor={borderColor} borderWidth="1px" borderRadius="xl">
           <CardBody>
-            <SimpleGrid columns={{ base: 2, md: 4 }} spacing={4}>
-              <Stat size="sm">
+            <SimpleGrid columns={{ base: 2, md: 4 }} gap={4}>
+              <StatRoot size="sm">
                 <StatLabel>
-                  <HStack>
+                  <HStack gap={1}>
                     <Icon as={FiDollarSign} />
                     <Text>Portfolio Value</Text>
                   </HStack>
                 </StatLabel>
-                <StatNumber>
+                <StatValueText>
                   {selectedAccount === 'all'
                     ? formatCurrency(totalValue)
                     : formatCurrency(selectedAccountData?.total_value || 0)
                   }
-                </StatNumber>
-              </Stat>
+                </StatValueText>
+              </StatRoot>
 
-              <Stat size="sm">
+              <StatRoot size="sm">
                 <StatLabel>
-                  <HStack>
+                  <HStack gap={1}>
                     <Icon as={selectedAccount === 'all' ? (totalPnL >= 0 ? FiTrendingUp : FiTrendingDown) : (selectedAccountData?.unrealized_pnl || 0) >= 0 ? FiTrendingUp : FiTrendingDown} />
                     <Text>Unrealized P&L</Text>
                   </HStack>
                 </StatLabel>
-                <StatNumber color={getChangeColor(selectedAccount === 'all' ? totalPnL : selectedAccountData?.unrealized_pnl || 0)}>
-                  <StatArrow type={(selectedAccount === 'all' ? totalPnL : selectedAccountData?.unrealized_pnl || 0) >= 0 ? 'increase' : 'decrease'} />
+                <StatValueText color={getChangeColor(selectedAccount === 'all' ? totalPnL : selectedAccountData?.unrealized_pnl || 0)}>
+                  {(selectedAccount === 'all' ? totalPnL : selectedAccountData?.unrealized_pnl || 0) >= 0 ? <StatUpIndicator /> : <StatDownIndicator />}
                   {formatCurrency(Math.abs(selectedAccount === 'all' ? totalPnL : selectedAccountData?.unrealized_pnl || 0))}
-                </StatNumber>
+                </StatValueText>
                 <StatHelpText>
                   {formatPercentage(selectedAccount === 'all' ? totalPnLPct : selectedAccountData?.unrealized_pnl_pct || 0)}
                 </StatHelpText>
-              </Stat>
+              </StatRoot>
 
-              <Stat size="sm">
+              <StatRoot size="sm">
                 <StatLabel>Positions</StatLabel>
-                <StatNumber>
+                <StatValueText>
                   {selectedAccount === 'all' ? totalPositions : selectedAccountData?.positions_count || 0}
-                </StatNumber>
+                </StatValueText>
                 <StatHelpText>
                   {selectedAccount === 'all' ? `${accounts.length} accounts` : selectedAccountData?.account_type || ''}
                 </StatHelpText>
-              </Stat>
+              </StatRoot>
 
-              <Stat size="sm">
+              <StatRoot size="sm">
                 <StatLabel>Allocation</StatLabel>
-                <StatNumber>
+                <StatValueText>
                   {selectedAccount === 'all' ? '100%' : `${(selectedAccountData?.allocation_pct ?? 0).toFixed(1)}%`}
-                </StatNumber>
+                </StatValueText>
                 <StatHelpText>
                   {selectedAccount === 'all' ? 'Combined' : `of total portfolio`}
                 </StatHelpText>
-              </Stat>
+              </StatRoot>
             </SimpleGrid>
           </CardBody>
-        </Card>
+        </CardRoot>
       )}
     </VStack>
   );

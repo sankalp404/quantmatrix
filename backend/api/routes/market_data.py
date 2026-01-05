@@ -691,6 +691,7 @@ async def get_coverage(
         def _kpi_cards() -> List[Dict[str, Any]]:
             tracked = int(snapshot.get("tracked_count") or 0)
             total_symbols = int(snapshot.get("symbols") or 0)
+            stale_m5 = int(status_info.get("stale_m5") or 0)
             return [
                 {
                     "id": "tracked",
@@ -716,7 +717,7 @@ async def get_coverage(
                     "id": "stale_daily",
                     "label": "Stale (>48h)",
                     "value": status_info.get("stale_daily"),
-                    "help": f"{status_info.get('stale_m5', 0)} missing 5m",
+                    "help": "All 5m covered" if stale_m5 == 0 else f"{stale_m5} missing 5m",
                 },
             ]
 

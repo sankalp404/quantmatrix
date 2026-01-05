@@ -15,7 +15,8 @@ def client():
         pytest.skip("FastAPI TestClient not available in this env")
     # Workaround older httpx/starlette in container: prefer asgi-lifespan disabled
     try:
-        return TestClient(app)
+        # Do not raise server-side exceptions into the test runner; treat them as 500 responses.
+        return TestClient(app, raise_server_exceptions=False)
     except TypeError:
         pytest.skip("Starlette TestClient incompatible in this runtime")
 

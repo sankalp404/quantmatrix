@@ -1,6 +1,6 @@
 services:
   postgres_test:
-    image: postgres:15-alpine
+    image: postgres:16-alpine
     container_name: quantmatrix-test-postgres
     environment:
       POSTGRES_DB: ${POSTGRES_TEST_DB}
@@ -12,19 +12,19 @@ services:
     networks:
       - quantmatrix_test_network
     healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_TEST_USER}"]
+      test: [ "CMD-SHELL", "pg_isready -U ${POSTGRES_TEST_USER}" ]
       interval: 5s
       timeout: 3s
       retries: 10
 
   redis_test:
-    image: redis:7-alpine
+    image: redis:7.4-alpine
     container_name: quantmatrix-test-redis
     command: redis-server --appendonly no --requirepass ${REDIS_TEST_PASSWORD}
     networks:
       - quantmatrix_test_network
     healthcheck:
-      test: ["CMD", "redis-cli", "-a", "${REDIS_TEST_PASSWORD}", "--raw", "PING"]
+      test: [ "CMD", "redis-cli", "-a", "${REDIS_TEST_PASSWORD}", "--raw", "PING" ]
       interval: 5s
       timeout: 3s
       retries: 10
@@ -57,5 +57,3 @@ networks:
 volumes:
   postgres_test_data:
     driver: local
-
-

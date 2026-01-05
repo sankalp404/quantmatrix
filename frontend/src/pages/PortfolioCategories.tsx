@@ -30,11 +30,11 @@ import {
   Tr,
   Th,
   Td,
-  TableContainer,
+  TableScrollArea,
   IconButton,
-  Menu,
-  MenuButton,
-  MenuList,
+  MenuRoot,
+  MenuTrigger,
+  MenuContent,
   MenuItem,
   NumberInput,
   NumberInputField,
@@ -53,7 +53,6 @@ import {
   StatArrow,
   Tooltip,
   Switch,
-  useColorModeValue,
 } from '@chakra-ui/react';
 import {
   FaPlus,
@@ -163,8 +162,8 @@ const PortfolioCategories: React.FC = () => {
   const { isOpen: isRebalanceModalOpen, onOpen: onRebalanceModalOpen, onClose: onRebalanceModalClose } = useDisclosure();
 
   const toast = useToast();
-  const cardBg = useColorModeValue('white', 'gray.800');
-  const borderColor = useColorModeValue('gray.200', 'gray.700');
+  const cardBg = 'gray.800';
+  const borderColor = 'gray.700';
 
   useEffect(() => {
     initializeData();
@@ -488,26 +487,27 @@ const PortfolioCategories: React.FC = () => {
                         {status.replace('-', ' ')}
                       </Badge>
                     </VStack>
-                    <Menu>
-                      <MenuButton
-                        as={IconButton}
-                        icon={<FaEllipsisV />}
-                        variant="ghost"
-                        size="sm"
-                      />
-                      <MenuList>
-                        <MenuItem icon={<FaEdit />}>Edit</MenuItem>
+                    <MenuRoot>
+                      <MenuTrigger asChild>
+                        <IconButton aria-label="Category menu" icon={<FaEllipsisV />} variant="ghost" size="sm" />
+                      </MenuTrigger>
+                      <MenuContent>
+                        <MenuItem value="edit">
+                          <HStack>
+                            <FaEdit />
+                            <Text>Edit</Text>
+                          </HStack>
+                        </MenuItem>
                         {!category.isCore && (
-                          <MenuItem
-                            icon={<FaTrash />}
-                            onClick={() => deleteCategory(category.id)}
-                            color="red.500"
-                          >
-                            Delete
+                          <MenuItem value="delete" onClick={() => deleteCategory(category.id)}>
+                            <HStack>
+                              <FaTrash />
+                              <Text color="red.500">Delete</Text>
+                            </HStack>
                           </MenuItem>
                         )}
-                      </MenuList>
-                    </Menu>
+                      </MenuContent>
+                    </MenuRoot>
                   </Flex>
                 </CardHeader>
                 <CardBody pt={0}>
@@ -560,7 +560,7 @@ const PortfolioCategories: React.FC = () => {
               <Heading size="md">Unassigned Holdings ({unassignedHoldings.length})</Heading>
             </CardHeader>
             <CardBody>
-              <TableContainer>
+              <TableScrollArea>
                 <Table size="sm">
                   <Thead>
                     <Tr>
@@ -605,7 +605,7 @@ const PortfolioCategories: React.FC = () => {
                     ))}
                   </Tbody>
                 </Table>
-              </TableContainer>
+              </TableScrollArea>
             </CardBody>
           </Card>
         )}

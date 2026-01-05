@@ -12,19 +12,18 @@ import {
   Select,
   Input,
   InputGroup,
-  InputLeftElement,
+  InputElement,
   Button,
   Badge,
-  Stat,
+  StatRoot,
   StatLabel,
-  StatNumber,
   StatHelpText,
-  StatArrow,
-  useColorModeValue,
+  StatValueText,
+  StatUpIndicator,
+  StatDownIndicator,
   Spinner,
-  Alert,
-  AlertIcon,
-  useToast,
+  AlertRoot,
+  AlertIndicator,
   SimpleGrid,
   Flex,
   Tooltip,
@@ -35,7 +34,7 @@ import {
   Tr,
   Th,
   Td,
-  TableContainer,
+  TableScrollArea,
   Progress,
 } from '@chakra-ui/react';
 import {
@@ -56,6 +55,10 @@ import AccountFilterWrapper from '../components/AccountFilterWrapper';
 import { transformPortfolioToAccounts, AccountData } from '../hooks/useAccountFilter';
 import SortableTable, { Column } from '../components/SortableTable';
 import { useAccountContext } from '../context/AccountContext';
+import toast from 'react-hot-toast';
+
+// Chakra v3 migration shim: prefer dark values until we reintroduce color-mode properly.
+const useColorModeValue = <T,>(_light: T, dark: T) => dark;
 
 interface Transaction {
   id: string;
@@ -269,7 +272,6 @@ const Transactions: React.FC = () => {
 
   const bgColor = useColorModeValue('white', 'gray.800');
   const borderColor = useColorModeValue('gray.200', 'gray.600');
-  const toast = useToast();
 
   const [selectedAccountSSR, setSelectedAccountSSR] = useState<string | undefined>(undefined);
 
@@ -342,13 +344,7 @@ const Transactions: React.FC = () => {
     } catch (err) {
       console.error('Error fetching transaction data:', err);
       setError(handleApiError(err));
-      toast({
-        title: 'Error',
-        description: 'Failed to load transaction data',
-        status: 'error',
-        duration: 5000,
-        isClosable: true,
-      });
+      toast.error('Failed to load transaction data');
     } finally {
       setLoading(false);
     }
@@ -470,13 +466,13 @@ const Transactions: React.FC = () => {
   if (error) {
     return (
       <Container maxW="container.xl" py={8}>
-        <Alert status="error">
-          <AlertIcon />
+        <AlertRoot status="error">
+          <AlertIndicator />
           {error}
           <Button ml={4} onClick={() => fetchData(selectedAccountSSR, tableOffset)} size="sm">
             Retry
           </Button>
-        </Alert>
+        </AlertRoot>
       </Container>
     );
   }
@@ -512,43 +508,43 @@ const Transactions: React.FC = () => {
         {/* Enhanced Summary Cards */}
         {summary && (
           <SimpleGrid columns={{ base: 2, md: 5 }} spacing={4}>
-            <Stat>
+            <StatRoot>
               <StatLabel>Total Transactions</StatLabel>
-              <StatNumber>{summary.total_transactions}</StatNumber>
+              <StatValueText>{summary.total_transactions}</StatValueText>
               <StatHelpText>
                 {summary.buy_count} buys • {summary.sell_count} sells
               </StatHelpText>
-            </Stat>
-            <Stat>
+            </StatRoot>
+            <StatRoot>
               <StatLabel>Total Volume</StatLabel>
-              <StatNumber>${summary.total_value.toLocaleString()}</StatNumber>
+              <StatValueText>${summary.total_value.toLocaleString()}</StatValueText>
               <StatHelpText>Trade volume</StatHelpText>
-            </Stat>
-            <Stat>
+            </StatRoot>
+            <StatRoot>
               <StatLabel>Net Buys</StatLabel>
-              <StatNumber color="green.500">
+              <StatValueText color="green.500">
                 ${summary.net_buy_value.toLocaleString()}
-              </StatNumber>
+              </StatValueText>
               <StatHelpText>
-                <StatArrow type="increase" />
+                <StatUpIndicator />
                 Purchases
               </StatHelpText>
-            </Stat>
-            <Stat>
+            </StatRoot>
+            <StatRoot>
               <StatLabel>Net Sells</StatLabel>
-              <StatNumber color="red.500">
+              <StatValueText color="red.500">
                 ${summary.net_sell_value.toLocaleString()}
-              </StatNumber>
+              </StatValueText>
               <StatHelpText>
-                <StatArrow type="decrease" />
+                <StatDownIndicator />
                 Sales
               </StatHelpText>
-            </Stat>
-            <Stat>
+            </StatRoot>
+            <StatRoot>
               <StatLabel>Total Fees</StatLabel>
-              <StatNumber>${(summary.total_commission + summary.total_fees).toFixed(2)}</StatNumber>
+              <StatValueText>${(summary.total_commission + summary.total_fees).toFixed(2)}</StatValueText>
               <StatHelpText>Commission + fees</StatHelpText>
-            </Stat>
+            </StatRoot>
           </SimpleGrid>
         )}
 
@@ -636,10 +632,14 @@ const Transactions: React.FC = () => {
                   <CardBody>
                     <VStack spacing={4}>
                       <Flex wrap="wrap" gap={4} align="center" width="full">
-                        <InputGroup maxW="300px">
-                          <InputLeftElement pointerEvents="none">
-                            <FiSearch color="gray.300" />
-                          </InputLeftElement>
+                        <InputGroup
+                          maxW="300px"
+                          startElement={
+                            <InputElement pointerEvents="none">
+                              <FiSearch color="gray.300" />
+                            </InputElement>
+                          }
+                        >
                           <Input
                             placeholder="Search transactions..."
                             value={searchTerm}
@@ -756,7 +756,7 @@ const Transactions: React.FC = () => {
                       </HStack>
                     </CardHeader>
                     <CardBody>
-                      <TableContainer>
+                      <TableScrollArea>
                         <Table size="sm" variant="simple">
                           <Thead>
                             <Tr>
@@ -776,12 +776,12 @@ const Transactions: React.FC = () => {
                             ))}
                           </Tbody>
                         </Table>
-                      </TableContainer>
+                      </TableScrollArea>
 
                       {sortedTransactions.length === 0 && (
                         <Box textAlign="center" py={8}>
-                          <Alert status="info" justifyContent="center">
-                            <AlertIcon />
+                          <AlertRoot status="info" justifyContent="center">
+                            <AlertIndicator />
                             <VStack spacing={2}>
                               <Text color="gray.600" fontWeight="medium">
                                 {transactions.length === 0
@@ -790,7 +790,7 @@ const Transactions: React.FC = () => {
                                 }
                               </Text>
                             </VStack>
-                          </Alert>
+                          </AlertRoot>
                         </Box>
                       )}
                     </CardBody>

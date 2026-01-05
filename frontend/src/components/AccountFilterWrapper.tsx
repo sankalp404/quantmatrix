@@ -1,5 +1,5 @@
 import React, { ReactNode } from 'react';
-import { Box, VStack, Alert, AlertIcon, Spinner, Text } from '@chakra-ui/react';
+import { Box, VStack, AlertRoot, AlertIndicator, AlertDescription, Spinner, Text } from '@chakra-ui/react';
 import AccountSelector from './AccountSelector';
 import { useAccountFilter, AccountData, FilterableItem, AccountFilterConfig } from '../hooks/useAccountFilter';
 
@@ -44,7 +44,7 @@ function AccountFilterWrapper<T extends FilterableItem>({
   // Show loading state
   if (loading) {
     return (
-      <VStack spacing={4} py={8}>
+      <VStack gap={4} py={8}>
         <Spinner size="xl" color="blue.500" />
         <Text>Loading account data...</Text>
       </VStack>
@@ -54,15 +54,15 @@ function AccountFilterWrapper<T extends FilterableItem>({
   // Show error state
   if (error) {
     return (
-      <Alert status="error" borderRadius="md">
-        <AlertIcon />
-        Error loading account data: {error}
-      </Alert>
+      <AlertRoot status="error" borderRadius="md">
+        <AlertIndicator />
+        <AlertDescription>Error loading account data: {error}</AlertDescription>
+      </AlertRoot>
     );
   }
 
   return (
-    <VStack spacing={6} align="stretch">
+    <VStack gap={6} align="stretch">
       {/* Account Filter UI */}
       <AccountSelector
         accounts={accounts}

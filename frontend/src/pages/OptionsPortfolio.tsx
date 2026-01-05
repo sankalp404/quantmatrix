@@ -15,32 +15,30 @@ import {
   Select,
   Input,
   InputGroup,
-  InputLeftElement,
-  Tabs,
-  TabList,
-  TabPanels,
-  Tab,
-  TabPanel,
-  Stat,
+  InputElement,
+  TabsRoot,
+  TabsList,
+  TabsTrigger,
+  TabsContent,
+  StatRoot,
   StatLabel,
-  StatNumber,
   StatHelpText,
-  StatArrow,
+  StatValueText,
+  StatUpIndicator,
+  StatDownIndicator,
   Spinner,
-  Alert,
-  AlertIcon,
-  useColorModeValue,
+  AlertRoot,
+  AlertIndicator,
   Flex,
   Icon,
   Tooltip,
   Progress,
-  Menu,
-  MenuButton,
-  MenuList,
+  MenuRoot,
+  MenuTrigger,
+  MenuContent,
   MenuItem,
   IconButton,
-  TableContainer,
-  useToast,
+  TableScrollArea,
   Table,
   Thead,
   Tbody,
@@ -54,6 +52,7 @@ import {
   TagCloseButton,
 } from '@chakra-ui/react';
 import AppDivider from '../components/ui/AppDivider';
+import toast from 'react-hot-toast';
 import {
   ResponsiveContainer,
   PieChart,
@@ -147,8 +146,8 @@ const UnderlyingCard: React.FC<{
   isExpanded?: boolean;
   onToggle?: () => void;
 }> = ({ symbol, data, isExpanded = false, onToggle }) => {
-  const cardBg = useColorModeValue('white', 'gray.800');
-  const borderColor = useColorModeValue('gray.200', 'gray.600');
+  const cardBg = 'gray.800';
+  const borderColor = 'gray.600';
   const profitColor = data.total_pnl >= 0 ? 'green.500' : 'red.500';
 
   // Calculate additional metrics
@@ -226,10 +225,10 @@ const UnderlyingCard: React.FC<{
             {/* Calls Section */}
             <Box
               p={3}
-              bg={useColorModeValue('green.50', 'green.900')}
+              bg={'green.900'}
               borderRadius="md"
               border="1px solid"
-              borderColor={useColorModeValue('green.200', 'green.700')}
+              borderColor={'green.700'}
             >
               <VStack align="start" spacing={2}>
                 <HStack justify="space-between" width="full">
@@ -284,10 +283,10 @@ const UnderlyingCard: React.FC<{
             {/* Puts Section */}
             <Box
               p={3}
-              bg={useColorModeValue('red.50', 'red.900')}
+              bg={'red.900'}
               borderRadius="md"
               border="1px solid"
-              borderColor={useColorModeValue('red.200', 'red.700')}
+              borderColor={'red.700'}
             >
               <VStack align="start" spacing={2}>
                 <HStack justify="space-between" width="full">
@@ -346,7 +345,7 @@ const UnderlyingCard: React.FC<{
               <AppDivider mb={4} />
               <Text fontSize="sm" fontWeight="semibold" mb={3}>All Positions</Text>
 
-              <TableContainer>
+              <TableScrollArea>
                 <Table size="sm">
                   <Thead>
                     <Tr>
@@ -388,7 +387,7 @@ const UnderlyingCard: React.FC<{
                       ))}
                   </Tbody>
                 </Table>
-              </TableContainer>
+              </TableScrollArea>
             </Box>
           )}
         </VStack>
@@ -412,9 +411,8 @@ const OptionsPortfolio: React.FC = () => {
   const [selectedAccountSSR, setSelectedAccountSSR] = useState<string | undefined>(undefined);
   const [activity, setActivity] = useState<any[]>([]);
 
-  const cardBg = useColorModeValue('white', 'gray.800');
-  const borderColor = useColorModeValue('gray.200', 'gray.600');
-  const toast = useToast();
+  const cardBg = 'gray.800';
+  const borderColor = 'gray.600';
   const { status: flexStatus, loading: flexLoading, error: flexError, refresh: refreshFlex, syncTaxLots } = useFlexQuery();
 
   useEffect(() => {
@@ -648,8 +646,8 @@ const OptionsPortfolio: React.FC = () => {
   if (error) {
     return (
       <Container maxW="container.xl" py={8}>
-        <Alert status="error">
-          <AlertIcon />
+        <AlertRoot status="error">
+          <AlertIndicator />
           <Box flex="1">
             <Text fontWeight="bold">Failed to load options portfolio</Text>
             <Text fontSize="sm">{typeof error === 'string' ? error : 'An error occurred'}</Text>
@@ -657,7 +655,7 @@ const OptionsPortfolio: React.FC = () => {
           <Button ml={4} onClick={handleRefresh} size="sm">
             Retry
           </Button>
-        </Alert>
+        </AlertRoot>
       </Container>
     );
   }
@@ -710,14 +708,15 @@ const OptionsPortfolio: React.FC = () => {
                   try {
                     const account = selectedAccountSSR || accounts?.[0]?.account_id;
                     if (!account) {
-                      toast({ title: 'No account selected', status: 'warning' });
+                      toast.error('No account selected');
                       return;
                     }
                     const res: any = await syncTaxLots(account);
-                    toast({ title: res?.message || 'Tax lots synced', status: res?.success ? 'success' : 'info' });
+                    if (res?.success) toast.success(res?.message || 'Tax lots synced');
+                    else toast(res?.message || 'Tax lots synced');
                     refreshFlex();
                   } catch (e: any) {
-                    toast({ title: e?.message || 'Sync failed', status: 'error' });
+                    toast.error(e?.message || 'Sync failed');
                   }
                 }}
               >
@@ -824,44 +823,48 @@ const OptionsPortfolio: React.FC = () => {
               <VStack spacing={4} align="stretch">
                 {/* Dynamic Summary Cards - Updates with filtering */}
                 <SimpleGrid columns={{ base: 2, md: 4 }} spacing={4}>
-                  <Stat>
+                  <StatRoot>
                     <StatLabel>Filtered Value</StatLabel>
-                    <StatNumber>${filteredSummary.total_market_value.toLocaleString()}</StatNumber>
+                    <StatValueText>${filteredSummary.total_market_value.toLocaleString()}</StatValueText>
                     <StatHelpText>Market value</StatHelpText>
-                  </Stat>
-                  <Stat>
+                  </StatRoot>
+                  <StatRoot>
                     <StatLabel>Unrealized P&L</StatLabel>
-                    <StatNumber color={filteredSummary.total_unrealized_pnl >= 0 ? 'green.500' : 'red.500'}>
+                    <StatValueText color={filteredSummary.total_unrealized_pnl >= 0 ? 'green.500' : 'red.500'}>
                       {filteredSummary.total_unrealized_pnl >= 0 ? '+' : ''}${filteredSummary.total_unrealized_pnl.toFixed(2)}
-                    </StatNumber>
+                    </StatValueText>
                     <StatHelpText>
-                      <StatArrow type={filteredSummary.total_unrealized_pnl >= 0 ? 'increase' : 'decrease'} />
+                      {filteredSummary.total_unrealized_pnl >= 0 ? <StatUpIndicator /> : <StatDownIndicator />}
                       {filteredSummary.total_unrealized_pnl_pct.toFixed(2)}%
                     </StatHelpText>
-                  </Stat>
-                  <Stat>
+                  </StatRoot>
+                  <StatRoot>
                     <StatLabel>Day P&L</StatLabel>
-                    <StatNumber color={filteredSummary.total_day_pnl >= 0 ? 'green.500' : 'red.500'}>
+                    <StatValueText color={filteredSummary.total_day_pnl >= 0 ? 'green.500' : 'red.500'}>
                       {filteredSummary.total_day_pnl >= 0 ? '+' : ''}${filteredSummary.total_day_pnl.toFixed(2)}
-                    </StatNumber>
+                    </StatValueText>
                     <StatHelpText>Today's change</StatHelpText>
-                  </Stat>
-                  <Stat>
+                  </StatRoot>
+                  <StatRoot>
                     <StatLabel>Positions</StatLabel>
-                    <StatNumber>{filteredSummary.total_positions}</StatNumber>
+                    <StatValueText>{filteredSummary.total_positions}</StatValueText>
                     <StatHelpText>
                       {filteredSummary.calls_count}C / {filteredSummary.puts_count}P
                     </StatHelpText>
-                  </Stat>
+                  </StatRoot>
                 </SimpleGrid>
                 {/* Filters */}
                 <Card bg={cardBg} borderColor={borderColor}>
                   <CardBody>
                     <Flex wrap="wrap" gap={4} align="center">
-                      <InputGroup maxW="300px">
-                        <InputLeftElement pointerEvents="none">
-                          <FiSearch color="gray.300" />
-                        </InputLeftElement>
+                      <InputGroup
+                        maxW="300px"
+                        startElement={
+                          <InputElement pointerEvents="none">
+                            <FiSearch color="gray.300" />
+                          </InputElement>
+                        }
+                      >
                         <Input
                           placeholder="Search by symbol..."
                           value={searchTerm}
@@ -902,207 +905,205 @@ const OptionsPortfolio: React.FC = () => {
                 </Card>
 
                 {/* Tabs */}
-                <Tabs variant="enclosed" colorScheme="blue" defaultIndex={0}>
-                  <TabList>
-                    <Tab>By Symbol ({Object.keys(filteredUnderlyings).length})</Tab>
-                    <Tab>All Positions ({filteredPositions.length})</Tab>
-                    <Tab>Analytics</Tab>
-                    <Tab>Activity</Tab>
-                  </TabList>
+                <TabsRoot defaultValue="bySymbol" variant="enclosed" colorScheme="blue">
+                  <TabsList>
+                    <TabsTrigger value="bySymbol">By Symbol ({Object.keys(filteredUnderlyings).length})</TabsTrigger>
+                    <TabsTrigger value="allPositions">All Positions ({filteredPositions.length})</TabsTrigger>
+                    <TabsTrigger value="analytics">Analytics</TabsTrigger>
+                    <TabsTrigger value="activity">Activity</TabsTrigger>
+                  </TabsList>
 
-                  <TabPanels>
-                    {/* By Symbol (default first) */}
-                    <TabPanel px={0}>
-                      <VStack spacing={4} align="stretch">
-                        <HStack justify="space-between">
-                          <Text fontSize="md" color="gray.600">
-                            Click any card to expand details
-                          </Text>
-                          <Button
-                            size="sm"
-                            variant="outline"
-                            onClick={() => {
-                              if (expandedUnderlyings.size === Object.keys(filteredUnderlyings).length) {
-                                setExpandedUnderlyings(new Set());
-                              } else {
-                                setExpandedUnderlyings(new Set(Object.keys(filteredUnderlyings)));
-                              }
-                            }}
-                          >
-                            {expandedUnderlyings.size === Object.keys(filteredUnderlyings).length ? 'Collapse All' : 'Expand All'}
-                          </Button>
-                        </HStack>
+                  {/* By Symbol (default first) */}
+                  <TabsContent value="bySymbol" px={0}>
+                    <VStack spacing={4} align="stretch">
+                      <HStack justify="space-between">
+                        <Text fontSize="md" color="gray.600">
+                          Click any card to expand details
+                        </Text>
+                        <Button
+                          size="sm"
+                          variant="outline"
+                          onClick={() => {
+                            if (expandedUnderlyings.size === Object.keys(filteredUnderlyings).length) {
+                              setExpandedUnderlyings(new Set());
+                            } else {
+                              setExpandedUnderlyings(new Set(Object.keys(filteredUnderlyings)));
+                            }
+                          }}
+                        >
+                          {expandedUnderlyings.size === Object.keys(filteredUnderlyings).length ? 'Collapse All' : 'Expand All'}
+                        </Button>
+                      </HStack>
 
-                        <SimpleGrid columns={{ base: 1, lg: 2 }} spacing={6}>
-                          {(Object.entries(filteredUnderlyings) as [string, UnderlyingGroup][])
-                            .sort(([symbolA, dataA], [symbolB, dataB]) => {
-                              // Apply sorting based on sortBy state
-                              switch (sortBy) {
-                                case 'days_to_expiration':
-                                  // Average days to expiration for the underlying
-                                  const avgDaysA = [...dataA.calls, ...dataA.puts].reduce((sum, pos) => sum + pos.days_to_expiration, 0) / (dataA.calls.length + dataA.puts.length) || 0;
-                                  const avgDaysB = [...dataB.calls, ...dataB.puts].reduce((sum, pos) => sum + pos.days_to_expiration, 0) / (dataB.calls.length + dataB.puts.length) || 0;
-                                  return avgDaysA - avgDaysB;
-
-                                case 'unrealized_pnl':
-                                  return dataB.total_pnl - dataA.total_pnl;
-
-                                case 'market_value':
-                                  return Math.abs(dataB.total_value) - Math.abs(dataA.total_value);
-
-                                case 'underlying_symbol':
-                                  return symbolA.localeCompare(symbolB);
-
-                                default:
-                                  return Math.abs(dataB.total_value) - Math.abs(dataA.total_value);
-                              }
-                            })
-                            .map(([symbol, data]) => (
-                              <UnderlyingCard
-                                key={symbol}
-                                symbol={symbol}
-                                data={data}
-                                isExpanded={expandedUnderlyings.has(symbol)}
-                                onToggle={() => toggleUnderlying(symbol)}
-                              />
-                            ))}
-                        </SimpleGrid>
-                      </VStack>
-                    </TabPanel>
-
-                    {/* All Positions */}
-                    <TabPanel px={0}>
-                      <VStack spacing={4} align="stretch">
-                        <Card bg={cardBg} borderColor={borderColor}>
-                          <CardHeader>
-                            <HStack justify="space-between">
-                              <Heading size="md">All Options Positions</Heading>
-                              <Badge variant="outline" p={2} fontSize="sm">
-                                {filteredPositions.length} positions
-                              </Badge>
-                            </HStack>
-                          </CardHeader>
-                          <CardBody>
-                            <SortableTable
-                              key={`options-${sortBy}-${filteredPositions.length}`}
-                              data={filteredPositions}
-                              columns={optionsColumns}
-                              defaultSortBy={sortBy}
-                              defaultSortOrder="asc"
-                              emptyMessage="No options positions found"
-                            />
-                          </CardBody>
-                        </Card>
-                      </VStack>
-                    </TabPanel>
-                    {/* Analytics */}
-                    <TabPanel px={0}>
                       <SimpleGrid columns={{ base: 1, lg: 2 }} spacing={6}>
-                        <Card bg={cardBg} borderColor={borderColor}>
-                          <CardHeader>
-                            <Heading size="md">Calls vs Puts Distribution</Heading>
-                          </CardHeader>
-                          <CardBody>
-                            <ResponsiveContainer width="100%" height={300}>
-                              <PieChart>
-                                <Pie
-                                  dataKey="value"
-                                  data={typeDistribution}
-                                  cx="50%"
-                                  cy="50%"
-                                  innerRadius={60}
-                                  outerRadius={120}
-                                  paddingAngle={5}
-                                >
-                                  {typeDistribution.map((entry, index) => (
-                                    <Cell key={`cell-${index}`} fill={entry.color} />
-                                  ))}
-                                </Pie>
-                                <RechartsTooltip
-                                  formatter={(value: number, name: string, props: any) => [
-                                    `$${value.toLocaleString()} (${props.payload.count} positions)`,
-                                    name
-                                  ]}
-                                />
-                                <Legend />
-                              </PieChart>
-                            </ResponsiveContainer>
-                          </CardBody>
-                        </Card>
+                        {(Object.entries(filteredUnderlyings) as [string, UnderlyingGroup][])
+                          .sort(([symbolA, dataA], [symbolB, dataB]) => {
+                            // Apply sorting based on sortBy state
+                            switch (sortBy) {
+                              case 'days_to_expiration':
+                                // Average days to expiration for the underlying
+                                const avgDaysA = [...dataA.calls, ...dataA.puts].reduce((sum, pos) => sum + pos.days_to_expiration, 0) / (dataA.calls.length + dataA.puts.length) || 0;
+                                const avgDaysB = [...dataB.calls, ...dataB.puts].reduce((sum, pos) => sum + pos.days_to_expiration, 0) / (dataB.calls.length + dataB.puts.length) || 0;
+                                return avgDaysA - avgDaysB;
 
-                        <Card bg={cardBg} borderColor={borderColor}>
-                          <CardHeader>
-                            <Heading size="md">Top Underlyings by Value</Heading>
-                          </CardHeader>
-                          <CardBody>
-                            <ResponsiveContainer width="100%" height={300}>
-                              <BarChart data={underlyingDistribution}>
-                                <CartesianGrid strokeDasharray="3 3" />
-                                <XAxis dataKey="name" />
-                                <YAxis tickFormatter={(value) => `$${value.toLocaleString()}`} />
-                                <RechartsTooltip
-                                  formatter={(value: number, name: string, props: any) => [
-                                    `$${value.toLocaleString()}`,
-                                    `Value (${props.payload.positions} positions)`
-                                  ]}
-                                  labelFormatter={(label) => `${label}`}
-                                />
-                                <Bar dataKey="value" fill="#3182CE" />
-                              </BarChart>
-                            </ResponsiveContainer>
-                          </CardBody>
-                        </Card>
+                              case 'unrealized_pnl':
+                                return dataB.total_pnl - dataA.total_pnl;
+
+                              case 'market_value':
+                                return Math.abs(dataB.total_value) - Math.abs(dataA.total_value);
+
+                              case 'underlying_symbol':
+                                return symbolA.localeCompare(symbolB);
+
+                              default:
+                                return Math.abs(dataB.total_value) - Math.abs(dataA.total_value);
+                            }
+                          })
+                          .map(([symbol, data]) => (
+                            <UnderlyingCard
+                              key={symbol}
+                              symbol={symbol}
+                              data={data}
+                              isExpanded={expandedUnderlyings.has(symbol)}
+                              onToggle={() => toggleUnderlying(symbol)}
+                            />
+                          ))}
                       </SimpleGrid>
-                    </TabPanel>
+                    </VStack>
+                  </TabsContent>
 
-                    {/* Activity */}
-                    <TabPanel px={0}>
+                  {/* All Positions */}
+                  <TabsContent value="allPositions" px={0}>
+                    <VStack spacing={4} align="stretch">
                       <Card bg={cardBg} borderColor={borderColor}>
                         <CardHeader>
                           <HStack justify="space-between">
-                            <Heading size="md">Options Activity</Heading>
-                            <Badge variant="outline" p={2} fontSize="sm">{activity.length} trades</Badge>
+                            <Heading size="md">All Options Positions</Heading>
+                            <Badge variant="outline" p={2} fontSize="sm">
+                              {filteredPositions.length} positions
+                            </Badge>
                           </HStack>
                         </CardHeader>
                         <CardBody>
-                          <TableContainer>
-                            <Table size="sm" variant="simple">
-                              <Thead>
-                                <Tr>
-                                  <Th>Date</Th>
-                                  <Th>Type</Th>
-                                  <Th>Symbol</Th>
-                                  <Th isNumeric>Qty</Th>
-                                  <Th isNumeric>Price</Th>
-                                  <Th>Account</Th>
-                                </Tr>
-                              </Thead>
-                              <Tbody>
-                                {activity.map((t) => (
-                                  <Tr key={`${t.id}-${t.execution_id || t.order_id || t.date}`}>
-                                    <Td>
-                                      <VStack align="start" spacing={0}>
-                                        <Text fontSize="sm">{t.date}</Text>
-                                        <Text fontSize="xs" color="gray.500">{t.time}</Text>
-                                      </VStack>
-                                    </Td>
-                                    <Td>
-                                      <Badge colorScheme={t.type === 'BUY' ? 'green' : 'red'}>{t.type}</Badge>
-                                    </Td>
-                                    <Td>{t.symbol}</Td>
-                                    <Td isNumeric>{t.quantity}</Td>
-                                    <Td isNumeric>${Number(t.price || 0).toFixed(2)}</Td>
-                                    <Td>{t.account}</Td>
-                                  </Tr>
-                                ))}
-                              </Tbody>
-                            </Table>
-                          </TableContainer>
+                          <SortableTable
+                            key={`options-${sortBy}-${filteredPositions.length}`}
+                            data={filteredPositions}
+                            columns={optionsColumns}
+                            defaultSortBy={sortBy}
+                            defaultSortOrder="asc"
+                            emptyMessage="No options positions found"
+                          />
                         </CardBody>
                       </Card>
-                    </TabPanel>
-                  </TabPanels>
-                </Tabs>
+                    </VStack>
+                  </TabsContent>
+                  {/* Analytics */}
+                  <TabsContent value="analytics" px={0}>
+                    <SimpleGrid columns={{ base: 1, lg: 2 }} spacing={6}>
+                      <Card bg={cardBg} borderColor={borderColor}>
+                        <CardHeader>
+                          <Heading size="md">Calls vs Puts Distribution</Heading>
+                        </CardHeader>
+                        <CardBody>
+                          <ResponsiveContainer width="100%" height={300}>
+                            <PieChart>
+                              <Pie
+                                dataKey="value"
+                                data={typeDistribution}
+                                cx="50%"
+                                cy="50%"
+                                innerRadius={60}
+                                outerRadius={120}
+                                paddingAngle={5}
+                              >
+                                {typeDistribution.map((entry, index) => (
+                                  <Cell key={`cell-${index}`} fill={entry.color} />
+                                ))}
+                              </Pie>
+                              <RechartsTooltip
+                                formatter={(value: number, name: string, props: any) => [
+                                  `$${value.toLocaleString()} (${props.payload.count} positions)`,
+                                  name
+                                ]}
+                              />
+                              <Legend />
+                            </PieChart>
+                          </ResponsiveContainer>
+                        </CardBody>
+                      </Card>
+
+                      <Card bg={cardBg} borderColor={borderColor}>
+                        <CardHeader>
+                          <Heading size="md">Top Underlyings by Value</Heading>
+                        </CardHeader>
+                        <CardBody>
+                          <ResponsiveContainer width="100%" height={300}>
+                            <BarChart data={underlyingDistribution}>
+                              <CartesianGrid strokeDasharray="3 3" />
+                              <XAxis dataKey="name" />
+                              <YAxis tickFormatter={(value) => `$${value.toLocaleString()}`} />
+                              <RechartsTooltip
+                                formatter={(value: number, name: string, props: any) => [
+                                  `$${value.toLocaleString()}`,
+                                  `Value (${props.payload.positions} positions)`
+                                ]}
+                                labelFormatter={(label) => `${label}`}
+                              />
+                              <Bar dataKey="value" fill="#3182CE" />
+                            </BarChart>
+                          </ResponsiveContainer>
+                        </CardBody>
+                      </Card>
+                    </SimpleGrid>
+                  </TabsContent>
+
+                  {/* Activity */}
+                  <TabsContent value="activity" px={0}>
+                    <Card bg={cardBg} borderColor={borderColor}>
+                      <CardHeader>
+                        <HStack justify="space-between">
+                          <Heading size="md">Options Activity</Heading>
+                          <Badge variant="outline" p={2} fontSize="sm">{activity.length} trades</Badge>
+                        </HStack>
+                      </CardHeader>
+                      <CardBody>
+                        <TableScrollArea>
+                          <Table size="sm" variant="simple">
+                            <Thead>
+                              <Tr>
+                                <Th>Date</Th>
+                                <Th>Type</Th>
+                                <Th>Symbol</Th>
+                                <Th isNumeric>Qty</Th>
+                                <Th isNumeric>Price</Th>
+                                <Th>Account</Th>
+                              </Tr>
+                            </Thead>
+                            <Tbody>
+                              {activity.map((t) => (
+                                <Tr key={`${t.id}-${t.execution_id || t.order_id || t.date}`}>
+                                  <Td>
+                                    <VStack align="start" spacing={0}>
+                                      <Text fontSize="sm">{t.date}</Text>
+                                      <Text fontSize="xs" color="gray.500">{t.time}</Text>
+                                    </VStack>
+                                  </Td>
+                                  <Td>
+                                    <Badge colorScheme={t.type === 'BUY' ? 'green' : 'red'}>{t.type}</Badge>
+                                  </Td>
+                                  <Td>{t.symbol}</Td>
+                                  <Td isNumeric>{t.quantity}</Td>
+                                  <Td isNumeric>${Number(t.price || 0).toFixed(2)}</Td>
+                                  <Td>{t.account}</Td>
+                                </Tr>
+                              ))}
+                            </Tbody>
+                          </Table>
+                        </TableScrollArea>
+                      </CardBody>
+                    </Card>
+                  </TabsContent>
+                </TabsRoot>
               </VStack>
             );
           }}

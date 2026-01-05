@@ -1,19 +1,18 @@
-FROM node:20-alpine
+FROM node:22-alpine
 
 # Set working directory
 WORKDIR /app
 
-# Copy package files
-COPY frontend/package*.json ./
+# Copy frontend source code (including lockfile) then install.
+# This avoids subtle cache/overwrite issues where package-lock.json changes
+# but an older layer-installed node_modules remains.
+COPY frontend/ .
 
 # Install dependencies (clean install)
 RUN npm ci
 
-# Copy frontend source code
-COPY frontend/ .
-
 # Expose port
 EXPOSE 3000
 
-# Start development server
-CMD ["npm", "start"] 
+# Start development server (compose overrides in dev, but keep a sane default)
+CMD ["npm", "run", "dev", "--", "--host", "0.0.0.0", "--port", "3000"]

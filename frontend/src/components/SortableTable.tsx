@@ -1,17 +1,16 @@
 import React, { useState, useMemo } from 'react';
 import {
-  Table,
-  Thead,
-  Tbody,
-  Tr,
-  Th,
-  Td,
-  TableContainer,
+  TableScrollArea,
+  TableRoot,
+  TableHeader,
+  TableBody,
+  TableRow,
+  TableColumnHeader,
+  TableCell,
   Box,
   Icon,
   HStack,
   Text,
-  useColorModeValue,
 } from '@chakra-ui/react';
 import { FiChevronUp, FiChevronDown, FiMinus } from 'react-icons/fi';
 
@@ -52,8 +51,8 @@ function SortableTable<T = any>({
   const [sortBy, setSortBy] = useState<string>(defaultSortBy || columns[0]?.key || '');
   const [sortOrder, setSortOrder] = useState<'asc' | 'desc'>(defaultSortOrder);
 
-  const borderColor = useColorModeValue('gray.200', 'gray.600');
-  const hoverBg = useColorModeValue('gray.50', 'gray.700');
+  const borderColor = 'border.subtle';
+  const hoverBg = 'bg.panel';
 
   const handleSort = (columnKey: string) => {
     const column = columns.find(col => col.key === columnKey);
@@ -79,6 +78,9 @@ function SortableTable<T = any>({
       ? <Icon as={FiChevronUp} color="blue.500" />
       : <Icon as={FiChevronDown} color="blue.500" />;
   };
+
+  // Chakra v3 table variants differ from v2. Normalize our legacy variants.
+  const tableVariant: 'line' | 'outline' | undefined = variant === 'unstyled' ? undefined : 'line';
 
   const sortedData = useMemo(() => {
     if (!sortBy || !data.length) return data;
@@ -123,53 +125,53 @@ function SortableTable<T = any>({
   }
 
   return (
-    <TableContainer maxHeight={maxHeight} overflowY={maxHeight ? 'auto' : 'visible'}>
-      <Table variant={variant} size={size}>
+    <TableScrollArea maxHeight={maxHeight} overflowY={maxHeight ? 'auto' : 'visible'}>
+      <TableRoot variant={tableVariant} size={size}>
         {showHeader && (
-          <Thead>
-            <Tr>
+          <TableHeader>
+            <TableRow>
               {columns.map((column) => (
-                <Th
+                <TableColumnHeader
                   key={column.key}
                   onClick={() => handleSort(column.key)}
                   cursor={column.sortable ? 'pointer' : 'default'}
                   _hover={column.sortable ? { bg: hoverBg } : undefined}
                   userSelect="none"
-                  isNumeric={column.isNumeric}
+                  textAlign={column.isNumeric ? 'end' : 'start'}
                   width={column.width}
                   borderColor={borderColor}
                 >
-                  <HStack spacing={2} justify={column.isNumeric ? 'flex-end' : 'flex-start'}>
+                  <HStack gap={2} justify={column.isNumeric ? 'flex-end' : 'flex-start'}>
                     <Text>{column.header}</Text>
                     {column.sortable && getSortIcon(column.key)}
                   </HStack>
-                </Th>
+                </TableColumnHeader>
               ))}
-            </Tr>
-          </Thead>
+            </TableRow>
+          </TableHeader>
         )}
-        <Tbody>
+        <TableBody>
           {sortedData.map((item, index) => (
-            <Tr key={index} _hover={{ bg: hoverBg }}>
+            <TableRow key={index} _hover={{ bg: hoverBg }}>
               {columns.map((column) => {
                 const value = column.accessor(item);
                 const renderedValue = column.render ? column.render(value, item) : value;
 
                 return (
-                  <Td
+                  <TableCell
                     key={column.key}
-                    isNumeric={column.isNumeric}
+                    textAlign={column.isNumeric ? 'end' : 'start'}
                     borderColor={borderColor}
                   >
                     {renderedValue}
-                  </Td>
+                  </TableCell>
                 );
               })}
-            </Tr>
+            </TableRow>
           ))}
-        </Tbody>
-      </Table>
-    </TableContainer>
+        </TableBody>
+      </TableRoot>
+    </TableScrollArea>
   );
 }
 

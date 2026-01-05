@@ -13,21 +13,19 @@ import {
   Badge,
   Button,
   Select,
-  Tabs,
-  TabList,
-  TabPanels,
-  Tab,
-  TabPanel,
-  Stat,
+  TabsRoot,
+  TabsList,
+  TabsTrigger,
+  TabsContent,
+  StatRoot,
   StatLabel,
-  StatNumber,
   StatHelpText,
-  StatArrow,
-  useColorModeValue,
+  StatValueText,
+  StatUpIndicator,
+  StatDownIndicator,
   Spinner,
-  Alert,
-  AlertIcon,
-  useToast,
+  AlertRoot,
+  AlertIndicator,
   Flex,
   Progress,
   Table,
@@ -36,7 +34,7 @@ import {
   Tr,
   Th,
   Td,
-  TableContainer,
+  TableScrollArea,
   List,
   ListItem,
   ListIcon,
@@ -62,6 +60,10 @@ import AccountFilterWrapper from '../components/AccountFilterWrapper';
 import { transformPortfolioToAccounts } from '../hooks/useAccountFilter';
 import SortableTable, { Column } from '../components/SortableTable';
 import FinvizHeatMap from '../components/FinvizHeatMap';
+import toast from 'react-hot-toast';
+
+// Chakra v3 migration shim: prefer dark values until we reintroduce color-mode properly.
+const useColorModeValue = <T,>(_light: T, dark: T) => dark;
 
 interface Holding {
   symbol: string;
@@ -90,7 +92,6 @@ const Portfolio: React.FC = () => {
 
   const cardBg = useColorModeValue('white', 'gray.800');
   const borderColor = useColorModeValue('gray.200', 'gray.700');
-  const toast = useToast();
 
   useEffect(() => {
     fetchPortfolioData();
@@ -147,13 +148,7 @@ const Portfolio: React.FC = () => {
       }
     } catch (error) {
       console.error('Error fetching performance data:', error);
-      toast({
-        title: 'Error',
-        description: 'Failed to load performance analytics',
-        status: 'error',
-        duration: 3000,
-        isClosable: true,
-      });
+      toast.error('Failed to load performance analytics');
     } finally {
       setPerformanceLoading(false);
     }
@@ -169,13 +164,7 @@ const Portfolio: React.FC = () => {
       }
     } catch (error) {
       console.error('Error fetching tax data:', error);
-      toast({
-        title: 'Error',
-        description: 'Failed to load tax optimization analysis',
-        status: 'error',
-        duration: 3000,
-        isClosable: true,
-      });
+      toast.error('Failed to load tax optimization analysis');
     } finally {
       setTaxLoading(false);
     }
@@ -186,25 +175,13 @@ const Portfolio: React.FC = () => {
     try {
       await portfolioApi.sync();
 
-      toast({
-        title: 'Portfolio Synced',
-        description: 'Portfolio data has been synced successfully',
-        status: 'success',
-        duration: 3000,
-        isClosable: true,
-      });
+      toast.success('Portfolio data has been synced successfully');
 
       await fetchPortfolioData();
 
     } catch (err: any) {
       console.error('Error syncing portfolio data:', err);
-      toast({
-        title: 'Sync Failed',
-        description: err.message || 'Failed to sync portfolio data',
-        status: 'error',
-        duration: 5000,
-        isClosable: true,
-      });
+      toast.error(err.message || 'Failed to sync portfolio data');
     } finally {
       setSyncing(false);
     }
@@ -380,309 +357,307 @@ const Portfolio: React.FC = () => {
           }}
         >
           {(filteredHoldings, filterState) => (
-            <Tabs variant="enclosed" colorScheme="blue">
-              <TabList>
-                <Tab>Holdings Overview</Tab>
-                <Tab>Performance</Tab>
-                <Tab>Tax Analysis</Tab>
-              </TabList>
+            <TabsRoot defaultValue="holdings" variant="enclosed" colorScheme="blue">
+              <TabsList>
+                <TabsTrigger value="holdings">Holdings Overview</TabsTrigger>
+                <TabsTrigger value="performance">Performance</TabsTrigger>
+                <TabsTrigger value="tax">Tax Analysis</TabsTrigger>
+              </TabsList>
 
-              <TabPanels>
-                <TabPanel px={0}>
-                  {/* Controls */}
-                  <HStack spacing={4} mb={6}>
-                    <Select
-                      value={sortBy}
-                      onChange={(e) => setSortBy(e.target.value)}
-                      w="200px"
-                      size="sm"
-                    >
-                      <option value="value">Sort by Value</option>
-                      <option value="gainLoss">Sort by Gain/Loss $</option>
-                      <option value="gainLossPct">Sort by Gain/Loss %</option>
-                      <option value="symbol">Sort by Symbol</option>
-                    </Select>
+              <TabsContent value="holdings" px={0}>
+                {/* Controls */}
+                <HStack spacing={4} mb={6}>
+                  <Select
+                    value={sortBy}
+                    onChange={(e) => setSortBy(e.target.value)}
+                    w="200px"
+                    size="sm"
+                  >
+                    <option value="value">Sort by Value</option>
+                    <option value="gainLoss">Sort by Gain/Loss $</option>
+                    <option value="gainLossPct">Sort by Gain/Loss %</option>
+                    <option value="symbol">Sort by Symbol</option>
+                  </Select>
 
-                    <Badge variant="outline" p={2}>
-                      {filteredHoldings.length} positions • ${filteredHoldings.reduce((sum, h) => sum + h.value, 0).toLocaleString()}
-                    </Badge>
-                  </HStack>
+                  <Badge variant="outline" p={2}>
+                    {filteredHoldings.length} positions • ${filteredHoldings.reduce((sum, h) => sum + h.value, 0).toLocaleString()}
+                  </Badge>
+                </HStack>
 
-                  {/* Holdings Table */}
-                  <Card bg={cardBg} borderColor={borderColor}>
-                    <CardHeader>
-                      <Heading size="md">Current Holdings</Heading>
-                    </CardHeader>
-                    <CardBody>
-                      <SortableTable
-                        data={sortHoldings(filteredHoldings)}
-                        columns={holdingsColumns}
-                        defaultSortBy="value"
-                        defaultSortOrder="desc"
-                        emptyMessage="No holdings found for the selected account."
-                      />
-                    </CardBody>
-                  </Card>
-                </TabPanel>
+                {/* Holdings Table */}
+                <Card bg={cardBg} borderColor={borderColor}>
+                  <CardHeader>
+                    <Heading size="md">Current Holdings</Heading>
+                  </CardHeader>
+                  <CardBody>
+                    <SortableTable
+                      data={sortHoldings(filteredHoldings)}
+                      columns={holdingsColumns}
+                      defaultSortBy="value"
+                      defaultSortOrder="desc"
+                      emptyMessage="No holdings found for the selected account."
+                    />
+                  </CardBody>
+                </Card>
+              </TabsContent>
 
-                <TabPanel px={0}>
-                  {/* Performance Tab with Real Analytics */}
-                  <VStack spacing={6} align="stretch">
-                    {!performanceData && (
-                      <Button onClick={fetchPerformanceData} isLoading={performanceLoading} loadingText="Loading Analytics...">
-                        Load Performance Analytics
-                      </Button>
-                    )}
+              <TabsContent value="performance" px={0}>
+                {/* Performance Tab with Real Analytics */}
+                <VStack spacing={6} align="stretch">
+                  {!performanceData && (
+                    <Button onClick={fetchPerformanceData} isLoading={performanceLoading} loadingText="Loading Analytics...">
+                      Load Performance Analytics
+                    </Button>
+                  )}
 
-                    {performanceData && (
-                      <>
-                        {/* Performance Metrics Cards */}
-                        <SimpleGrid columns={{ base: 2, md: 4 }} spacing={4}>
-                          <Card bg={cardBg} borderColor={borderColor}>
-                            <CardBody>
-                              <Stat>
-                                <StatLabel>Total Return</StatLabel>
-                                <StatNumber color={performanceData.performance_metrics.total_return >= 0 ? 'green.500' : 'red.500'}>
-                                  {performanceData.performance_metrics.total_return >= 0 ? '+' : ''}
-                                  ${performanceData.performance_metrics.total_return?.toLocaleString()}
-                                </StatNumber>
-                                <StatHelpText>
-                                  <StatArrow type={performanceData.performance_metrics.total_return_pct >= 0 ? 'increase' : 'decrease'} />
-                                  {performanceData.performance_metrics.total_return_pct?.toFixed(2)}%
-                                </StatHelpText>
-                              </Stat>
-                            </CardBody>
-                          </Card>
+                  {performanceData && (
+                    <>
+                      {/* Performance Metrics Cards */}
+                      <SimpleGrid columns={{ base: 2, md: 4 }} spacing={4}>
+                        <Card bg={cardBg} borderColor={borderColor}>
+                          <CardBody>
+                            <StatRoot>
+                              <StatLabel>Total Return</StatLabel>
+                              <StatValueText color={performanceData.performance_metrics.total_return >= 0 ? 'green.500' : 'red.500'}>
+                                {performanceData.performance_metrics.total_return >= 0 ? '+' : ''}
+                                ${performanceData.performance_metrics.total_return?.toLocaleString()}
+                              </StatValueText>
+                              <StatHelpText>
+                                {performanceData.performance_metrics.total_return_pct >= 0 ? <StatUpIndicator /> : <StatDownIndicator />}
+                                {performanceData.performance_metrics.total_return_pct?.toFixed(2)}%
+                              </StatHelpText>
+                            </StatRoot>
+                          </CardBody>
+                        </Card>
 
-                          <Card bg={cardBg} borderColor={borderColor}>
-                            <CardBody>
-                              <Stat>
-                                <StatLabel>Win Rate</StatLabel>
-                                <StatNumber>{performanceData.performance_metrics.win_rate}%</StatNumber>
-                                <StatHelpText>
-                                  {performanceData.performance_metrics.winners_count} winners / {performanceData.performance_metrics.losers_count} losers
-                                </StatHelpText>
-                              </Stat>
-                            </CardBody>
-                          </Card>
+                        <Card bg={cardBg} borderColor={borderColor}>
+                          <CardBody>
+                            <StatRoot>
+                              <StatLabel>Win Rate</StatLabel>
+                              <StatValueText>{performanceData.performance_metrics.win_rate}%</StatValueText>
+                              <StatHelpText>
+                                {performanceData.performance_metrics.winners_count} winners / {performanceData.performance_metrics.losers_count} losers
+                              </StatHelpText>
+                            </StatRoot>
+                          </CardBody>
+                        </Card>
 
-                          <Card bg={cardBg} borderColor={borderColor}>
-                            <CardBody>
-                              <Stat>
-                                <StatLabel>Sharpe Ratio</StatLabel>
-                                <StatNumber color={performanceData.risk_metrics.sharpe_ratio >= 1 ? 'green.500' : 'orange.500'}>
-                                  {performanceData.risk_metrics.sharpe_ratio?.toFixed(2)}
-                                </StatNumber>
-                                <StatHelpText>Risk-adjusted return</StatHelpText>
-                              </Stat>
-                            </CardBody>
-                          </Card>
+                        <Card bg={cardBg} borderColor={borderColor}>
+                          <CardBody>
+                            <StatRoot>
+                              <StatLabel>Sharpe Ratio</StatLabel>
+                              <StatValueText color={performanceData.risk_metrics.sharpe_ratio >= 1 ? 'green.500' : 'orange.500'}>
+                                {performanceData.risk_metrics.sharpe_ratio?.toFixed(2)}
+                              </StatValueText>
+                              <StatHelpText>Risk-adjusted return</StatHelpText>
+                            </StatRoot>
+                          </CardBody>
+                        </Card>
 
-                          <Card bg={cardBg} borderColor={borderColor}>
-                            <CardBody>
-                              <Stat>
-                                <StatLabel>Max Drawdown</StatLabel>
-                                <StatNumber color="red.500">
-                                  -{performanceData.risk_metrics.max_drawdown?.toFixed(2)}%
-                                </StatNumber>
-                                <StatHelpText>Largest decline</StatHelpText>
-                              </Stat>
-                            </CardBody>
-                          </Card>
-                        </SimpleGrid>
+                        <Card bg={cardBg} borderColor={borderColor}>
+                          <CardBody>
+                            <StatRoot>
+                              <StatLabel>Max Drawdown</StatLabel>
+                              <StatValueText color="red.500">
+                                -{performanceData.risk_metrics.max_drawdown?.toFixed(2)}%
+                              </StatValueText>
+                              <StatHelpText>Largest decline</StatHelpText>
+                            </StatRoot>
+                          </CardBody>
+                        </Card>
+                      </SimpleGrid>
 
-                        {/* Risk Metrics */}
+                      {/* Risk Metrics */}
+                      <Card bg={cardBg} borderColor={borderColor}>
+                        <CardHeader>
+                          <Heading size="md">Risk Analysis</Heading>
+                        </CardHeader>
+                        <CardBody>
+                          <SimpleGrid columns={{ base: 1, md: 2 }} spacing={6}>
+                            <VStack align="start" spacing={4}>
+                              <Box w="full">
+                                <Text fontSize="sm" fontWeight="semibold" mb={2}>Portfolio Concentration</Text>
+                                <HStack justify="space-between">
+                                  <Text fontSize="sm">Top 5 Holdings:</Text>
+                                  <Text fontSize="sm" fontWeight="bold">{performanceData.risk_metrics.top_5_concentration}%</Text>
+                                </HStack>
+                                <Progress value={performanceData.risk_metrics.top_5_concentration} colorScheme={performanceData.risk_metrics.top_5_concentration > 50 ? 'red' : 'green'} size="sm" />
+
+                                <HStack justify="space-between" mt={2}>
+                                  <Text fontSize="sm">Top 10 Holdings:</Text>
+                                  <Text fontSize="sm" fontWeight="bold">{performanceData.risk_metrics.top_10_concentration}%</Text>
+                                </HStack>
+                                <Progress value={performanceData.risk_metrics.top_10_concentration} colorScheme={performanceData.risk_metrics.top_10_concentration > 75 ? 'red' : 'green'} size="sm" />
+                              </Box>
+
+                              <Box w="full">
+                                <Text fontSize="sm" fontWeight="semibold" mb={2}>Risk Metrics</Text>
+                                <VStack spacing={2} align="stretch">
+                                  <HStack justify="space-between">
+                                    <Text fontSize="sm">Portfolio Volatility:</Text>
+                                    <Text fontSize="sm" fontWeight="bold">{performanceData.risk_metrics.portfolio_volatility}%</Text>
+                                  </HStack>
+                                  <HStack justify="space-between">
+                                    <Text fontSize="sm">Beta vs Market:</Text>
+                                    <Text fontSize="sm" fontWeight="bold">{performanceData.risk_metrics.beta}</Text>
+                                  </HStack>
+                                  <HStack justify="space-between">
+                                    <Text fontSize="sm">Value at Risk (95%):</Text>
+                                    <Text fontSize="sm" fontWeight="bold" color="red.500">${performanceData.risk_metrics.value_at_risk_95?.toLocaleString()}</Text>
+                                  </HStack>
+                                </VStack>
+                              </Box>
+                            </VStack>
+
+                            <Box>
+                              <Text fontSize="sm" fontWeight="semibold" mb={2}>Sector Performance</Text>
+                              <ResponsiveContainer width="100%" height={200}>
+                                <BarChart data={performanceData.attribution_analysis.sector_performance}>
+                                  <CartesianGrid strokeDasharray="3 3" />
+                                  <XAxis dataKey="sector" tick={{ fontSize: 12 }} />
+                                  <YAxis tick={{ fontSize: 12 }} />
+                                  <RechartsTooltip
+                                    formatter={(value, name) => [
+                                      name === 'return' ? `${value}%` : `${value}%`,
+                                      name === 'return' ? 'Sector Return' : 'Portfolio Weight'
+                                    ]}
+                                  />
+                                  <Bar dataKey="return" fill="#4299E1" />
+                                </BarChart>
+                              </ResponsiveContainer>
+                            </Box>
+                          </SimpleGrid>
+                        </CardBody>
+                      </Card>
+
+                      {/* Top Contributors/Detractors */}
+                      <SimpleGrid columns={{ base: 1, lg: 2 }} spacing={6}>
                         <Card bg={cardBg} borderColor={borderColor}>
                           <CardHeader>
-                            <Heading size="md">Risk Analysis</Heading>
+                            <Heading size="md" color="green.500">Top Contributors</Heading>
                           </CardHeader>
                           <CardBody>
-                            <SimpleGrid columns={{ base: 1, md: 2 }} spacing={6}>
-                              <VStack align="start" spacing={4}>
-                                <Box w="full">
-                                  <Text fontSize="sm" fontWeight="semibold" mb={2}>Portfolio Concentration</Text>
-                                  <HStack justify="space-between">
-                                    <Text fontSize="sm">Top 5 Holdings:</Text>
-                                    <Text fontSize="sm" fontWeight="bold">{performanceData.risk_metrics.top_5_concentration}%</Text>
-                                  </HStack>
-                                  <Progress value={performanceData.risk_metrics.top_5_concentration} colorScheme={performanceData.risk_metrics.top_5_concentration > 50 ? 'red' : 'green'} size="sm" />
+                            <TableScrollArea>
+                              <Table size="sm">
+                                <Thead>
+                                  <Tr>
+                                    <Th>Symbol</Th>
+                                    <Th isNumeric>Contribution</Th>
+                                    <Th isNumeric>Return</Th>
+                                  </Tr>
+                                </Thead>
+                                <Tbody>
+                                  {performanceData.attribution_analysis.top_contributors.slice(0, 5).map((stock: any, idx: number) => (
+                                    <Tr key={idx}>
+                                      <Td fontWeight="bold">{stock.symbol}</Td>
+                                      <Td isNumeric color="green.500">+{stock.contribution}%</Td>
+                                      <Td isNumeric>{stock.return}%</Td>
+                                    </Tr>
+                                  ))}
+                                </Tbody>
+                              </Table>
+                            </TableScrollArea>
+                          </CardBody>
+                        </Card>
 
-                                  <HStack justify="space-between" mt={2}>
-                                    <Text fontSize="sm">Top 10 Holdings:</Text>
-                                    <Text fontSize="sm" fontWeight="bold">{performanceData.risk_metrics.top_10_concentration}%</Text>
-                                  </HStack>
-                                  <Progress value={performanceData.risk_metrics.top_10_concentration} colorScheme={performanceData.risk_metrics.top_10_concentration > 75 ? 'red' : 'green'} size="sm" />
-                                </Box>
+                        <Card bg={cardBg} borderColor={borderColor}>
+                          <CardHeader>
+                            <Heading size="md" color="red.500">Top Detractors</Heading>
+                          </CardHeader>
+                          <CardBody>
+                            <TableScrollArea>
+                              <Table size="sm">
+                                <Thead>
+                                  <Tr>
+                                    <Th>Symbol</Th>
+                                    <Th isNumeric>Contribution</Th>
+                                    <Th isNumeric>Return</Th>
+                                  </Tr>
+                                </Thead>
+                                <Tbody>
+                                  {performanceData.attribution_analysis.top_detractors.map((stock: any, idx: number) => (
+                                    <Tr key={idx}>
+                                      <Td fontWeight="bold">{stock.symbol}</Td>
+                                      <Td isNumeric color="red.500">{stock.contribution}%</Td>
+                                      <Td isNumeric>{stock.return}%</Td>
+                                    </Tr>
+                                  ))}
+                                </Tbody>
+                              </Table>
+                            </TableScrollArea>
+                          </CardBody>
+                        </Card>
+                      </SimpleGrid>
 
-                                <Box w="full">
-                                  <Text fontSize="sm" fontWeight="semibold" mb={2}>Risk Metrics</Text>
-                                  <VStack spacing={2} align="stretch">
-                                    <HStack justify="space-between">
-                                      <Text fontSize="sm">Portfolio Volatility:</Text>
-                                      <Text fontSize="sm" fontWeight="bold">{performanceData.risk_metrics.portfolio_volatility}%</Text>
-                                    </HStack>
-                                    <HStack justify="space-between">
-                                      <Text fontSize="sm">Beta vs Market:</Text>
-                                      <Text fontSize="sm" fontWeight="bold">{performanceData.risk_metrics.beta}</Text>
-                                    </HStack>
-                                    <HStack justify="space-between">
-                                      <Text fontSize="sm">Value at Risk (95%):</Text>
-                                      <Text fontSize="sm" fontWeight="bold" color="red.500">${performanceData.risk_metrics.value_at_risk_95?.toLocaleString()}</Text>
-                                    </HStack>
-                                  </VStack>
-                                </Box>
+                      {/* Benchmark Comparison */}
+                      <Card bg={cardBg} borderColor={borderColor}>
+                        <CardHeader>
+                          <Heading size="md">Benchmark Comparison</Heading>
+                        </CardHeader>
+                        <CardBody>
+                          <SimpleGrid columns={{ base: 1, md: 2 }} spacing={6}>
+                            <Box>
+                              <Text fontWeight="semibold" mb={2}>vs S&P 500</Text>
+                              <VStack spacing={2} align="stretch">
+                                <HStack justify="space-between">
+                                  <Text fontSize="sm">Portfolio Return:</Text>
+                                  <Text fontSize="sm" fontWeight="bold" color="blue.500">
+                                    {performanceData.benchmarks.vs_sp500.portfolio_return}%
+                                  </Text>
+                                </HStack>
+                                <HStack justify="space-between">
+                                  <Text fontSize="sm">S&P 500 Return:</Text>
+                                  <Text fontSize="sm" fontWeight="bold">
+                                    {performanceData.benchmarks.vs_sp500.benchmark_return}%
+                                  </Text>
+                                </HStack>
+                                <HStack justify="space-between">
+                                  <Text fontSize="sm">Alpha:</Text>
+                                  <Text fontSize="sm" fontWeight="bold" color={performanceData.benchmarks.vs_sp500.alpha >= 0 ? 'green.500' : 'red.500'}>
+                                    {performanceData.benchmarks.vs_sp500.alpha >= 0 ? '+' : ''}{performanceData.benchmarks.vs_sp500.alpha}%
+                                  </Text>
+                                </HStack>
                               </VStack>
+                            </Box>
 
-                              <Box>
-                                <Text fontSize="sm" fontWeight="semibold" mb={2}>Sector Performance</Text>
-                                <ResponsiveContainer width="100%" height={200}>
-                                  <BarChart data={performanceData.attribution_analysis.sector_performance}>
-                                    <CartesianGrid strokeDasharray="3 3" />
-                                    <XAxis dataKey="sector" tick={{ fontSize: 12 }} />
-                                    <YAxis tick={{ fontSize: 12 }} />
-                                    <RechartsTooltip
-                                      formatter={(value, name) => [
-                                        name === 'return' ? `${value}%` : `${value}%`,
-                                        name === 'return' ? 'Sector Return' : 'Portfolio Weight'
-                                      ]}
-                                    />
-                                    <Bar dataKey="return" fill="#4299E1" />
-                                  </BarChart>
-                                </ResponsiveContainer>
-                              </Box>
-                            </SimpleGrid>
-                          </CardBody>
-                        </Card>
+                            <Box>
+                              <Text fontWeight="semibold" mb={2}>vs NASDAQ</Text>
+                              <VStack spacing={2} align="stretch">
+                                <HStack justify="space-between">
+                                  <Text fontSize="sm">Portfolio Return:</Text>
+                                  <Text fontSize="sm" fontWeight="bold" color="blue.500">
+                                    {performanceData.benchmarks.vs_nasdaq.portfolio_return}%
+                                  </Text>
+                                </HStack>
+                                <HStack justify="space-between">
+                                  <Text fontSize="sm">NASDAQ Return:</Text>
+                                  <Text fontSize="sm" fontWeight="bold">
+                                    {performanceData.benchmarks.vs_nasdaq.benchmark_return}%
+                                  </Text>
+                                </HStack>
+                                <HStack justify="space-between">
+                                  <Text fontSize="sm">Alpha:</Text>
+                                  <Text fontSize="sm" fontWeight="bold" color={performanceData.benchmarks.vs_nasdaq.alpha >= 0 ? 'green.500' : 'red.500'}>
+                                    {performanceData.benchmarks.vs_nasdaq.alpha >= 0 ? '+' : ''}{performanceData.benchmarks.vs_nasdaq.alpha}%
+                                  </Text>
+                                </HStack>
+                              </VStack>
+                            </Box>
+                          </SimpleGrid>
+                        </CardBody>
+                      </Card>
+                    </>
+                  )}
+                </VStack>
+              </TabsContent>
 
-                        {/* Top Contributors/Detractors */}
-                        <SimpleGrid columns={{ base: 1, lg: 2 }} spacing={6}>
-                          <Card bg={cardBg} borderColor={borderColor}>
-                            <CardHeader>
-                              <Heading size="md" color="green.500">Top Contributors</Heading>
-                            </CardHeader>
-                            <CardBody>
-                              <TableContainer>
-                                <Table size="sm">
-                                  <Thead>
-                                    <Tr>
-                                      <Th>Symbol</Th>
-                                      <Th isNumeric>Contribution</Th>
-                                      <Th isNumeric>Return</Th>
-                                    </Tr>
-                                  </Thead>
-                                  <Tbody>
-                                    {performanceData.attribution_analysis.top_contributors.slice(0, 5).map((stock: any, idx: number) => (
-                                      <Tr key={idx}>
-                                        <Td fontWeight="bold">{stock.symbol}</Td>
-                                        <Td isNumeric color="green.500">+{stock.contribution}%</Td>
-                                        <Td isNumeric>{stock.return}%</Td>
-                                      </Tr>
-                                    ))}
-                                  </Tbody>
-                                </Table>
-                              </TableContainer>
-                            </CardBody>
-                          </Card>
-
-                          <Card bg={cardBg} borderColor={borderColor}>
-                            <CardHeader>
-                              <Heading size="md" color="red.500">Top Detractors</Heading>
-                            </CardHeader>
-                            <CardBody>
-                              <TableContainer>
-                                <Table size="sm">
-                                  <Thead>
-                                    <Tr>
-                                      <Th>Symbol</Th>
-                                      <Th isNumeric>Contribution</Th>
-                                      <Th isNumeric>Return</Th>
-                                    </Tr>
-                                  </Thead>
-                                  <Tbody>
-                                    {performanceData.attribution_analysis.top_detractors.map((stock: any, idx: number) => (
-                                      <Tr key={idx}>
-                                        <Td fontWeight="bold">{stock.symbol}</Td>
-                                        <Td isNumeric color="red.500">{stock.contribution}%</Td>
-                                        <Td isNumeric>{stock.return}%</Td>
-                                      </Tr>
-                                    ))}
-                                  </Tbody>
-                                </Table>
-                              </TableContainer>
-                            </CardBody>
-                          </Card>
-                        </SimpleGrid>
-
-                        {/* Benchmark Comparison */}
-                        <Card bg={cardBg} borderColor={borderColor}>
-                          <CardHeader>
-                            <Heading size="md">Benchmark Comparison</Heading>
-                          </CardHeader>
-                          <CardBody>
-                            <SimpleGrid columns={{ base: 1, md: 2 }} spacing={6}>
-                              <Box>
-                                <Text fontWeight="semibold" mb={2}>vs S&P 500</Text>
-                                <VStack spacing={2} align="stretch">
-                                  <HStack justify="space-between">
-                                    <Text fontSize="sm">Portfolio Return:</Text>
-                                    <Text fontSize="sm" fontWeight="bold" color="blue.500">
-                                      {performanceData.benchmarks.vs_sp500.portfolio_return}%
-                                    </Text>
-                                  </HStack>
-                                  <HStack justify="space-between">
-                                    <Text fontSize="sm">S&P 500 Return:</Text>
-                                    <Text fontSize="sm" fontWeight="bold">
-                                      {performanceData.benchmarks.vs_sp500.benchmark_return}%
-                                    </Text>
-                                  </HStack>
-                                  <HStack justify="space-between">
-                                    <Text fontSize="sm">Alpha:</Text>
-                                    <Text fontSize="sm" fontWeight="bold" color={performanceData.benchmarks.vs_sp500.alpha >= 0 ? 'green.500' : 'red.500'}>
-                                      {performanceData.benchmarks.vs_sp500.alpha >= 0 ? '+' : ''}{performanceData.benchmarks.vs_sp500.alpha}%
-                                    </Text>
-                                  </HStack>
-                                </VStack>
-                              </Box>
-
-                              <Box>
-                                <Text fontWeight="semibold" mb={2}>vs NASDAQ</Text>
-                                <VStack spacing={2} align="stretch">
-                                  <HStack justify="space-between">
-                                    <Text fontSize="sm">Portfolio Return:</Text>
-                                    <Text fontSize="sm" fontWeight="bold" color="blue.500">
-                                      {performanceData.benchmarks.vs_nasdaq.portfolio_return}%
-                                    </Text>
-                                  </HStack>
-                                  <HStack justify="space-between">
-                                    <Text fontSize="sm">NASDAQ Return:</Text>
-                                    <Text fontSize="sm" fontWeight="bold">
-                                      {performanceData.benchmarks.vs_nasdaq.benchmark_return}%
-                                    </Text>
-                                  </HStack>
-                                  <HStack justify="space-between">
-                                    <Text fontSize="sm">Alpha:</Text>
-                                    <Text fontSize="sm" fontWeight="bold" color={performanceData.benchmarks.vs_nasdaq.alpha >= 0 ? 'green.500' : 'red.500'}>
-                                      {performanceData.benchmarks.vs_nasdaq.alpha >= 0 ? '+' : ''}{performanceData.benchmarks.vs_nasdaq.alpha}%
-                                    </Text>
-                                  </HStack>
-                                </VStack>
-                              </Box>
-                            </SimpleGrid>
-                          </CardBody>
-                        </Card>
-                      </>
-                    )}
-                  </VStack>
-                </TabPanel>
-
-                <TabPanel px={0}>
-                  <Alert status="info">
-                    <AlertIcon />
-                    Tax analysis coming soon...
-                  </Alert>
-                </TabPanel>
-              </TabPanels>
-            </Tabs>
+              <TabsContent value="tax" px={0}>
+                <AlertRoot status="info">
+                  <AlertIndicator />
+                  Tax analysis coming soon...
+                </AlertRoot>
+              </TabsContent>
+            </TabsRoot>
           )}
         </AccountFilterWrapper>
       </VStack>

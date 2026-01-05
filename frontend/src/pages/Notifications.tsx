@@ -28,13 +28,12 @@ import {
   Spinner,
   Alert,
   AlertIcon,
-  useColorModeValue,
   Flex,
   Icon,
   Tooltip,
-  Menu,
-  MenuButton,
-  MenuList,
+  MenuRoot,
+  MenuTrigger,
+  MenuContent,
   MenuItem,
   IconButton,
   Switch,
@@ -244,8 +243,8 @@ const Notifications: React.FC = () => {
   const [selectedPriority, setSelectedPriority] = useState<string>('');
   const [showUnreadOnly, setShowUnreadOnly] = useState(false);
 
-  const bgColor = useColorModeValue('white', 'gray.800');
-  const borderColor = useColorModeValue('gray.200', 'gray.600');
+  const bgColor = 'gray.800';
+  const borderColor = 'gray.600';
 
   // Process notifications
   useEffect(() => {
@@ -374,14 +373,16 @@ const Notifications: React.FC = () => {
               <Button size="sm" variant="outline" onClick={markAllAsRead}>
                 Mark All Read
               </Button>
-              <Menu>
-                <MenuButton as={IconButton} icon={<FiSettings />} size="sm" variant="outline" />
-                <MenuList>
-                  <MenuItem>Notification Settings</MenuItem>
-                  <MenuItem>Discord Integration</MenuItem>
-                  <MenuItem>Email Preferences</MenuItem>
-                </MenuList>
-              </Menu>
+              <MenuRoot>
+                <MenuTrigger asChild>
+                  <IconButton aria-label="Notification menu" icon={<FiSettings />} size="sm" variant="outline" />
+                </MenuTrigger>
+                <MenuContent>
+                  <MenuItem value="settings">Notification Settings</MenuItem>
+                  <MenuItem value="discord">Discord Integration</MenuItem>
+                  <MenuItem value="email">Email Preferences</MenuItem>
+                </MenuContent>
+              </MenuRoot>
             </HStack>
           </HStack>
           <Text color="gray.600">
@@ -521,7 +522,7 @@ const Notifications: React.FC = () => {
                             border="1px solid"
                             borderColor={borderColor}
                             borderRadius="md"
-                            bg={notification.isRead ? bgColor : useColorModeValue('blue.50', 'blue.900')}
+                            bg={notification.isRead ? bgColor : 'blue.900'}
                             borderLeftWidth="4px"
                             borderLeftColor={`${priorityColor}.500`}
                           >

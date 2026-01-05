@@ -6,7 +6,6 @@ import {
   VStack,
   Badge,
   Tooltip,
-  useColorModeValue,
 } from '@chakra-ui/react';
 import {
   ResponsiveContainer,
@@ -47,26 +46,24 @@ const getHeatMapColor = (changePercent: number): string => {
 };
 
 const CustomTooltip = ({ active, payload }: any) => {
-  const bgColor = useColorModeValue('white', 'gray.800');
-
   if (active && payload && payload.length) {
     const data = payload[0].payload;
     return (
       <Box
-        bg={bgColor}
+        bg="bg.panel"
         p={3}
         border="1px solid"
-        borderColor="gray.200"
+        borderColor="border.subtle"
         borderRadius="md"
         boxShadow="lg"
         fontSize="sm"
       >
-        <Text fontWeight="bold">{data.name}</Text>
+        <Text fontWeight="bold" color="fg.default">{data.name}</Text>
         <Text>Value: ${data.value.toLocaleString()}</Text>
         <Text color={data.change >= 0 ? 'green.500' : 'red.500'}>
           Change: {data.change >= 0 ? '+' : ''}{data.change.toFixed(2)}%
         </Text>
-        <Text fontSize="xs" color="gray.500">{data.sector}</Text>
+        <Text fontSize="xs" color="fg.subtle">{data.sector}</Text>
       </Box>
     );
   }

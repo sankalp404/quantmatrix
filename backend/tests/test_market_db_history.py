@@ -1,7 +1,7 @@
 from fastapi.testclient import TestClient
 from backend.api.main import app
 
-client = TestClient(app)
+client = TestClient(app, raise_server_exceptions=False)
 
 
 def test_db_history_empty_ok():

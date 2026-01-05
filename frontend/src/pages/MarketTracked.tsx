@@ -1,19 +1,31 @@
 import React from 'react';
-import { Box, Heading, Table, Thead, Tbody, Tr, Th, Td, Text, useToast, Badge } from '@chakra-ui/react';
+import {
+  Box,
+  Heading,
+  Text,
+  Badge,
+  TableScrollArea,
+  TableRoot,
+  TableHeader,
+  TableBody,
+  TableRow,
+  TableColumnHeader,
+  TableCell,
+} from '@chakra-ui/react';
+import toast from 'react-hot-toast';
 import api from '../services/api';
 
 const MarketTracked: React.FC = () => {
   const [data, setData] = React.useState<any>({ all: [], details: {}, meta: {} });
   const [sortKey, setSortKey] = React.useState<'symbol' | 'market_cap' | 'stage'>('symbol');
   const [sortDir, setSortDir] = React.useState<'asc' | 'desc'>('asc');
-  const toast = useToast();
 
   const load = async () => {
     try {
       const r = await api.get('/market-data/tracked');
       setData(r.data || { all: [], details: {}, meta: {} });
     } catch (err: any) {
-      toast({ title: 'Failed to load tracked symbols', description: err?.message || 'Unknown error', status: 'error', duration: 3000, isClosable: true });
+      toast.error(err?.message || 'Failed to load tracked symbols');
     }
   };
   React.useEffect(() => { load(); }, []);
@@ -62,37 +74,39 @@ const MarketTracked: React.FC = () => {
           </Text>
         </Box>
       )}
-      <Table size="sm">
-        <Thead>
-          <Tr>
-            <Th cursor="pointer" onClick={() => toggleSort('symbol')}>Symbol{sortArrow('symbol')}</Th>
-            <Th>Current Price</Th>
-            <Th cursor="pointer" onClick={() => toggleSort('market_cap')}>Market Cap{sortArrow('market_cap')}</Th>
-            <Th cursor="pointer" onClick={() => toggleSort('stage')}>Stage{sortArrow('stage')}</Th>
-            <Th>ATR</Th>
-            <Th>Last Snapshot</Th>
-            <Th>Sector / Industry</Th>
-            <Th>Indices</Th>
-          </Tr>
-        </Thead>
-        <Tbody>
-          {detailRows.slice(0, 400).map((row: any) => (
-            <Tr key={row.symbol}>
-              <Td><Badge colorScheme="blue">{row.symbol}</Badge></Td>
-              <Td>{fmtNumber(row.current_price)}</Td>
-              <Td>{fmtCompact(row.market_cap)}</Td>
-              <Td>{row.stage_label || '—'}</Td>
-              <Td>{row.atr_value ? row.atr_value.toFixed(2) : '—'}</Td>
-              <Td>{row.last_snapshot_at ? new Date(row.last_snapshot_at).toLocaleString() : '—'}</Td>
-              <Td>
-                <Text>{row.sector || '—'}</Text>
-                <Text fontSize="xs" color="gray.500">{row.industry || ''}</Text>
-              </Td>
-              <Td>{(row.indices || []).join(', ') || '—'}</Td>
-            </Tr>
-          ))}
-        </Tbody>
-      </Table>
+      <TableScrollArea>
+        <TableRoot size="sm" variant="line">
+          <TableHeader>
+            <TableRow>
+              <TableColumnHeader cursor="pointer" onClick={() => toggleSort('symbol')}>Symbol{sortArrow('symbol')}</TableColumnHeader>
+              <TableColumnHeader>Current Price</TableColumnHeader>
+              <TableColumnHeader cursor="pointer" onClick={() => toggleSort('market_cap')}>Market Cap{sortArrow('market_cap')}</TableColumnHeader>
+              <TableColumnHeader cursor="pointer" onClick={() => toggleSort('stage')}>Stage{sortArrow('stage')}</TableColumnHeader>
+              <TableColumnHeader>ATR</TableColumnHeader>
+              <TableColumnHeader>Last Snapshot</TableColumnHeader>
+              <TableColumnHeader>Sector / Industry</TableColumnHeader>
+              <TableColumnHeader>Indices</TableColumnHeader>
+            </TableRow>
+          </TableHeader>
+          <TableBody>
+            {detailRows.slice(0, 400).map((row: any) => (
+              <TableRow key={row.symbol}>
+                <TableCell><Badge colorScheme="blue">{row.symbol}</Badge></TableCell>
+                <TableCell>{fmtNumber(row.current_price)}</TableCell>
+                <TableCell>{fmtCompact(row.market_cap)}</TableCell>
+                <TableCell>{row.stage_label || '—'}</TableCell>
+                <TableCell>{row.atr_value ? row.atr_value.toFixed(2) : '—'}</TableCell>
+                <TableCell>{row.last_snapshot_at ? new Date(row.last_snapshot_at).toLocaleString() : '—'}</TableCell>
+                <TableCell>
+                  <Text>{row.sector || '—'}</Text>
+                  <Text fontSize="xs" color="gray.500">{row.industry || ''}</Text>
+                </TableCell>
+                <TableCell>{(row.indices || []).join(', ') || '—'}</TableCell>
+              </TableRow>
+            ))}
+          </TableBody>
+        </TableRoot>
+      </TableScrollArea>
       {(!data.all || data.all.length === 0) && <Text color="gray.400">No tracked symbols yet.</Text>}
     </Box>
   );
