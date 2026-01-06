@@ -69,6 +69,7 @@ def test_brokers_list(client):
 def test_link_and_callback_flow(client, monkeypatch, db_session):
     # Ensure Schwab OAuth is considered configured for this test
     monkeypatch.setattr(settings, "SCHWAB_CLIENT_ID", "cid")
+    monkeypatch.setattr(settings, "SCHWAB_CLIENT_SECRET", "csecret")
     monkeypatch.setattr(settings, "SCHWAB_REDIRECT_URI", "http://localhost/cb")
 
     def _override_db():
