@@ -1,9 +1,8 @@
 import React from 'react';
 import { describe, it, expect, vi, beforeEach } from 'vitest';
-import { ChakraProvider } from '@chakra-ui/react';
-import { render, screen, fireEvent, waitFor } from '@testing-library/react';
+import { screen, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
-import { system } from '../../theme/system';
+import { renderWithProviders } from '../../test/render';
 import SettingsPreferences from '../SettingsPreferences';
 import * as apiModule from '../../services/api';
 
@@ -59,11 +58,7 @@ describe('SettingsPreferences', () => {
 
   it('saves preferences and updates theme preference', async () => {
     const user = userEvent.setup();
-    const { container } = render(
-      <ChakraProvider value={system}>
-        <SettingsPreferences />
-      </ChakraProvider>
-    );
+    const { container } = renderWithProviders(<SettingsPreferences />);
 
     const selects = Array.from(container.querySelectorAll('select')) as HTMLSelectElement[];
     if (selects.length < 3) throw new Error(`Expected at least 3 <select> elements, found ${selects.length}`);

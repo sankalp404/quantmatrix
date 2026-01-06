@@ -1,10 +1,8 @@
 import React from 'react';
 import { describe, it, expect, vi } from 'vitest';
-import { MemoryRouter } from 'react-router-dom';
-import { ChakraProvider } from '@chakra-ui/react';
 import { render, screen, fireEvent, waitFor } from '@testing-library/react';
 import Settings from '../../pages/Settings';
-import { system } from '../../theme/system';
+import { renderWithProviders } from '../../test/render';
 
 vi.mock('../../services/api', () => {
   return {
@@ -42,13 +40,7 @@ vi.mock('../../context/AuthContext', async () => {
 
 describe('Brokerages wizard', () => {
   it('opens modal and shows broker logos', async () => {
-    render(
-      <ChakraProvider value={system}>
-        <MemoryRouter>
-          <Settings />
-        </MemoryRouter>
-      </ChakraProvider>
-    );
+    renderWithProviders(<Settings />);
     const btn = screen.getByRole('button', { name: /\+ New connection/i });
     fireEvent.click(btn);
     expect(await screen.findByText(/Choose a broker to connect/i)).toBeInTheDocument();

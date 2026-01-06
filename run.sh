@@ -63,7 +63,7 @@ makemigration() {
         exit 1
     fi
     echo "🧱 Creating Alembic revision: $MSG"
-    $COMPOSE_CMD exec backend alembic -c backend/alembic.ini revision --autogenerate -m "$MSG"
+    make migrate-create MSG="$MSG"
 }
 
 downgrade() {
@@ -73,12 +73,12 @@ downgrade() {
         exit 1
     fi
     echo "↩️  Downgrading to $REV"
-    $COMPOSE_CMD exec backend alembic -c backend/alembic.ini downgrade "$REV"
+    make migrate-down REV="$REV"
 }
 
 stamp_head() {
     echo "🏷️  Stamping head"
-    $COMPOSE_CMD exec backend alembic -c backend/alembic.ini stamp head
+    make migrate-stamp-head
 }
 
 # Main menu
@@ -126,8 +126,29 @@ case "$1" in
         make test-up
         make test
         ;;
+    makemigration)
+        check_make
+        setup_infra_env
+        makemigration "$2"
+        ;;
+    migrate)
+        check_make
+        setup_infra_env
+        echo "⬆️  Applying Alembic migrations (dev DB)..."
+        make migrate-up
+        ;;
+    downgrade)
+        check_make
+        setup_infra_env
+        downgrade "$2"
+        ;;
+    stamp)
+        check_make
+        setup_infra_env
+        stamp_head
+        ;;
     *)
-        echo "Usage: $0 {start|stop|restart|status|logs|test}"
+        echo "Usage: $0 {start|stop|restart|status|logs|test|migrate|makemigration|downgrade|stamp}"
         echo ""
         echo "Commands:"
         echo "  start   - Start dev stack (via Makefile)"
@@ -136,6 +157,10 @@ case "$1" in
         echo "  status  - Show service status and URLs"
         echo "  logs    - Tail logs (backend/worker/beat/frontend)"
         echo "  test    - Run tests in isolated test DB (postgres_test)"
+        echo "  migrate - Apply Alembic migrations to dev DB (upgrade head)"
+        echo "  makemigration - Create an autogenerate Alembic revision (dev DB)"
+        echo "  downgrade - Alembic downgrade (dev DB)"
+        echo "  stamp   - Alembic stamp head (dev DB)"
         exit 1
         ;;
-esac 
+esac

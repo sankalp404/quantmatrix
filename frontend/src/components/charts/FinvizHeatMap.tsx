@@ -115,7 +115,7 @@ const FinvizHeatMap: React.FC<FinvizHeatMapProps> = ({
 
       <Box borderWidth="1px" borderColor="border.subtle" borderRadius="md" overflow="hidden" bg="bg.card">
         <ResponsiveContainer width="100%" height={height}>
-          <Treemap data={heatMapData} dataKey="size" stroke="#fff" strokeWidth={1} content={<CustomContent />}>
+          <Treemap data={heatMapData} dataKey="size" stroke="#fff" content={<CustomContent />}>
             {heatMapData.map((entry, index) => (
               <Cell key={`cell-${index}`} fill={entry.color} />
             ))}

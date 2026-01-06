@@ -17,10 +17,18 @@ depends_on = None
 
 
 def upgrade() -> None:
-    op.add_column("users", sa.Column("ui_preferences", sa.JSON(), nullable=True))
+    bind = op.get_bind()
+    insp = sa.inspect(bind)
+    existing = {c["name"] for c in insp.get_columns("users")}
+    if "ui_preferences" not in existing:
+        op.add_column("users", sa.Column("ui_preferences", sa.JSON(), nullable=True))
 
 
 def downgrade() -> None:
-    op.drop_column("users", "ui_preferences")
+    bind = op.get_bind()
+    insp = sa.inspect(bind)
+    existing = {c["name"] for c in insp.get_columns("users")}
+    if "ui_preferences" in existing:
+        op.drop_column("users", "ui_preferences")
 
 

@@ -8,6 +8,7 @@ Central database configuration and session management.
 from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
 import os
+import sys
 from typing import Generator
 
 # Shared test DB safety checks (used by both app and pytest)
@@ -17,6 +18,32 @@ from backend.utils.db_safety import check_test_database_url
 DATABASE_URL = os.getenv(
     "DATABASE_URL", "postgresql://quantmatrix:quantmatrix@localhost:5432/quantmatrix"
 )
+
+# Fail-closed test safety:
+# If pytest is running and any code imports backend.database, we refuse to even construct
+# an engine unless TEST_DATABASE_URL is present and unambiguously safe. This prevents
+# accidental connections to (or destructive operations against) a dev DB during test
+# collection/import time.
+_PYTEST_RUNNING = "pytest" in sys.modules
+if _PYTEST_RUNNING:
+    test_db_url = os.getenv("TEST_DATABASE_URL", "")
+    if not test_db_url:
+        raise RuntimeError(
+            "Running under pytest: TEST_DATABASE_URL must be set. "
+            "Refusing to create an application engine that could touch a dev DB."
+        )
+    expected_host = os.getenv("TEST_DB_EXPECTED_HOST", "postgres_test")
+    required_user = os.getenv("POSTGRES_TEST_USER") or None
+    chk = check_test_database_url(
+        test_db_url, expected_host=expected_host, required_user=required_user
+    )
+    if not chk.ok:
+        raise RuntimeError(
+            f"Running under pytest: unsafe TEST_DATABASE_URL ({chk.reason}). Refusing to start."
+        )
+    # Ensure all code paths see the same DB URL in tests.
+    os.environ["DATABASE_URL"] = test_db_url
+    DATABASE_URL = test_db_url
 
 APP_DATABASE_URL = DATABASE_URL
 

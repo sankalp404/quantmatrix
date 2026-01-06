@@ -13,7 +13,7 @@ def client():
 
 def test_accounts_requires_auth(client):
     r = client.get("/api/v1/accounts")
-    # 401 is expected for auth-protected routes
-    assert r.status_code in (200, 401)
+    # Auth-protected routes return 401/403 when unauthenticated depending on auth backend.
+    assert r.status_code in (401, 403)
 
 

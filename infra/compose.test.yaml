@@ -48,7 +48,7 @@ services:
       - /app/backend/__pycache__
     networks:
       - quantmatrix_test_network
-    command: bash -lc "python -m pytest backend/tests -v"
+    command: bash -lc "python -m pytest -c backend/pytest.ini backend/tests -v"
 
 networks:
   quantmatrix_test_network:

@@ -67,6 +67,11 @@ def test_brokers_list(client):
 
 
 def test_link_and_callback_flow(client, monkeypatch, db_session):
+    # Ensure Schwab OAuth is considered configured for this test
+    monkeypatch.setattr(settings, "SCHWAB_CLIENT_ID", "cid")
+    monkeypatch.setattr(settings, "SCHWAB_CLIENT_SECRET", "csecret")
+    monkeypatch.setattr(settings, "SCHWAB_REDIRECT_URI", "http://localhost/cb")
+
     def _override_db():
         yield db_session
     app.dependency_overrides[get_db] = _override_db
@@ -83,6 +88,8 @@ def test_link_and_callback_flow(client, monkeypatch, db_session):
         def json(self):
             return self._payload
     class DummyClient:
+        def __init__(self, *args, **kwargs):
+            pass
         async def __aenter__(self):
             return self
         async def __aexit__(self, exc_type, exc, tb):
@@ -95,26 +102,28 @@ def test_link_and_callback_flow(client, monkeypatch, db_session):
     import httpx
     monkeypatch.setattr(httpx, "AsyncClient", DummyClient)
 
-    # Link -> get URL (probe runs inside)
-    r_link = client.post(
-        "/api/v1/aggregator/schwab/link",
-        json={"account_id": account_id, "trading": False},
-        headers={"Authorization": f"Bearer {token}"},
-    )
-    assert r_link.status_code == 200
-    url = r_link.json()["url"]
-    # Extract state query param from URL for callback
-    import urllib.parse as _up
-    qs = _up.urlparse(url).query
-    params = dict(_up.parse_qsl(qs))
-    assert "state" in params
-    state = params["state"]
+    try:
+        # Link -> get URL (probe runs inside)
+        r_link = client.post(
+            "/api/v1/aggregator/schwab/link",
+            json={"account_id": account_id, "trading": False},
+            headers={"Authorization": f"Bearer {token}"},
+        )
+        assert r_link.status_code == 200
+        url = r_link.json()["url"]
+        # Extract state query param from URL for callback
+        import urllib.parse as _up
+        qs = _up.urlparse(url).query
+        params = dict(_up.parse_qsl(qs))
+        assert "state" in params
+        state = params["state"]
 
-    r_cb = client.get(
-        "/api/v1/aggregator/schwab/callback", params={"code": "abc", "state": state}
-    )
-    assert r_cb.status_code == 200
-    assert r_cb.json().get("status") == "linked"
-    app.dependency_overrides.pop(get_db, None)
+        r_cb = client.get(
+            "/api/v1/aggregator/schwab/callback", params={"code": "abc", "state": state}
+        )
+        assert r_cb.status_code == 200
+        assert r_cb.json().get("status") == "linked"
+    finally:
+        app.dependency_overrides.pop(get_db, None)
 
 

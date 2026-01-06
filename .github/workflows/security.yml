@@ -1,12 +1,10 @@
 name: 🔒 Security Scanning
 
-on:
+"on":
   schedule:
     # Run security scans daily at 2 AM UTC
     - cron: '0 2 * * *'
   push:
-    branches: [ main ]
-  pull_request:
     branches: [ main ]
   workflow_dispatch:
 
@@ -24,10 +22,10 @@ jobs:
     
     steps:
     - name: 📥 Checkout Code
-      uses: actions/checkout@v4
+      uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5
       
     - name: 🐍 Set up Python
-      uses: actions/setup-python@v5
+      uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065
       with:
         python-version: ${{ env.PYTHON_VERSION }}
         
@@ -60,7 +58,7 @@ jobs:
         fi
         
     - name: 📊 Upload Security Report
-      uses: actions/upload-artifact@v5
+      uses: actions/upload-artifact@330a01c490aca151604b8cf639adc76d48f6c5d4
       if: always()
       with:
         name: security-reports
@@ -77,10 +75,10 @@ jobs:
     
     steps:
     - name: 📥 Checkout Code
-      uses: actions/checkout@v6
+      uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5
       
     - name: 🐍 Set up Python
-      uses: actions/setup-python@v6
+      uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065
       with:
         python-version: ${{ env.PYTHON_VERSION }}
         
@@ -92,7 +90,7 @@ jobs:
         bandit -r backend/ -f txt -x backend/migrations/,backend/tests_v2/
         
     - name: 📊 Upload Bandit Report
-      uses: actions/upload-artifact@v5
+      uses: actions/upload-artifact@330a01c490aca151604b8cf639adc76d48f6c5d4
       if: always()
       with:
         name: bandit-report
@@ -108,12 +106,12 @@ jobs:
     
     steps:
     - name: 📥 Checkout Code
-      uses: actions/checkout@v6
+      uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5
       with:
         fetch-depth: 0  # Full history for secret scanning
         
     - name: 🔍 GitLeaks Secret Scan
-      uses: gitleaks/gitleaks-action@v2
+      uses: gitleaks/gitleaks-action@ff98106e4c7b2bc287b24eaf42907196329070c7
       env:
         GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         GITLEAKS_LICENSE: ${{ secrets.GITLEAKS_LICENSE }}
@@ -134,13 +132,13 @@ jobs:
     
     steps:
     - name: 📥 Checkout Code
-      uses: actions/checkout@v6
+      uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5
       
     - name: 🐳 Set up Docker Buildx
-      uses: docker/setup-buildx-action@v3
+      uses: docker/setup-buildx-action@8d2750c68a42422c14e847fe6c8ac0403b4cbd6f
       
     - name: 🏗️ Build Backend Image for Scanning
-      uses: docker/build-push-action@v6
+      uses: docker/build-push-action@263435318d21b8e681c14492fe198d362a7d2c83
       with:
         context: .
         file: Dockerfile.backend
@@ -149,14 +147,14 @@ jobs:
         load: true
         
     - name: 🔍 Trivy Vulnerability Scanner
-      uses: aquasecurity/trivy-action@master
+      uses: aquasecurity/trivy-action@b6643a29fecd7f34b3597bc6acb0a98b03d33ff8
       with:
         image-ref: 'quantmatrix-backend:security-scan'
         format: 'sarif'
         output: 'trivy-results.sarif'
         
     - name: 📊 Upload Trivy Results
-      uses: github/codeql-action/upload-sarif@v3
+      uses: github/codeql-action/upload-sarif@45c373516f557556c15d420e3f5e0aa3d64366bc
       if: always()
       with:
         sarif_file: 'trivy-results.sarif'
@@ -171,10 +169,10 @@ jobs:
     
     steps:
     - name: 📥 Checkout Code
-      uses: actions/checkout@v6
+      uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5
       
     - name: 🐍 Set up Python
-      uses: actions/setup-python@v6
+      uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065
       with:
         python-version: ${{ env.PYTHON_VERSION }}
         
@@ -249,7 +247,7 @@ jobs:
     
     steps:
     - name: 📥 Checkout Code
-      uses: actions/checkout@v6
+      uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5
       
     - name: 📋 Financial Regulations Compliance
       run: |

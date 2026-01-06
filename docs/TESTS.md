@@ -3,13 +3,12 @@ Testing Strategy
 
 Test Database Isolation (Backend)
 ---------------------------------
-- Set `TEST_DATABASE_URL` to a separate Postgres database (not equal to `DATABASE_URL`).
+- Tests run against a dedicated Postgres database in Docker (`postgres_test`).\n+- **Safety invariant:** in tests, `DATABASE_URL` **must equal** `TEST_DATABASE_URL` so any accidental use of the app engine/session still targets the isolated test DB.\n+- Pytest will **fail closed** if `TEST_DATABASE_URL` is missing or unsafe.
 - The test suite will:
   - Run Alembic migrations to head on the test database at session start.
   - Create a per-test transaction and roll it back after each test for isolation.
 - Example (Docker):
-  - Export `TEST_DATABASE_URL` in your shell or `.env`.
-  - Run: `./run.sh test`
+  - Run: `./run.sh test` (this uses `infra/compose.test.yaml` + `infra/env.test`).
 
 Safe Patterns (Enforced)
 ------------------------
@@ -21,11 +20,7 @@ Safe Patterns (Enforced)
 
 Env Guidance
 ------------
-- Leave production `.env` untouched.
-- For pytest/CI, load a test-safe env (e.g., `.env.test`) that sets:
-  - `TEST_DATABASE_URL=postgresql://quantmatrix:quantmatrix@postgres:5432/quantmatrix_test`
-  - Optionally set `DATABASE_URL` to a throwaway dev DB when running tests locally; avoid pointing to prod.
-- Docker Compose runtime can continue using `.env`; test jobs should override with `.env.test` or exported vars.
+- Leave production `.env` untouched.\n+- Local dev uses `infra/env.dev` (untracked); tests use `infra/env.test` (untracked).\n+- CI should copy `infra/env.test.example` to `infra/env.test` for safe defaults.\n+- Do not run backend tests outside the isolated test compose stack unless you intentionally set `TEST_DATABASE_URL` to `postgres_test` and `_test` DB name.
 
 Do/Don't
 --------
@@ -42,8 +37,7 @@ Goals
 
 How to run
 ----------
-- docker-compose exec backend pytest -q
-- Single file: docker-compose exec backend pytest backend/tests/test_client_tastytrade.py -q
+- Recommended:\n+  - `./run.sh test`\n+- Focused (still isolated):\n+  - `make test-up`\n+  - `docker compose --project-name quantmatrix_test --env-file infra/env.test -f infra/compose.test.yaml run --rm backend_test bash -lc \"python -m pytest backend/tests/test_client_tastytrade.py -q\"`
 
 Scopes
 ------

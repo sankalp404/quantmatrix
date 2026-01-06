@@ -1,4 +1,9 @@
-.PHONY: up down down-reset ps logs build ladle-up ladle-down ladle-logs ladle-build test-up test test-down
+.PHONY: up down down-reset ps logs build ladle-up ladle-down ladle-logs ladle-build \
+	test-up test test-down \
+	backend-shell frontend-shell \
+	migrate-create migrate-up migrate-down migrate-stamp-head \
+	frontend-install frontend-lint frontend-typecheck frontend-test \
+	ui ui-install ui-lint ui-typecheck ui-test ui-check
 
 DOCKER ?= docker
 PROJECT ?= quantmatrix
@@ -45,9 +50,73 @@ test-up:
 	$(COMPOSE_TEST) up -d postgres_test redis_test
 
 test:
+	@# Always use a fresh isolated test DB volume to prevent migration drift.
+	@# This never touches dev DB; it only resets the quantmatrix_test project volumes.
+	-$(COMPOSE_TEST) down -v
+	$(COMPOSE_TEST) up -d postgres_test redis_test
 	$(COMPOSE_TEST) run --rm backend_test
+	$(COMPOSE_TEST) down -v
 
 test-down:
 	$(COMPOSE_TEST) down -v
+
+backend-shell:
+	$(COMPOSE_DEV) exec backend bash
+
+frontend-shell:
+	$(COMPOSE_DEV) exec frontend sh
+
+# Alembic migrations (dev DB only; tests run migrations against postgres_test via pytest)
+# Usage:
+# - make migrate-create MSG="add foo table"
+# - make migrate-up
+# - make migrate-down REV=-1
+# - make migrate-stamp-head
+MSG ?=
+REV ?=
+migrate-create:
+	@if [ -z "$(MSG)" ]; then echo "Usage: make migrate-create MSG=\"message\""; exit 2; fi
+	$(COMPOSE_DEV) exec backend alembic -c backend/alembic.ini revision --autogenerate -m "$(MSG)"
+
+migrate-up:
+	$(COMPOSE_DEV) exec backend alembic -c backend/alembic.ini upgrade head
+
+migrate-down:
+	@if [ -z "$(REV)" ]; then echo "Usage: make migrate-down REV=<revision| -1>"; exit 2; fi
+	$(COMPOSE_DEV) exec backend alembic -c backend/alembic.ini downgrade "$(REV)"
+
+migrate-stamp-head:
+	$(COMPOSE_DEV) exec backend alembic -c backend/alembic.ini stamp head
+
+frontend-install:
+	$(COMPOSE_DEV) exec -T frontend npm ci
+
+frontend-lint:
+	$(COMPOSE_DEV) exec -T frontend npm run lint
+
+frontend-typecheck:
+	$(COMPOSE_DEV) exec -T frontend npm run type-check
+
+frontend-test:
+	$(COMPOSE_DEV) exec -T frontend npm run test
+
+# UI aliases (human-friendly)
+ui:
+	@echo "UI targets:"
+	@echo "  make ui-install    # npm ci (fixes missing deps in docker volume)"
+	@echo "  make ui-lint       # eslint"
+	@echo "  make ui-typecheck  # tsc --noEmit"
+	@echo "  make ui-test       # vitest"
+	@echo "  make ui-check      # lint + typecheck + test"
+
+ui-install: frontend-install
+
+ui-lint: frontend-lint
+
+ui-typecheck: frontend-typecheck
+
+ui-test: frontend-test
+
+ui-check: ui-install ui-lint ui-typecheck ui-test
 
 

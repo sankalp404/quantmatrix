@@ -28,9 +28,9 @@ def test_health(client):
 
 
 def test_accounts_list(client):
-    # unauth dev route
+    # Accounts routes are auth-protected
     r = client.get("/api/v1/accounts")
-    assert r.status_code in (200, 404, 422)
+    assert r.status_code in (401, 403)
 
 
 def test_portfolio_live(client):

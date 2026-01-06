@@ -1,5 +1,5 @@
 import React from "react";
-import { Box, HStack, Heading, Text, type BoxProps } from "@chakra-ui/react";
+import { Box, HStack, Heading, Text, type BoxProps, type StackProps } from "@chakra-ui/react";
 
 export function Page({ children, ...props }: BoxProps & { children: React.ReactNode }) {
   return (
@@ -18,7 +18,7 @@ export function PageHeader({
   title: string;
   subtitle?: string;
   actions?: React.ReactNode;
-} & BoxProps) {
+} & StackProps) {
   return (
     <HStack align="flex-start" justify="space-between" gap={4} mb={6} {...props}>
       <Box>

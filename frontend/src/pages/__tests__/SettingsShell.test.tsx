@@ -1,10 +1,8 @@
 import React from 'react';
 import { describe, it, expect, vi } from 'vitest';
-import { MemoryRouter } from 'react-router-dom';
-import { ChakraProvider } from '@chakra-ui/react';
-import { render, screen } from '@testing-library/react';
+import { screen } from '@testing-library/react';
 import SettingsShell from '../../pages/SettingsShell';
-import { system } from '../../theme/system';
+import { renderWithProviders } from '../../test/render';
 
 vi.mock('../../context/AuthContext', async () => {
   return {
@@ -22,13 +20,7 @@ vi.mock('../../services/api', () => {
 
 describe('SettingsShell', () => {
   it('renders sidebar sections', () => {
-    render(
-      <ChakraProvider value={system}>
-        <MemoryRouter initialEntries={['/settings']}>
-          <SettingsShell />
-        </MemoryRouter>
-      </ChakraProvider>
-    );
+    renderWithProviders(<SettingsShell />, { route: '/settings' });
     // On small screens SettingsShell collapses to an icon rail, so links are aria-labels.
     expect(screen.getByRole('button', { name: /Profile/i })).toBeInTheDocument();
     expect(screen.getByRole('button', { name: /Preferences/i })).toBeInTheDocument();

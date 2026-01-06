@@ -26,7 +26,11 @@ class TestIBKRFlexQueryClient:
     @pytest.fixture
     def client(self):
         """Create a test client instance."""
-        return IBKRFlexQueryClient()
+        c = IBKRFlexQueryClient()
+        # Tests patch the network methods; set dummy credentials so we don't early-return.
+        c.token = c.token or "test_token"
+        c.query_id = c.query_id or "test_query_id"
+        return c
 
     @pytest.fixture
     def sample_flexquery_xml(self):

@@ -1,0 +1,50 @@
+PR Automation
+=============
+
+Goals
+-----
+- Dependabot PRs should auto-merge after required checks pass (non-major updates).
+- Human/agent changes should *never* be pushed directly to `main`; they should land via PRs.
+
+Dependabot
+----------
+- Config: `.github/dependabot.yml`
+- Auto-merge workflow: `.github/workflows/dependabot-automerge.yml`
+  - Only runs for `dependabot[bot]`
+  - Skips semver-major updates by default
+
+Agent / Human PR flow
+---------------------
+
+Recommended workflow for an agent change-set:
+- Make changes locally
+- Run checks:
+  - `./run.sh test`
+  - `cd frontend && npm test` (if frontend changed)
+- Create a PR automatically:
+  - `scripts/open_pr.sh fix "short description"`
+
+Automatic PR opening (on push)
+------------------------------
+- Workflow: `.github/workflows/agent-auto-pr.yml`\n+- Any push to a branch named `agent/**` will auto-open a PR to `main` (if one doesn’t already exist).\n+- This is useful for agent workflows: push a branch, and GitHub opens the PR automatically.
+
+Requirements for automation
+---------------------------
+- GitHub CLI (`gh`) must be available
+- The environment must be authenticated to GitHub:
+  - either via `gh auth login`
+  - or by providing `GH_TOKEN` (fine-grained PAT or GitHub App token) with:
+    - `contents:write`
+    - `pull_requests:write`
+
+Branch protection (recommended)
+-------------------------------
+In GitHub repo settings:
+- Protect `main`
+- Require PRs for merges
+- Require status checks:
+  - `CI / Backend (pytest in docker)`
+  - `CI / Frontend (lint/typecheck/test)`
+- Restrict who can push to `main` (ideally: nobody)
+
+

@@ -36,6 +36,7 @@ class TestAccountConfigService:
             "IBKR_TEST_ACCOUNT_A:TAXABLE,IBKR_TEST_ACCOUNT_B:IRA"
         )
         mock_settings.TASTYTRADE_USERNAME = "testuser@example.com"
+        mock_settings.TASTYTRADE_ACCOUNT_NUMBER = "TT_TEST_ACCOUNT_1"
         mock_settings.FIDELITY_ACCOUNTS = ""  # Empty for testing
         return mock_settings
 
@@ -71,6 +72,7 @@ class TestAccountConfigService:
 
         assert account is not None
         assert account["account_id"] == "testuser@example.com"
+        assert account["account_number"] == "TT_TEST_ACCOUNT_1"
         assert account["broker"] == BrokerType.TASTYTRADE
         assert account["account_type"] == AccountType.TAXABLE  # Default
 
@@ -142,6 +144,7 @@ class TestAccountConfigService:
             "IBKR_TEST_ACCOUNT_A:TAXABLE,IBKR_TEST_ACCOUNT_B:IRA"
         )
         mock_settings_patch.TASTYTRADE_USERNAME = "testuser@example.com"
+        mock_settings_patch.TASTYTRADE_ACCOUNT_NUMBER = "TT_TEST_ACCOUNT_1"
         mock_settings_patch.FIDELITY_ACCOUNTS = ""
 
         # Run seeding
@@ -163,7 +166,7 @@ class TestAccountConfigService:
         assert len(ibkr_accounts) == 2
 
         ibkr_taxable = next(
-            (acc for acc in ibkr_accounts if acc.account_id == "IBKR_TEST_ACCOUNT_A"),
+            (acc for acc in ibkr_accounts if acc.account_number == "IBKR_TEST_ACCOUNT_A"),
             None,
         )
         assert ibkr_taxable is not None
@@ -171,7 +174,7 @@ class TestAccountConfigService:
         assert ibkr_taxable.user_id == user.id
 
         ibkr_ira = next(
-            (acc for acc in ibkr_accounts if acc.account_id == "IBKR_TEST_ACCOUNT_B"),
+            (acc for acc in ibkr_accounts if acc.account_number == "IBKR_TEST_ACCOUNT_B"),
             None,
         )
         assert ibkr_ira is not None
@@ -186,7 +189,7 @@ class TestAccountConfigService:
         )
         assert len(tt_accounts) == 1
         tt_account = tt_accounts[0]
-        assert tt_account.account_id == "testuser@example.com"
+        assert tt_account.account_number == "TT_TEST_ACCOUNT_1"
         assert tt_account.account_type == AccountType.TAXABLE
         assert tt_account.user_id == user.id
 
@@ -264,10 +267,11 @@ class TestAccountConfigService:
         # Create broker account directly
         broker_account = BrokerAccount(
             user_id=user.id,
-            account_id="TEST_INTEGRATION",
+            account_number="TEST_INTEGRATION",
+            account_name="Test Integration",
             broker=BrokerType.IBKR,
             account_type=AccountType.TAXABLE,
-            sync_status=SyncStatus.PENDING,
+            sync_status=SyncStatus.QUEUED,
             connection_status="connected",
         )
 
@@ -277,7 +281,7 @@ class TestAccountConfigService:
         # Verify the relationship works
         retrieved_account = (
             db_session.query(BrokerAccount)
-            .filter_by(account_id="TEST_INTEGRATION")
+            .filter_by(account_number="TEST_INTEGRATION")
             .first()
         )
         assert retrieved_account is not None

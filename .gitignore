@@ -161,11 +161,12 @@ secrets.json
 credentials.json
 
 # Test coverage
-coverage/
+/coverage/
 .nyc_output
 
 # Alembic
-alembic.ini
+/alembic.ini
+!backend/alembic.ini
 
 # Local configuration
 config.local.py

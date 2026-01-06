@@ -69,7 +69,7 @@ class IBKRSyncService:
         # Account mapping removed - now retrieved dynamically from database/config
 
     async def sync_comprehensive_portfolio(
-        self, account_number: str = "U19491234"
+        self, account_number: str = "U19491234", db_session: Session | None = None
     ) -> Dict:
         """
         MAIN METHOD: Comprehensive sync of all portfolio data.
@@ -83,7 +83,7 @@ class IBKRSyncService:
         6. Positions (detailed position data)
         7. PortfolioSnapshot (daily portfolio snapshot)
         """
-        db = SessionLocal()
+        db = db_session or SessionLocal()
         results = {}
 
         try:
@@ -116,9 +116,11 @@ class IBKRSyncService:
             )
             results["instruments"] = instruments_result
 
-            # Step 2: Sync TaxLots with REAL cost basis from FlexQuery trades
+            # Step 2: Sync TaxLots with REAL cost basis from FlexQuery.
+            # Prefer the client's canonical tax-lots endpoint over parsing the full report XML,
+            # since report formats can vary and the client normalizes the structure.
             tax_lots_result = await self._sync_tax_lots_from_flexquery(
-                db, broker_account, account_number, report_xml
+                db, broker_account, account_number
             )
             results["tax_lots"] = tax_lots_result
 
@@ -215,14 +217,14 @@ class IBKRSyncService:
             logger.error(f"❌ Error in comprehensive sync: {e}")
             return {"error": str(e)}
         finally:
-            db.close()
+            if db_session is None:
+                db.close()
 
     async def sync_account_comprehensive(
         self, account_number: str, db_session=None
     ) -> Dict:
         """Adapter to align with broker-agnostic sync interface."""
-        # For now, delegate to comprehensive portfolio sync (manages its own session)
-        return await self.sync_comprehensive_portfolio(account_number)
+        return await self.sync_comprehensive_portfolio(account_number, db_session=db_session)
 
     async def _sync_instruments(
         self, db: Session, account_number: str, report_xml: str | None = None
@@ -488,8 +490,12 @@ class IBKRSyncService:
                         acquisition_date=_coerce_date(lot_data.get("acquisition_date")),
                         current_price=float(lot_data.get("current_price", 0)),
                         market_value=float(
-                            lot_data.get("current_value", 0)
-                        ),  # Fixed: Use 'market_value' not 'current_value'
+                            lot_data.get(
+                                "market_value",
+                                lot_data.get("current_value", 0),
+                            )
+                            or 0
+                        ),
                         unrealized_pnl=float(lot_data.get("unrealized_pnl", 0)),
                         unrealized_pnl_pct=float(lot_data.get("unrealized_pnl_pct", 0)),
                         currency=lot_data.get("currency", "USD"),
@@ -504,7 +510,13 @@ class IBKRSyncService:
                     db.add(tax_lot)
                     synced_count += 1
                     total_cost += float(lot_data.get("cost_basis", 0))
-                    total_value += float(lot_data.get("market_value", 0))
+                    total_value += float(
+                        lot_data.get(
+                            "market_value",
+                            lot_data.get("current_value", 0),
+                        )
+                        or 0
+                    )
 
                 except Exception as e:
                     logger.error(f"Error creating tax lot {synced_count}: {e}")

@@ -11,7 +11,7 @@ import hashlib
 from typing import Optional, Any, Dict
 from fastapi import APIRouter, Depends, HTTPException, status
 from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
-from pydantic import BaseModel, EmailStr
+from pydantic import BaseModel, EmailStr, ConfigDict
 from sqlalchemy.orm import Session
 from passlib.context import CryptContext
 import logging
@@ -109,6 +109,8 @@ class Token(BaseModel):
 class UserResponse(BaseModel):
     """User information response."""
 
+    model_config = ConfigDict(from_attributes=True)
+
     id: int
     username: str
     email: str
@@ -121,9 +123,6 @@ class UserResponse(BaseModel):
     ui_preferences: Optional[Dict[str, Any]] = None
     role: Optional[str] = None
     has_password: Optional[bool] = None
-
-    class Config:
-        from_attributes = True
 
 
 class UserUpdate(BaseModel):
@@ -217,7 +216,7 @@ async def register_user(
 
     logger.info(f"New user registered: {user_data.username}")
 
-    return UserResponse.from_orm(db_user)
+    return UserResponse.model_validate(db_user)
 
 
 @router.post("/login", response_model=Token)
@@ -251,7 +250,7 @@ async def get_current_user_info(user: User = Depends(get_current_user)) -> UserR
     Get current user information.
     Requires valid authentication token.
     """
-    resp = UserResponse.from_orm(user)
+    resp = UserResponse.model_validate(user)
     resp.role = getattr(user.role, "value", None)
     resp.has_password = bool(user.password_hash)
     return resp
@@ -332,7 +331,7 @@ async def update_current_user(
 
     logger.info(f"User updated: {current_user.username}")
 
-    resp = UserResponse.from_orm(current_user)
+    resp = UserResponse.model_validate(current_user)
     resp.role = getattr(current_user.role, "value", None)
     resp.has_password = bool(current_user.password_hash)
     return resp

@@ -1,8 +1,7 @@
 import React from 'react';
 import { describe, it, expect, vi, beforeEach } from 'vitest';
-import { ChakraProvider } from '@chakra-ui/react';
-import { render, screen, fireEvent, waitFor } from '@testing-library/react';
-import { system } from '../../theme/system';
+import { screen, fireEvent, waitFor } from '@testing-library/react';
+import { renderWithProviders } from '../../test/render';
 import SettingsProfile from '../SettingsProfile';
 import * as apiModule from '../../services/api';
 
@@ -35,11 +34,7 @@ describe('SettingsProfile', () => {
   });
 
   it('updates email with current_password', async () => {
-    render(
-      <ChakraProvider value={system}>
-        <SettingsProfile />
-      </ChakraProvider>
-    );
+    renderWithProviders(<SettingsProfile />);
 
     fireEvent.change(screen.getByPlaceholderText('name@domain.com'), {
       target: { value: 'new@example.com' },
@@ -58,11 +53,7 @@ describe('SettingsProfile', () => {
   });
 
   it('changes password with current_password and new_password', async () => {
-    render(
-      <ChakraProvider value={system}>
-        <SettingsProfile />
-      </ChakraProvider>
-    );
+    renderWithProviders(<SettingsProfile />);
 
     // Current password (Password section)
     const pw = screen.getAllByLabelText('Current password for password change');

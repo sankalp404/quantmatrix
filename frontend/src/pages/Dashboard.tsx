@@ -67,11 +67,13 @@ interface AccountSummary {
   broker: string;
   total_value: number;
   unrealized_pnl: number;
+  unrealized_pnl_pct?: number;
   positions_count: number;
   allocation_pct: number;
 }
 
 interface SectorData {
+  [key: string]: unknown;
   name: string;
   value: number;
   percentage: number;
@@ -176,7 +178,7 @@ const Dashboard: React.FC = () => {
   if (loading) {
     return (
       <Box display="flex" justifyContent="center" alignItems="center" height="400px">
-        <VStack spacing={4}>
+        <VStack gap={4}>
           <Spinner size="xl" color="brand.500" />
           <Text>Loading dashboard data...</Text>
         </VStack>
@@ -191,11 +193,13 @@ const Dashboard: React.FC = () => {
           <AlertIndicator />
           <AlertDescription>{error}</AlertDescription>
         </AlertRoot>
-        <HStack spacing={3}>
-          <Button onClick={fetchDashboardData} leftIcon={<FiRefreshCw />}>
+        <HStack gap={3}>
+          <Button onClick={fetchDashboardData}>
+            <FiRefreshCw style={{ marginRight: 8 }} />
             Retry
           </Button>
-          <Button onClick={syncPortfolioData} leftIcon={<FiActivity />} colorScheme="blue">
+          <Button onClick={syncPortfolioData} colorScheme="blue">
+            <FiActivity style={{ marginRight: 8 }} />
             Sync Portfolio
           </Button>
         </HStack>
@@ -214,7 +218,7 @@ const Dashboard: React.FC = () => {
   return (
     <Box p={6}>
       {/* Header with unified account selector */}
-      <VStack spacing={6} align="stretch">
+      <VStack gap={6} align="stretch">
         <Box>
           <Heading size="lg" mb={2}>Portfolio Dashboard</Heading>
           <Text color="gray.500" fontSize="sm">
@@ -338,7 +342,7 @@ const Dashboard: React.FC = () => {
                             outerRadius={80}
                             fill="#8884d8"
                             dataKey="value"
-                            label={({ name, percent }) => `${name}: ${(percent * 100).toFixed(0)}%`}
+                            label={({ name, percent }) => `${name}: ${(((percent ?? 0) as number) * 100).toFixed(0)}%`}
                           >
                             {dashboardData.sector_allocation.map((entry, index) => (
                               <Cell key={`cell-${index}`} fill={CHART_COLORS[index % CHART_COLORS.length]} />
@@ -362,11 +366,11 @@ const Dashboard: React.FC = () => {
                     <Heading size="md">Account Summary</Heading>
                   </CardHeader>
                   <CardBody>
-                    <VStack spacing={4} align="stretch">
+                    <VStack gap={4} align="stretch">
                       {dashboardData.accounts_summary.map((account, index) => (
                         <Box key={account.account_id}>
                           <HStack justify="space-between" mb={2}>
-                            <VStack align="start" spacing={0}>
+                            <VStack align="start" gap={0}>
                               <Text fontWeight="medium" fontSize="sm">
                                 {account.account_name}
                               </Text>
@@ -374,7 +378,7 @@ const Dashboard: React.FC = () => {
                                 {account.broker}
                               </Badge>
                             </VStack>
-                            <VStack align="end" spacing={0}>
+                            <VStack align="end" gap={0}>
                               <Text fontWeight="bold" fontSize="sm">
                                 {formatCurrency(account.total_value)}
                               </Text>
@@ -386,12 +390,11 @@ const Dashboard: React.FC = () => {
                               </Text>
                             </VStack>
                           </HStack>
-                          <Progress
-                            value={account.allocation_pct || 0}
-                            size="sm"
-                            colorScheme={(account.unrealized_pnl_pct || 0) >= 0 ? 'green' : 'red'}
-                            borderRadius="md"
-                          />
+                          <Progress.Root value={account.allocation_pct || 0} max={100}>
+                            <Progress.Track borderRadius="md">
+                              <Progress.Range />
+                            </Progress.Track>
+                          </Progress.Root>
                           {index < dashboardData.accounts_summary.length - 1 && <AppDivider mt={4} />}
                         </Box>
                       ))}
