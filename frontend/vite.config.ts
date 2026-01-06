@@ -7,6 +7,10 @@ export default defineConfig({
   server: {
     port: 3000,
     host: true,
+    headers: {
+      // Avoid stale ESM module caching during fast-moving Chakra v3 migration.
+      'Cache-Control': 'no-store',
+    },
     proxy: {
       '/api': {
         target: 'http://backend:8000',

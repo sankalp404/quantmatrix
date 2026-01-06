@@ -1,668 +1,162 @@
-import React, { useState, useEffect } from 'react';
-import {
-  Box,
-  Container,
-  Heading,
-  VStack,
-  HStack,
-  Text,
-  Card,
-  CardBody,
-  CardHeader,
-  SimpleGrid,
-  Badge,
-  Button,
-  Select,
-  TabsRoot,
-  TabsList,
-  TabsTrigger,
-  TabsContent,
-  StatRoot,
-  StatLabel,
-  StatHelpText,
-  StatValueText,
-  StatUpIndicator,
-  StatDownIndicator,
-  Spinner,
-  AlertRoot,
-  AlertIndicator,
-  Flex,
-  Progress,
-  Table,
-  Thead,
-  Tbody,
-  Tr,
-  Th,
-  Td,
-  TableScrollArea,
-  List,
-  ListItem,
-  ListIcon,
-} from '@chakra-ui/react';
-import {
-  ResponsiveContainer,
-  BarChart,
-  Bar,
-  XAxis,
-  YAxis,
-  CartesianGrid,
-  Tooltip as RechartsTooltip,
-  Legend,
-  PieChart,
-  Pie,
-  Cell,
-  LineChart,
-  Line,
-} from 'recharts';
-import { FiRefreshCw, FiDownload, FiTrendingUp, FiTrendingDown, FiCheckCircle, FiAlertTriangle } from 'react-icons/fi';
-import { portfolioApi, handleApiError } from '../services/api';
+import React from 'react';
+import { Box, HStack, Text, Button, CardRoot, CardBody, Badge } from '@chakra-ui/react';
+import { FiRefreshCw } from 'react-icons/fi';
+import { usePortfolio } from '../hooks/usePortfolio';
+import SortableTable, { type Column } from '../components/SortableTable';
+import FinvizHeatMap from '../components/charts/FinvizHeatMap';
 import AccountFilterWrapper from '../components/ui/AccountFilterWrapper';
 import { transformPortfolioToAccounts } from '../hooks/useAccountFilter';
-import SortableTable, { Column } from '../components/SortableTable';
-import FinvizHeatMap from '../components/charts/FinvizHeatMap';
-import toast from 'react-hot-toast';
 
-// Chakra v3 migration shim: prefer dark values until we reintroduce color-mode properly.
-const useColorModeValue = <T,>(_light: T, dark: T) => dark;
+type AnyPos = any;
 
-interface Holding {
-  symbol: string;
-  account: string;
-  value: number;
-  gainLoss: number;
-  gainLossPct: number;
-  quantity: number;
-  currentPrice: number;
-  dayChange: number;
-  dayChangePct: number;
-  sector: string;
+function isNonOptionPosition(p: AnyPos): boolean {
+  const t = String(p?.instrument_type || p?.asset_class || p?.type || '').toLowerCase();
+  return !(t.includes('option') || t.includes('opt'));
 }
 
 const Portfolio: React.FC = () => {
-  const [portfolioData, setPortfolioData] = useState<any>(null);
-  const [holdings, setHoldings] = useState<Holding[]>([]);
-  const [performanceData, setPerformanceData] = useState<any>(null);
-  const [taxData, setTaxData] = useState<any>(null);
-  const [loading, setLoading] = useState(true);
-  const [performanceLoading, setPerformanceLoading] = useState(false);
-  const [taxLoading, setTaxLoading] = useState(false);
-  const [syncing, setSyncing] = useState(false);
-  const [error, setError] = useState<string | null>(null);
-  const [sortBy, setSortBy] = useState('value');
+  const q = usePortfolio();
+  const data = (q.data as any) || {};
+  const accounts = transformPortfolioToAccounts(data);
 
-  const cardBg = useColorModeValue('white', 'gray.800');
-  const borderColor = useColorModeValue('gray.200', 'gray.700');
+  const positions: AnyPos[] = React.useMemo(() => {
+    const accs = Object.values<any>(data?.accounts || {});
+    const all = accs.flatMap((a: any) => a?.all_positions || []);
+    return all.filter(isNonOptionPosition);
+  }, [data]);
 
-  useEffect(() => {
-    fetchPortfolioData();
-  }, []);
+  const heatmap = React.useMemo(() => {
+    return positions
+      .map((p: any) => {
+        const symbol = String(p?.symbol || p?.instrument?.symbol || '').toUpperCase();
+        const value = Number(p?.market_value ?? p?.marketValue ?? p?.value ?? 0);
+        const change = Number(p?.day_change_pct ?? p?.dayChangePct ?? p?.pnl_pct ?? 0);
+        const sector = String(p?.sector || '—');
+        return {
+          name: symbol || '—',
+          size: Math.max(1, Math.round(value / 1000)),
+          change,
+          sector,
+          value: Number.isFinite(value) ? value : 0,
+        };
+      })
+      .filter((x: any) => x.name !== '—')
+      .slice(0, 40);
+  }, [positions]);
 
-  const fetchPortfolioData = async (accountId?: string) => {
-    setLoading(true);
-    setError(null);
-    try {
-      const data = await portfolioApi.getLive(accountId);
-      setPortfolioData(data.data);
-
-      // Transform portfolio data into holdings array
-      const allHoldings: Holding[] = [];
-      if (data.data?.accounts) {
-        Object.entries(data.data.accounts).forEach(([accountId, accountData]: [string, any]) => {
-          if (accountData.all_positions) {
-            accountData.all_positions.forEach((position: any) => {
-              // Only include stocks (exclude options)
-              if (position.contract_type === 'STK') {
-                allHoldings.push({
-                  symbol: position.symbol,
-                  account: accountId,
-                  value: position.position_value || 0,
-                  gainLoss: position.unrealized_pnl || 0,
-                  gainLossPct: position.unrealized_pnl_pct || 0,
-                  quantity: position.position || 0,
-                  currentPrice: position.market_price || 0,
-                  dayChange: position.day_change || 0,
-                  dayChangePct: position.day_change_pct || 0,
-                  sector: position.sector || 'Unknown',
-                });
-              }
-            });
-          }
-        });
-      }
-      setHoldings(allHoldings);
-    } catch (error) {
-      console.error('Error fetching portfolio data:', error);
-      setError(handleApiError(error));
-    } finally {
-      setLoading(false);
-    }
-  };
-
-  const fetchPerformanceData = async () => {
-    setPerformanceLoading(true);
-    try {
-      const response = await fetch('/api/v1/portfolio/performance-analytics');
-      const data = await response.json();
-      if (data.status === 'success') {
-        setPerformanceData(data.data);
-      }
-    } catch (error) {
-      console.error('Error fetching performance data:', error);
-      toast.error('Failed to load performance analytics');
-    } finally {
-      setPerformanceLoading(false);
-    }
-  };
-
-  const fetchTaxData = async () => {
-    setTaxLoading(true);
-    try {
-      const response = await fetch('/api/v1/portfolio/tax-optimization');
-      const data = await response.json();
-      if (data.status === 'success') {
-        setTaxData(data.data);
-      }
-    } catch (error) {
-      console.error('Error fetching tax data:', error);
-      toast.error('Failed to load tax optimization analysis');
-    } finally {
-      setTaxLoading(false);
-    }
-  };
-
-  const syncPortfolioData = async () => {
-    setSyncing(true);
-    try {
-      await portfolioApi.sync();
-
-      toast.success('Portfolio data has been synced successfully');
-
-      await fetchPortfolioData();
-
-    } catch (err: any) {
-      console.error('Error syncing portfolio data:', err);
-      toast.error(err.message || 'Failed to sync portfolio data');
-    } finally {
-      setSyncing(false);
-    }
-  };
-
-  // Transform portfolio data for account selector
-  const accounts = portfolioData ? transformPortfolioToAccounts(portfolioData) : [];
-
-  // Sort holdings based on selection
-  const sortHoldings = (holdingsToSort: Holding[]) => {
-    return [...holdingsToSort].sort((a, b) => {
-      switch (sortBy) {
-        case 'value': return b.value - a.value;
-        case 'gainLoss': return b.gainLoss - a.gainLoss;
-        case 'gainLossPct': return b.gainLossPct - a.gainLossPct;
-        case 'symbol': return a.symbol.localeCompare(b.symbol);
-        default: return 0;
-      }
-    });
-  };
-
-  // Holdings table columns
-  const holdingsColumns: Column<Holding>[] = [
+  const columns: Column<AnyPos>[] = [
     {
       key: 'symbol',
       header: 'Symbol',
-      accessor: (item) => item.symbol,
+      accessor: (p) => String(p?.symbol || p?.instrument?.symbol || ''),
       sortable: true,
       sortType: 'string',
-      render: (value) => <Text fontWeight="bold">{value}</Text>,
-    },
-    {
-      key: 'account',
-      header: 'Account',
-      accessor: (item) => item.account,
-      sortable: true,
-      sortType: 'string',
-      render: (value) => (
-        <Badge size="sm" colorScheme="blue">{value}</Badge>
+      render: (v) => (
+        <Text fontFamily="mono" fontSize="12px">
+          {String(v || '—')}
+        </Text>
       ),
+      width: '120px',
     },
     {
-      key: 'quantity',
-      header: 'Shares',
-      accessor: (item) => item.quantity,
+      key: 'qty',
+      header: 'Qty',
+      accessor: (p) => Number(p?.quantity ?? p?.qty ?? 0),
       sortable: true,
       sortType: 'number',
       isNumeric: true,
-      render: (value) => value.toFixed(2),
-    },
-    {
-      key: 'currentPrice',
-      header: 'Price',
-      accessor: (item) => item.currentPrice,
-      sortable: true,
-      sortType: 'number',
-      isNumeric: true,
-      render: (value) => `$${value.toFixed(2)}`,
+      width: '90px',
     },
     {
       key: 'value',
       header: 'Value',
-      accessor: (item) => item.value,
+      accessor: (p) => Number(p?.market_value ?? p?.marketValue ?? p?.value ?? 0),
       sortable: true,
       sortType: 'number',
       isNumeric: true,
-      render: (value) => `$${value.toLocaleString()}`,
+      render: (v) => (
+        <Text fontSize="12px" color="fg.muted">
+          {Number(v || 0).toLocaleString(undefined, { style: 'currency', currency: 'USD', maximumFractionDigits: 0 })}
+        </Text>
+      ),
+      width: '160px',
     },
     {
-      key: 'dayChange',
-      header: 'Day Change',
-      accessor: (item) => item.dayChange,
+      key: 'pnl',
+      header: 'P&L',
+      accessor: (p) => Number(p?.unrealized_pnl ?? p?.unrealizedPnL ?? p?.pnl ?? 0),
       sortable: true,
       sortType: 'number',
       isNumeric: true,
-      render: (value, item) => (
-        <VStack align="end" spacing={0}>
-          <Text color={value >= 0 ? 'green.500' : 'red.500'}>
-            {value >= 0 ? '+' : ''}${value.toFixed(2)}
-          </Text>
-          <Text fontSize="xs" color={item.dayChangePct >= 0 ? 'green.500' : 'red.500'}>
-            ({item.dayChangePct >= 0 ? '+' : ''}{item.dayChangePct.toFixed(2)}%)
-          </Text>
-        </VStack>
+      render: (v) => (
+        <Text fontSize="12px" color={Number(v || 0) >= 0 ? 'green.500' : 'red.500'}>
+          {Number(v || 0).toLocaleString(undefined, { style: 'currency', currency: 'USD', maximumFractionDigits: 0 })}
+        </Text>
       ),
-    },
-    {
-      key: 'gainLoss',
-      header: 'Total Return',
-      accessor: (item) => item.gainLoss,
-      sortable: true,
-      sortType: 'number',
-      isNumeric: true,
-      render: (value, item) => (
-        <VStack align="end" spacing={0}>
-          <Text color={value >= 0 ? 'green.500' : 'red.500'} fontWeight="medium">
-            {value >= 0 ? '+' : ''}${value.toFixed(2)}
-          </Text>
-          <Text fontSize="xs" color={item.gainLossPct >= 0 ? 'green.500' : 'red.500'}>
-            ({item.gainLossPct >= 0 ? '+' : ''}{item.gainLossPct.toFixed(2)}%)
-          </Text>
-        </VStack>
-      ),
-    },
-    {
-      key: 'sector',
-      header: 'Sector',
-      accessor: (item) => item.sector,
-      sortable: true,
-      sortType: 'string',
-      render: (value) => (
-        <Badge size="sm" variant="outline">{value}</Badge>
-      ),
+      width: '160px',
     },
   ];
 
-  if (loading) {
-    return (
-      <Container maxW="container.xl" py={8}>
-        <Flex justify="center" align="center" h="400px">
-          <VStack>
-            <Spinner size="xl" color="blue.500" />
-            <Text>Loading portfolio...</Text>
-          </VStack>
-        </Flex>
-      </Container>
-    );
-  }
-
   return (
-    <Container maxW="container.xl" py={8}>
-      <VStack spacing={6} align="stretch">
-        {/* Header */}
+    <Box>
+      <HStack justify="space-between" mb={3}>
         <Box>
-          <HStack justify="space-between" mb={2}>
-            <Heading size="lg">Portfolio Overview</Heading>
-            <HStack>
-              <Button
-                leftIcon={<FiRefreshCw />}
-                onClick={syncPortfolioData}
-                isLoading={syncing}
-                loadingText="Syncing..."
-                colorScheme="blue"
-                size="sm"
-              >
-                Sync Portfolio
-              </Button>
-              <Button leftIcon={<FiDownload />} size="sm" variant="outline">
-                Export
-              </Button>
-            </HStack>
-          </HStack>
-          <Text color="gray.500">
-            Real-time portfolio data with advanced filtering and analytics
+          <Text fontSize="lg" fontWeight="semibold" color="fg.default">
+            Portfolio
+          </Text>
+          <Text fontSize="sm" color="fg.muted">
+            v3-safe view (stocks/ETFs)
           </Text>
         </Box>
+        <Button size="sm" variant="outline" onClick={() => q.refetch()} loading={q.isFetching}>
+          <FiRefreshCw />
+          <Box as="span" ml={2}>
+            Reload
+          </Box>
+        </Button>
+      </HStack>
 
-        {/* Unified Account Filter */}
-        <AccountFilterWrapper
-          data={holdings}
-          accounts={accounts}
-          loading={loading}
-          error={error}
-          config={{
-            showAllOption: true,
-            showSummary: true,
-            variant: 'detailed',
-            size: 'md'
-          }}
-          onAccountChange={(account) => {
-            const accParam = account === 'all' ? undefined : account;
-            fetchPortfolioData(accParam);
-          }}
-        >
-          {(filteredHoldings, filterState) => (
-            <TabsRoot defaultValue="holdings" variant="enclosed" colorScheme="blue">
-              <TabsList>
-                <TabsTrigger value="holdings">Holdings Overview</TabsTrigger>
-                <TabsTrigger value="performance">Performance</TabsTrigger>
-                <TabsTrigger value="tax">Tax Analysis</TabsTrigger>
-              </TabsList>
-
-              <TabsContent value="holdings" px={0}>
-                {/* Controls */}
-                <HStack spacing={4} mb={6}>
-                  <Select
-                    value={sortBy}
-                    onChange={(e) => setSortBy(e.target.value)}
-                    w="200px"
-                    size="sm"
-                  >
-                    <option value="value">Sort by Value</option>
-                    <option value="gainLoss">Sort by Gain/Loss $</option>
-                    <option value="gainLossPct">Sort by Gain/Loss %</option>
-                    <option value="symbol">Sort by Symbol</option>
-                  </Select>
-
-                  <Badge variant="outline" p={2}>
-                    {filteredHoldings.length} positions • ${filteredHoldings.reduce((sum, h) => sum + h.value, 0).toLocaleString()}
-                  </Badge>
+      <AccountFilterWrapper
+        data={positions}
+        accounts={accounts}
+        config={{ showSummary: false, showAllOption: true, variant: 'simple' }}
+      >
+        {(filtered) => (
+          <Box display="flex" flexDirection="column" gap={3}>
+            <CardRoot bg="bg.card" borderWidth="1px" borderColor="border.subtle" borderRadius="xl">
+              <CardBody>
+                <HStack justify="space-between">
+                  <Text fontWeight="semibold">Holdings</Text>
+                  <Badge colorPalette="gray">{filtered.length}</Badge>
                 </HStack>
+              </CardBody>
+            </CardRoot>
 
-                {/* Holdings Table */}
-                <Card bg={cardBg} borderColor={borderColor}>
-                  <CardHeader>
-                    <Heading size="md">Current Holdings</Heading>
-                  </CardHeader>
-                  <CardBody>
-                    <SortableTable
-                      data={sortHoldings(filteredHoldings)}
-                      columns={holdingsColumns}
-                      defaultSortBy="value"
-                      defaultSortOrder="desc"
-                      emptyMessage="No holdings found for the selected account."
-                    />
-                  </CardBody>
-                </Card>
-              </TabsContent>
+            {heatmap.length ? (
+              <CardRoot bg="bg.card" borderWidth="1px" borderColor="border.subtle" borderRadius="xl">
+                <CardBody>
+                  <FinvizHeatMap data={heatmap as any} height={320} />
+                </CardBody>
+              </CardRoot>
+            ) : null}
 
-              <TabsContent value="performance" px={0}>
-                {/* Performance Tab with Real Analytics */}
-                <VStack spacing={6} align="stretch">
-                  {!performanceData && (
-                    <Button onClick={fetchPerformanceData} isLoading={performanceLoading} loadingText="Loading Analytics...">
-                      Load Performance Analytics
-                    </Button>
-                  )}
-
-                  {performanceData && (
-                    <>
-                      {/* Performance Metrics Cards */}
-                      <SimpleGrid columns={{ base: 2, md: 4 }} spacing={4}>
-                        <Card bg={cardBg} borderColor={borderColor}>
-                          <CardBody>
-                            <StatRoot>
-                              <StatLabel>Total Return</StatLabel>
-                              <StatValueText color={performanceData.performance_metrics.total_return >= 0 ? 'green.500' : 'red.500'}>
-                                {performanceData.performance_metrics.total_return >= 0 ? '+' : ''}
-                                ${performanceData.performance_metrics.total_return?.toLocaleString()}
-                              </StatValueText>
-                              <StatHelpText>
-                                {performanceData.performance_metrics.total_return_pct >= 0 ? <StatUpIndicator /> : <StatDownIndicator />}
-                                {performanceData.performance_metrics.total_return_pct?.toFixed(2)}%
-                              </StatHelpText>
-                            </StatRoot>
-                          </CardBody>
-                        </Card>
-
-                        <Card bg={cardBg} borderColor={borderColor}>
-                          <CardBody>
-                            <StatRoot>
-                              <StatLabel>Win Rate</StatLabel>
-                              <StatValueText>{performanceData.performance_metrics.win_rate}%</StatValueText>
-                              <StatHelpText>
-                                {performanceData.performance_metrics.winners_count} winners / {performanceData.performance_metrics.losers_count} losers
-                              </StatHelpText>
-                            </StatRoot>
-                          </CardBody>
-                        </Card>
-
-                        <Card bg={cardBg} borderColor={borderColor}>
-                          <CardBody>
-                            <StatRoot>
-                              <StatLabel>Sharpe Ratio</StatLabel>
-                              <StatValueText color={performanceData.risk_metrics.sharpe_ratio >= 1 ? 'green.500' : 'orange.500'}>
-                                {performanceData.risk_metrics.sharpe_ratio?.toFixed(2)}
-                              </StatValueText>
-                              <StatHelpText>Risk-adjusted return</StatHelpText>
-                            </StatRoot>
-                          </CardBody>
-                        </Card>
-
-                        <Card bg={cardBg} borderColor={borderColor}>
-                          <CardBody>
-                            <StatRoot>
-                              <StatLabel>Max Drawdown</StatLabel>
-                              <StatValueText color="red.500">
-                                -{performanceData.risk_metrics.max_drawdown?.toFixed(2)}%
-                              </StatValueText>
-                              <StatHelpText>Largest decline</StatHelpText>
-                            </StatRoot>
-                          </CardBody>
-                        </Card>
-                      </SimpleGrid>
-
-                      {/* Risk Metrics */}
-                      <Card bg={cardBg} borderColor={borderColor}>
-                        <CardHeader>
-                          <Heading size="md">Risk Analysis</Heading>
-                        </CardHeader>
-                        <CardBody>
-                          <SimpleGrid columns={{ base: 1, md: 2 }} spacing={6}>
-                            <VStack align="start" spacing={4}>
-                              <Box w="full">
-                                <Text fontSize="sm" fontWeight="semibold" mb={2}>Portfolio Concentration</Text>
-                                <HStack justify="space-between">
-                                  <Text fontSize="sm">Top 5 Holdings:</Text>
-                                  <Text fontSize="sm" fontWeight="bold">{performanceData.risk_metrics.top_5_concentration}%</Text>
-                                </HStack>
-                                <Progress value={performanceData.risk_metrics.top_5_concentration} colorScheme={performanceData.risk_metrics.top_5_concentration > 50 ? 'red' : 'green'} size="sm" />
-
-                                <HStack justify="space-between" mt={2}>
-                                  <Text fontSize="sm">Top 10 Holdings:</Text>
-                                  <Text fontSize="sm" fontWeight="bold">{performanceData.risk_metrics.top_10_concentration}%</Text>
-                                </HStack>
-                                <Progress value={performanceData.risk_metrics.top_10_concentration} colorScheme={performanceData.risk_metrics.top_10_concentration > 75 ? 'red' : 'green'} size="sm" />
-                              </Box>
-
-                              <Box w="full">
-                                <Text fontSize="sm" fontWeight="semibold" mb={2}>Risk Metrics</Text>
-                                <VStack spacing={2} align="stretch">
-                                  <HStack justify="space-between">
-                                    <Text fontSize="sm">Portfolio Volatility:</Text>
-                                    <Text fontSize="sm" fontWeight="bold">{performanceData.risk_metrics.portfolio_volatility}%</Text>
-                                  </HStack>
-                                  <HStack justify="space-between">
-                                    <Text fontSize="sm">Beta vs Market:</Text>
-                                    <Text fontSize="sm" fontWeight="bold">{performanceData.risk_metrics.beta}</Text>
-                                  </HStack>
-                                  <HStack justify="space-between">
-                                    <Text fontSize="sm">Value at Risk (95%):</Text>
-                                    <Text fontSize="sm" fontWeight="bold" color="red.500">${performanceData.risk_metrics.value_at_risk_95?.toLocaleString()}</Text>
-                                  </HStack>
-                                </VStack>
-                              </Box>
-                            </VStack>
-
-                            <Box>
-                              <Text fontSize="sm" fontWeight="semibold" mb={2}>Sector Performance</Text>
-                              <ResponsiveContainer width="100%" height={200}>
-                                <BarChart data={performanceData.attribution_analysis.sector_performance}>
-                                  <CartesianGrid strokeDasharray="3 3" />
-                                  <XAxis dataKey="sector" tick={{ fontSize: 12 }} />
-                                  <YAxis tick={{ fontSize: 12 }} />
-                                  <RechartsTooltip
-                                    formatter={(value, name) => [
-                                      name === 'return' ? `${value}%` : `${value}%`,
-                                      name === 'return' ? 'Sector Return' : 'Portfolio Weight'
-                                    ]}
-                                  />
-                                  <Bar dataKey="return" fill="#4299E1" />
-                                </BarChart>
-                              </ResponsiveContainer>
-                            </Box>
-                          </SimpleGrid>
-                        </CardBody>
-                      </Card>
-
-                      {/* Top Contributors/Detractors */}
-                      <SimpleGrid columns={{ base: 1, lg: 2 }} spacing={6}>
-                        <Card bg={cardBg} borderColor={borderColor}>
-                          <CardHeader>
-                            <Heading size="md" color="green.500">Top Contributors</Heading>
-                          </CardHeader>
-                          <CardBody>
-                            <TableScrollArea>
-                              <Table size="sm">
-                                <Thead>
-                                  <Tr>
-                                    <Th>Symbol</Th>
-                                    <Th isNumeric>Contribution</Th>
-                                    <Th isNumeric>Return</Th>
-                                  </Tr>
-                                </Thead>
-                                <Tbody>
-                                  {performanceData.attribution_analysis.top_contributors.slice(0, 5).map((stock: any, idx: number) => (
-                                    <Tr key={idx}>
-                                      <Td fontWeight="bold">{stock.symbol}</Td>
-                                      <Td isNumeric color="green.500">+{stock.contribution}%</Td>
-                                      <Td isNumeric>{stock.return}%</Td>
-                                    </Tr>
-                                  ))}
-                                </Tbody>
-                              </Table>
-                            </TableScrollArea>
-                          </CardBody>
-                        </Card>
-
-                        <Card bg={cardBg} borderColor={borderColor}>
-                          <CardHeader>
-                            <Heading size="md" color="red.500">Top Detractors</Heading>
-                          </CardHeader>
-                          <CardBody>
-                            <TableScrollArea>
-                              <Table size="sm">
-                                <Thead>
-                                  <Tr>
-                                    <Th>Symbol</Th>
-                                    <Th isNumeric>Contribution</Th>
-                                    <Th isNumeric>Return</Th>
-                                  </Tr>
-                                </Thead>
-                                <Tbody>
-                                  {performanceData.attribution_analysis.top_detractors.map((stock: any, idx: number) => (
-                                    <Tr key={idx}>
-                                      <Td fontWeight="bold">{stock.symbol}</Td>
-                                      <Td isNumeric color="red.500">{stock.contribution}%</Td>
-                                      <Td isNumeric>{stock.return}%</Td>
-                                    </Tr>
-                                  ))}
-                                </Tbody>
-                              </Table>
-                            </TableScrollArea>
-                          </CardBody>
-                        </Card>
-                      </SimpleGrid>
-
-                      {/* Benchmark Comparison */}
-                      <Card bg={cardBg} borderColor={borderColor}>
-                        <CardHeader>
-                          <Heading size="md">Benchmark Comparison</Heading>
-                        </CardHeader>
-                        <CardBody>
-                          <SimpleGrid columns={{ base: 1, md: 2 }} spacing={6}>
-                            <Box>
-                              <Text fontWeight="semibold" mb={2}>vs S&P 500</Text>
-                              <VStack spacing={2} align="stretch">
-                                <HStack justify="space-between">
-                                  <Text fontSize="sm">Portfolio Return:</Text>
-                                  <Text fontSize="sm" fontWeight="bold" color="blue.500">
-                                    {performanceData.benchmarks.vs_sp500.portfolio_return}%
-                                  </Text>
-                                </HStack>
-                                <HStack justify="space-between">
-                                  <Text fontSize="sm">S&P 500 Return:</Text>
-                                  <Text fontSize="sm" fontWeight="bold">
-                                    {performanceData.benchmarks.vs_sp500.benchmark_return}%
-                                  </Text>
-                                </HStack>
-                                <HStack justify="space-between">
-                                  <Text fontSize="sm">Alpha:</Text>
-                                  <Text fontSize="sm" fontWeight="bold" color={performanceData.benchmarks.vs_sp500.alpha >= 0 ? 'green.500' : 'red.500'}>
-                                    {performanceData.benchmarks.vs_sp500.alpha >= 0 ? '+' : ''}{performanceData.benchmarks.vs_sp500.alpha}%
-                                  </Text>
-                                </HStack>
-                              </VStack>
-                            </Box>
-
-                            <Box>
-                              <Text fontWeight="semibold" mb={2}>vs NASDAQ</Text>
-                              <VStack spacing={2} align="stretch">
-                                <HStack justify="space-between">
-                                  <Text fontSize="sm">Portfolio Return:</Text>
-                                  <Text fontSize="sm" fontWeight="bold" color="blue.500">
-                                    {performanceData.benchmarks.vs_nasdaq.portfolio_return}%
-                                  </Text>
-                                </HStack>
-                                <HStack justify="space-between">
-                                  <Text fontSize="sm">NASDAQ Return:</Text>
-                                  <Text fontSize="sm" fontWeight="bold">
-                                    {performanceData.benchmarks.vs_nasdaq.benchmark_return}%
-                                  </Text>
-                                </HStack>
-                                <HStack justify="space-between">
-                                  <Text fontSize="sm">Alpha:</Text>
-                                  <Text fontSize="sm" fontWeight="bold" color={performanceData.benchmarks.vs_nasdaq.alpha >= 0 ? 'green.500' : 'red.500'}>
-                                    {performanceData.benchmarks.vs_nasdaq.alpha >= 0 ? '+' : ''}{performanceData.benchmarks.vs_nasdaq.alpha}%
-                                  </Text>
-                                </HStack>
-                              </VStack>
-                            </Box>
-                          </SimpleGrid>
-                        </CardBody>
-                      </Card>
-                    </>
-                  )}
-                </VStack>
-              </TabsContent>
-
-              <TabsContent value="tax" px={0}>
-                <AlertRoot status="info">
-                  <AlertIndicator />
-                  Tax analysis coming soon...
-                </AlertRoot>
-              </TabsContent>
-            </TabsRoot>
-          )}
-        </AccountFilterWrapper>
-      </VStack>
-    </Container>
+            <Box w="full" borderWidth="1px" borderColor="border.subtle" borderRadius="xl" bg="bg.card">
+              <SortableTable
+                data={filtered}
+                columns={columns}
+                defaultSortBy="value"
+                defaultSortOrder="desc"
+                size="sm"
+                maxHeight="70vh"
+                emptyMessage={q.isLoading ? 'Loading…' : 'No holdings found.'}
+              />
+            </Box>
+          </Box>
+        )}
+      </AccountFilterWrapper>
+    </Box>
   );
 };
 
-export default Portfolio; 
+export default Portfolio;
+

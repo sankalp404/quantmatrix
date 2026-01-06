@@ -73,7 +73,7 @@ const SettingsShell: React.FC = () => {
   return (
     <Flex gap={2} p={0} w="full" minW={0} overflowX="hidden">
       {isDesktop ? (
-        <Box w="140px" flexShrink={0}>
+        <Box w="160px" flexShrink={0}>
           <VStack align="stretch" gap={1}>
             <Text fontSize="sm" color={sectionColor} px={2}>ACCOUNT</Text>
             <MenuLink to="/settings/profile">Profile</MenuLink>

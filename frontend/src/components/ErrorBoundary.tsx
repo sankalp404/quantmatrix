@@ -9,8 +9,6 @@ import {
   VStack,
   Text,
   Code,
-  Collapse,
-  useDisclosure
 } from '@chakra-ui/react';
 
 interface Props {
@@ -96,7 +94,7 @@ const ErrorFallback: React.FC<{
   onRetry: () => void;
   onReload: () => void;
 }> = ({ error, errorInfo, onRetry, onReload }) => {
-  const { isOpen, onToggle } = useDisclosure();
+  const [detailsOpen, setDetailsOpen] = React.useState(false);
   const bgColor = 'bg.card';
   const borderColor = 'border.subtle';
 
@@ -121,7 +119,7 @@ const ErrorFallback: React.FC<{
         </Box>
       </AlertRoot>
 
-      <VStack spacing={4} align="stretch">
+      <VStack gap={4} align="stretch">
         <Box>
           <Button colorScheme="blue" onClick={onRetry} mr={3}>
             Try Again
@@ -133,18 +131,18 @@ const ErrorFallback: React.FC<{
 
         {error && (
           <Box>
-            <Button size="sm" variant="ghost" onClick={onToggle}>
-              {isOpen ? 'Hide' : 'Show'} Error Details
+            <Button size="sm" variant="ghost" onClick={() => setDetailsOpen((v) => !v)}>
+              {detailsOpen ? 'Hide' : 'Show'} Error Details
             </Button>
 
-            <Collapse in={isOpen} animateOpacity>
-              <Box mt={4} p={4} bg="red.50" borderRadius="md" border="1px" borderColor="red.200">
+            {detailsOpen ? (
+              <Box mt={4} p={4} bg="bg.muted" borderRadius="md" borderWidth="1px" borderColor="border.subtle">
                 <Text fontWeight="bold" mb={2}>Error Message:</Text>
-                <Code colorScheme="red" display="block" p={2} mb={4} whiteSpace="pre-wrap">
+                <Code display="block" p={2} mb={4} whiteSpace="pre-wrap">
                   {error.message}
                 </Code>
 
-                {error.stack && (
+                {error.stack ? (
                   <>
                     <Text fontWeight="bold" mb={2}>Stack Trace:</Text>
                     <Code
@@ -158,9 +156,9 @@ const ErrorFallback: React.FC<{
                       {error.stack}
                     </Code>
                   </>
-                )}
+                ) : null}
               </Box>
-            </Collapse>
+            ) : null}
           </Box>
         )}
 
