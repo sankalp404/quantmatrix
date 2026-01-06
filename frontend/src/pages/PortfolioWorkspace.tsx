@@ -23,8 +23,8 @@ import {
 } from '@chakra-ui/react';
 import { FiRefreshCw, FiSearch } from 'react-icons/fi';
 import PageHeader from '../components/ui/PageHeader';
-import SymbolChartWithMarkers from '../components/SymbolChartWithMarkers';
-import TradingViewChart from '../components/TradingViewChart';
+import SymbolChartWithMarkers from '../components/charts/SymbolChartWithMarkers';
+import TradingViewChart from '../components/charts/TradingViewChart';
 import { marketDataApi } from '../services/api';
 import { portfolioApi } from '../services/api';
 import { useAccountContext } from '../context/AccountContext';

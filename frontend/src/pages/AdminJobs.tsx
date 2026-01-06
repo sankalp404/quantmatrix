@@ -128,8 +128,8 @@ const AdminJobs: React.FC = () => {
   }, [page, pageSize]);
 
   return (
-    <Box p={4}>
-      <HStack justify="space-between" mb={4}>
+    <Box p={0}>
+      <HStack justify="space-between" mb={3}>
         <Box>
           <Heading size="md">Admin Jobs</Heading>
           <Text fontSize="sm" color="fg.muted">
@@ -143,7 +143,7 @@ const AdminJobs: React.FC = () => {
           Reload
         </Button>
       </HStack>
-      <Box borderWidth="1px" borderColor="border.subtle" borderRadius="xl" bg="bg.card">
+      <Box w="full" borderWidth="1px" borderColor="border.subtle" borderRadius="xl" bg="bg.card">
         <SortableTable
           data={data?.jobs || []}
           columns={
@@ -262,7 +262,7 @@ const AdminJobs: React.FC = () => {
         />
       </Box>
 
-      <Box mt={3}>
+      <Box mt={2}>
         <Pagination
           page={page}
           pageSize={pageSize}

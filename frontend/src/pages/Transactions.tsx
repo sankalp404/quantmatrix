@@ -51,7 +51,7 @@ import {
   FiSearch,
 } from 'react-icons/fi';
 import { portfolioApi, handleApiError, activityApi } from '../services/api';
-import AccountFilterWrapper from '../components/AccountFilterWrapper';
+import AccountFilterWrapper from '../components/ui/AccountFilterWrapper';
 import { transformPortfolioToAccounts, AccountData } from '../hooks/useAccountFilter';
 import SortableTable, { Column } from '../components/SortableTable';
 import { useAccountContext } from '../context/AccountContext';

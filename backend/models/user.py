@@ -71,6 +71,8 @@ class User(Base):
     timezone = Column(String(50), default="UTC")
     currency_preference = Column(String(3), default="USD")
     notification_preferences = Column(JSON)
+    # UI Preferences (theme, table density, etc.)
+    ui_preferences = Column(JSON)
 
     # Audit
     created_at = Column(

@@ -91,7 +91,7 @@ import {
 import { portfolioApi } from '../services/api';
 import useFlexQuery from '../hooks/useFlexQuery';
 import SortableTable, { Column } from '../components/SortableTable';
-import AccountFilterWrapper from '../components/AccountFilterWrapper';
+import AccountFilterWrapper from '../components/ui/AccountFilterWrapper';
 import { transformPortfolioToAccounts } from '../hooks/useAccountFilter';
 import EmptyState from '../components/ui/EmptyState';
 import { useAccountContext } from '../context/AccountContext';

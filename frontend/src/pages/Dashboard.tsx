@@ -37,7 +37,7 @@ import {
 import { FiTrendingUp, FiTrendingDown, FiDollarSign, FiPieChart, FiActivity, FiRefreshCw, FiFilter } from 'react-icons/fi';
 import { PieChart, Pie, Cell, ResponsiveContainer, Tooltip, Legend } from 'recharts';
 import { portfolioApi, handleApiError } from '../services/api';
-import AccountFilterWrapper from '../components/AccountFilterWrapper';
+import AccountFilterWrapper from '../components/ui/AccountFilterWrapper';
 import { transformPortfolioToAccounts } from '../hooks/useAccountFilter';
 import AppDivider from '../components/ui/AppDivider';
 import toast from 'react-hot-toast';

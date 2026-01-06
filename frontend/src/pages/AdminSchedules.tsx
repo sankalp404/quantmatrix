@@ -119,8 +119,8 @@ const AdminSchedules: React.FC = () => {
   }, []);
 
   return (
-    <Box p={4}>
-      <HStack justify="space-between" mb={4}>
+    <Box p={0}>
+      <HStack justify="space-between" mb={3}>
         <Box>
           <Heading size="md">Admin Schedules</Heading>
           <Text fontSize="sm" color="fg.muted">
@@ -137,7 +137,7 @@ const AdminSchedules: React.FC = () => {
         </HStack>
       </HStack>
 
-      <Box borderWidth="1px" borderColor="border.subtle" borderRadius="xl" bg="bg.card">
+      <Box w="full" borderWidth="1px" borderColor="border.subtle" borderRadius="xl" bg="bg.card">
         <SortableTable
           data={data?.schedules || []}
           columns={

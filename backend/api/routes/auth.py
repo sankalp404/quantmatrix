@@ -8,7 +8,7 @@ Includes JWT token handling and user profile management.
 
 from datetime import datetime, timedelta
 import hashlib
-from typing import Optional
+from typing import Optional, Any, Dict
 from fastapi import APIRouter, Depends, HTTPException, status
 from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
 from pydantic import BaseModel, EmailStr
@@ -115,10 +115,30 @@ class UserResponse(BaseModel):
     full_name: Optional[str]
     is_active: bool
     created_at: datetime
+    timezone: Optional[str] = None
+    currency_preference: Optional[str] = None
+    notification_preferences: Optional[Dict[str, Any]] = None
+    ui_preferences: Optional[Dict[str, Any]] = None
     role: Optional[str] = None
+    has_password: Optional[bool] = None
 
     class Config:
         from_attributes = True
+
+
+class UserUpdate(BaseModel):
+    full_name: Optional[str] = None
+    email: Optional[EmailStr] = None
+    current_password: Optional[str] = None
+    timezone: Optional[str] = None
+    currency_preference: Optional[str] = None
+    notification_preferences: Optional[Dict[str, Any]] = None
+    ui_preferences: Optional[Dict[str, Any]] = None
+
+
+class ChangePasswordRequest(BaseModel):
+    current_password: Optional[str] = None
+    new_password: str
 
 
 # Authentication helper functions
@@ -233,12 +253,13 @@ async def get_current_user_info(user: User = Depends(get_current_user)) -> UserR
     """
     resp = UserResponse.from_orm(user)
     resp.role = getattr(user.role, "value", None)
+    resp.has_password = bool(user.password_hash)
     return resp
 
 
 @router.put("/me", response_model=UserResponse)
 async def update_current_user(
-    user_update: dict,
+    user_update: UserUpdate,
     current_user: User = Depends(get_current_user),
     db: Session = Depends(get_db),
 ) -> UserResponse:
@@ -246,24 +267,80 @@ async def update_current_user(
     Update current user information.
     Requires valid authentication token.
     """
-    # Update allowed fields
-    allowed_fields = ["full_name", "email"]
-    for field, value in user_update.items():
-        if field in allowed_fields and hasattr(current_user, field):
-            setattr(current_user, field, value)
+    # full_name (property setter splits into first/last)
+    if user_update.full_name is not None:
+        current_user.full_name = user_update.full_name
+
+    # email (unique + optionally require password confirmation)
+    if user_update.email is not None and user_update.email != current_user.email:
+        if current_user.password_hash:
+            if not user_update.current_password:
+                raise HTTPException(
+                    status_code=status.HTTP_400_BAD_REQUEST,
+                    detail="current_password required to update email",
+                )
+            if not verify_password(user_update.current_password, current_user.password_hash or ""):
+                raise HTTPException(
+                    status_code=status.HTTP_400_BAD_REQUEST,
+                    detail="Incorrect current password",
+                )
+        existing = (
+            db.query(User)
+            .filter(User.email == str(user_update.email), User.id != current_user.id)
+            .first()
+        )
+        if existing:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="Email already in use",
+            )
+        current_user.email = str(user_update.email)
+
+    if user_update.timezone is not None:
+        current_user.timezone = user_update.timezone
+
+    if user_update.currency_preference is not None:
+        cur = str(user_update.currency_preference).upper().strip()
+        if len(cur) != 3 or not cur.isalpha():
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="currency_preference must be a 3-letter currency code (e.g. USD)",
+            )
+        current_user.currency_preference = cur
+
+    if user_update.notification_preferences is not None:
+        if not isinstance(user_update.notification_preferences, dict):
+            raise HTTPException(status_code=400, detail="notification_preferences must be an object")
+        current_user.notification_preferences = user_update.notification_preferences
+
+    if user_update.ui_preferences is not None:
+        if not isinstance(user_update.ui_preferences, dict):
+            raise HTTPException(status_code=400, detail="ui_preferences must be an object")
+        merged = dict(current_user.ui_preferences or {})
+        merged.update(user_update.ui_preferences)
+        # Basic validation for known keys (allow additional keys for forward-compat)
+        cm = merged.get("color_mode_preference")
+        if cm is not None and cm not in ("system", "light", "dark"):
+            raise HTTPException(status_code=400, detail="ui_preferences.color_mode_preference must be system|light|dark")
+        td = merged.get("table_density")
+        if td is not None and td not in ("comfortable", "compact"):
+            raise HTTPException(status_code=400, detail="ui_preferences.table_density must be comfortable|compact")
+        current_user.ui_preferences = merged
 
     db.commit()
     db.refresh(current_user)
 
     logger.info(f"User updated: {current_user.username}")
 
-    return UserResponse.from_orm(current_user)
+    resp = UserResponse.from_orm(current_user)
+    resp.role = getattr(current_user.role, "value", None)
+    resp.has_password = bool(current_user.password_hash)
+    return resp
 
 
 @router.post("/change-password")
 async def change_password(
-    current_password: str,
-    new_password: str,
+    payload: ChangePasswordRequest,
     current_user: User = Depends(get_current_user),
     db: Session = Depends(get_db),
 ):
@@ -271,11 +348,24 @@ async def change_password(
     Change user password.
     Requires valid authentication token and current password.
     """
-    # Verify current password
-    if not verify_password(current_password, current_user.password_hash or ""):
+    new_password = payload.new_password
+    if not new_password or len(new_password) < 8:
         raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST, detail="Incorrect current password"
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="New password must be at least 8 characters",
         )
+
+    # Verify current password (if user already has one)
+    if current_user.password_hash:
+        if not payload.current_password:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="current_password required",
+            )
+        if not verify_password(payload.current_password, current_user.password_hash or ""):
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST, detail="Incorrect current password"
+            )
 
     # Update password
     current_user.password_hash = get_password_hash(new_password)

@@ -1,5 +1,6 @@
 import React, { createContext, useContext, useEffect, useMemo, useState } from 'react';
 import { authApi } from '../services/api';
+import { useColorMode } from '../theme/colorMode';
 
 type User = {
   id: number;
@@ -8,6 +9,11 @@ type User = {
   full_name?: string | null;
   is_active: boolean;
   role?: string | null;
+  timezone?: string | null;
+  currency_preference?: string | null;
+  notification_preferences?: any;
+  ui_preferences?: any;
+  has_password?: boolean;
 };
 
 type AuthContextValue = {
@@ -24,6 +30,7 @@ const AuthContext = createContext<AuthContextValue | undefined>(undefined);
 
 export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children }) => {
   const [user, setUser] = useState<User | null>(null);
+  const { setColorModePreference } = useColorMode();
   // Initialize token synchronously from localStorage to avoid redirect flicker
   const [token, setToken] = useState<string | null>(() => {
     try {
@@ -40,6 +47,10 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
         if (token) {
           const me: any = await authApi.me();
           setUser(me);
+          const pref = me?.ui_preferences?.color_mode_preference;
+          if (pref === 'system' || pref === 'light' || pref === 'dark') {
+            setColorModePreference(pref);
+          }
         }
       } catch {
         // invalid token -> clear
@@ -61,6 +72,10 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
       setToken(t);
       const me: any = await authApi.me();
       setUser(me);
+      const pref = me?.ui_preferences?.color_mode_preference;
+      if (pref === 'system' || pref === 'light' || pref === 'dark') {
+        setColorModePreference(pref);
+      }
     }
   };
 
@@ -78,6 +93,10 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
   const refreshMe = async () => {
     const me: any = await authApi.me();
     setUser(me);
+    const pref = me?.ui_preferences?.color_mode_preference;
+    if (pref === 'system' || pref === 'light' || pref === 'dark') {
+      setColorModePreference(pref);
+    }
   };
 
   const value = useMemo<AuthContextValue>(() => ({

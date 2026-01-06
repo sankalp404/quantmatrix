@@ -406,7 +406,7 @@ const DashboardLayout: React.FC = () => {
         </Flex>
 
         {/* Page Content */}
-        <Box p={6} h="calc(100vh - 4rem)" overflowY="auto" overflowX="hidden" minW={0}>
+        <Box p={4} h="calc(100vh - 4rem)" overflowY="auto" overflowX="hidden" minW={0}>
           <Outlet />
         </Box>
       </Box>

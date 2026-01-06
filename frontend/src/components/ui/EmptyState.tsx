@@ -12,17 +12,17 @@ interface EmptyStateProps {
 const EmptyState: React.FC<EmptyStateProps> = ({ icon, title, description, action, secondaryAction }) => {
   return (
     <Box textAlign="center" py={12}>
-      <VStack spacing={3}>
-        {icon && <Icon as={icon} boxSize={10} color="gray.500" />}
-        <Heading size="md">{title}</Heading>
+      <VStack gap={3}>
+        {icon && <Icon as={icon} boxSize={10} color="fg.muted" />}
+        <Heading size="md" color="fg.default">{title}</Heading>
         {description && (
-          <Text color="gray.500" maxW="3xl">
+          <Text color="fg.muted" maxW="3xl">
             {description}
           </Text>
         )}
-        <VStack spacing={2}>
+        <VStack gap={2}>
           {action && (
-            <Button colorScheme="blue" onClick={action.onClick}>
+            <Button bg="brand.500" _hover={{ bg: "brand.400" }} onClick={action.onClick}>
               {action.label}
             </Button>
           )}

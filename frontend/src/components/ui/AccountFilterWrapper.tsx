@@ -1,7 +1,15 @@
-import React, { ReactNode } from 'react';
-import { Box, VStack, AlertRoot, AlertIndicator, AlertDescription, Spinner, Text } from '@chakra-ui/react';
-import AccountSelector from './AccountSelector';
-import { useAccountFilter, AccountData, FilterableItem, AccountFilterConfig } from '../hooks/useAccountFilter';
+import React, { type ReactNode } from 'react';
+import {
+  Box,
+  VStack,
+  AlertRoot,
+  AlertIndicator,
+  AlertDescription,
+  Spinner,
+  Text,
+} from '@chakra-ui/react';
+import AccountSelector, { type AccountData } from './AccountSelector';
+import { useAccountFilter, type FilterableItem, type AccountFilterConfig } from '../../hooks/useAccountFilter';
 
 interface AccountFilterWrapperProps<T extends FilterableItem> {
   data: T[];
@@ -14,15 +22,7 @@ interface AccountFilterWrapperProps<T extends FilterableItem> {
 }
 
 /**
- * Reusable wrapper component that provides consistent account filtering UI and logic
- * across all pages in the application.
- * 
- * Usage:
- * <AccountFilterWrapper data={holdings} accounts={accounts}>
- *   {(filteredData, filterState) => (
- *     // Your page content with filtered data
- *   )}
- * </AccountFilterWrapper>
+ * Reusable wrapper component that provides consistent account filtering UI and logic.
  */
 function AccountFilterWrapper<T extends FilterableItem>({
   data,
@@ -35,26 +35,23 @@ function AccountFilterWrapper<T extends FilterableItem>({
 }: AccountFilterWrapperProps<T>) {
   const filterState = useAccountFilter(data, accounts, config);
 
-  // Handle account selection changes
   const handleAccountChange = (accountId: string) => {
     filterState.setSelectedAccount(accountId);
     onAccountChange?.(accountId);
   };
 
-  // Show loading state
   if (loading) {
     return (
       <VStack gap={4} py={8}>
-        <Spinner size="xl" color="blue.500" />
-        <Text>Loading account data...</Text>
+        <Spinner size="xl" color="brand.500" />
+        <Text color="fg.muted">Loading account data…</Text>
       </VStack>
     );
   }
 
-  // Show error state
   if (error) {
     return (
-      <AlertRoot status="error" borderRadius="md">
+      <AlertRoot status="error" borderRadius="lg" borderWidth="1px" borderColor="border.subtle" bg="bg.card">
         <AlertIndicator />
         <AlertDescription>Error loading account data: {error}</AlertDescription>
       </AlertRoot>
@@ -63,7 +60,6 @@ function AccountFilterWrapper<T extends FilterableItem>({
 
   return (
     <VStack gap={6} align="stretch">
-      {/* Account Filter UI */}
       <AccountSelector
         accounts={accounts}
         selectedAccount={filterState.selectedAccount}
@@ -74,12 +70,11 @@ function AccountFilterWrapper<T extends FilterableItem>({
         variant={config.variant}
       />
 
-      {/* Page Content with Filtered Data */}
-      <Box>
-        {children(filterState.filteredData as T[], filterState)}
-      </Box>
+      <Box>{children(filterState.filteredData as T[], filterState)}</Box>
     </VStack>
   );
 }
 
-export default AccountFilterWrapper; 
+export default AccountFilterWrapper;
+
+

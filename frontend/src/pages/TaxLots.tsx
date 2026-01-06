@@ -39,7 +39,7 @@ import {
 import hotToast from 'react-hot-toast';
 import { FiDollarSign, FiTrendingUp, FiTrendingDown, FiCalendar, FiFilter, FiRefreshCw, FiDownload, FiSearch, FiClock } from 'react-icons/fi';
 import { PieChart, Pie, Cell, ResponsiveContainer, Tooltip as RechartsTooltip, Legend, BarChart, Bar, XAxis, YAxis, CartesianGrid } from 'recharts';
-import AccountFilterWrapper from '../components/AccountFilterWrapper';
+import AccountFilterWrapper from '../components/ui/AccountFilterWrapper';
 import { portfolioApi } from '../services/api';
 import { transformPortfolioToAccounts } from '../hooks/useAccountFilter';
 

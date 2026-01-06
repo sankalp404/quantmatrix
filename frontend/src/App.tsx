@@ -88,7 +88,7 @@ function App() {
                       <Route path="strategies-manager" element={<StrategiesManager />} />
                       <Route path="notifications" element={<Notifications />} />
                       <Route path="settings" element={<SettingsShell />}>
-                        <Route index element={<Settings />} />
+                        <Route index element={<Navigate to="profile" replace />} />
                         <Route path="profile" element={<SettingsProfile />} />
                         <Route path="preferences" element={<SettingsPreferences />} />
                         <Route path="notifications" element={<SettingsNotifications />} />

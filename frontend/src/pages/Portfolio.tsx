@@ -56,10 +56,10 @@ import {
 } from 'recharts';
 import { FiRefreshCw, FiDownload, FiTrendingUp, FiTrendingDown, FiCheckCircle, FiAlertTriangle } from 'react-icons/fi';
 import { portfolioApi, handleApiError } from '../services/api';
-import AccountFilterWrapper from '../components/AccountFilterWrapper';
+import AccountFilterWrapper from '../components/ui/AccountFilterWrapper';
 import { transformPortfolioToAccounts } from '../hooks/useAccountFilter';
 import SortableTable, { Column } from '../components/SortableTable';
-import FinvizHeatMap from '../components/FinvizHeatMap';
+import FinvizHeatMap from '../components/charts/FinvizHeatMap';
 import toast from 'react-hot-toast';
 
 // Chakra v3 migration shim: prefer dark values until we reintroduce color-mode properly.

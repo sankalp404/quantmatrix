@@ -13,6 +13,7 @@ import {
   Text,
 } from '@chakra-ui/react';
 import { FiChevronUp, FiChevronDown, FiMinus } from 'react-icons/fi';
+import EmptyState from './ui/EmptyState';
 
 export interface Column<T = any> {
   key: string;
@@ -117,16 +118,17 @@ function SortableTable<T = any>({
   }, [data, sortBy, sortOrder, columns]);
 
   if (!data.length) {
-    return (
-      <Box p={8} textAlign="center" color="gray.500">
-        <Text>{emptyMessage}</Text>
-      </Box>
-    );
+    return <EmptyState title={emptyMessage} />;
   }
 
   return (
-    <TableScrollArea maxHeight={maxHeight} overflowY={maxHeight ? 'auto' : 'visible'}>
-      <TableRoot variant={tableVariant} size={size}>
+    <TableScrollArea
+      w="full"
+      maxHeight={maxHeight}
+      overflowY={maxHeight ? 'auto' : 'visible'}
+      overflowX="auto"
+    >
+      <TableRoot w="full" variant={tableVariant} size={size}>
         {showHeader && (
           <TableHeader>
             <TableRow>

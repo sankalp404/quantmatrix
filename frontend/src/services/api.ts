@@ -414,6 +414,12 @@ export const authApi = {
   me: async () => {
     return makeOptimizedRequest(() => api.get('/auth/me'));
   },
+  updateMe: async (payload: any) => {
+    return makeOptimizedRequest(() => api.put('/auth/me', payload));
+  },
+  changePassword: async (payload: { current_password?: string; new_password: string }) => {
+    return makeOptimizedRequest(() => api.post('/auth/change-password', payload));
+  },
 };
 
 // Accounts API

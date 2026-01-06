@@ -31,8 +31,8 @@ import {
 } from '@chakra-ui/react';
 import { FiSearch, FiFilter, FiTrendingUp, FiTrendingDown, FiX, FiExternalLink } from 'react-icons/fi';
 import { portfolioApi, handleApiError } from '../services/api';
-import AccountFilterWrapper from '../components/AccountFilterWrapper';
-import TradingViewChart from '../components/TradingViewChart';
+import AccountFilterWrapper from '../components/ui/AccountFilterWrapper';
+import TradingViewChart from '../components/charts/TradingViewChart';
 import ErrorBoundary from '../components/ErrorBoundary';
 import { HoldingsTableSkeleton, LoadingSpinner } from '../components/LoadingStates';
 import PageHeader from '../components/ui/PageHeader';
