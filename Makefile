@@ -2,7 +2,8 @@
 	test-up test test-down \
 	backend-shell frontend-shell \
 	migrate-create migrate-up migrate-down migrate-stamp-head \
-	frontend-lint frontend-typecheck frontend-test
+	frontend-install frontend-lint frontend-typecheck frontend-test \
+	ui ui-install ui-lint ui-typecheck ui-test ui-check
 
 DOCKER ?= docker
 PROJECT ?= quantmatrix
@@ -49,7 +50,12 @@ test-up:
 	$(COMPOSE_TEST) up -d postgres_test redis_test
 
 test:
+	@# Always use a fresh isolated test DB volume to prevent migration drift.
+	@# This never touches dev DB; it only resets the quantmatrix_test project volumes.
+	-$(COMPOSE_TEST) down -v
+	$(COMPOSE_TEST) up -d postgres_test redis_test
 	$(COMPOSE_TEST) run --rm backend_test
+	$(COMPOSE_TEST) down -v
 
 test-down:
 	$(COMPOSE_TEST) down -v
@@ -82,13 +88,35 @@ migrate-down:
 migrate-stamp-head:
 	$(COMPOSE_DEV) exec backend alembic -c backend/alembic.ini stamp head
 
+frontend-install:
+	$(COMPOSE_DEV) exec -T frontend npm ci
+
 frontend-lint:
-	$(COMPOSE_DEV) exec frontend npm run lint
+	$(COMPOSE_DEV) exec -T frontend npm run lint
 
 frontend-typecheck:
-	$(COMPOSE_DEV) exec frontend npm run type-check
+	$(COMPOSE_DEV) exec -T frontend npm run type-check
 
 frontend-test:
-	$(COMPOSE_DEV) exec frontend npm run test
+	$(COMPOSE_DEV) exec -T frontend npm run test
+
+# UI aliases (human-friendly)
+ui:
+	@echo "UI targets:"
+	@echo "  make ui-install    # npm ci (fixes missing deps in docker volume)"
+	@echo "  make ui-lint       # eslint"
+	@echo "  make ui-typecheck  # tsc --noEmit"
+	@echo "  make ui-test       # vitest"
+	@echo "  make ui-check      # lint + typecheck + test"
+
+ui-install: frontend-install
+
+ui-lint: frontend-lint
+
+ui-typecheck: frontend-typecheck
+
+ui-test: frontend-test
+
+ui-check: ui-install ui-lint ui-typecheck ui-test
 
 

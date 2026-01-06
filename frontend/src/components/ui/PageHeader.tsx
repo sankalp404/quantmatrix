@@ -11,8 +11,8 @@ interface PageHeaderProps {
 const PageHeader: React.FC<PageHeaderProps> = ({ title, subtitle, actions, rightContent }) => {
   return (
     <Box>
-      <HStack justify="space-between" align="start" spacing={4} mb={2}>
-        <VStack align="start" spacing={1}>
+      <HStack justify="space-between" align="flex-start" gap={4} mb={2}>
+        <VStack align="flex-start" gap={1}>
           <Heading size="lg">{title}</Heading>
           {subtitle && (
             <Text color="gray.500" fontSize="sm">

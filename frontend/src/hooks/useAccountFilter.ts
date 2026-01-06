@@ -8,7 +8,7 @@ export interface AccountData {
   broker: string;
   total_value: number;
   unrealized_pnl: number;
-  unrealized_pnl_pct: number;
+  unrealized_pnl_pct?: number;
   positions_count: number;
   allocation_pct: number;
   available_funds?: number;
@@ -190,7 +190,7 @@ export const transformPortfolioToAccounts = (portfolioData: any): AccountData[] 
  */
 export const getAccountDisplayName = (account: AccountData): string => {
   const value = account.total_value;
-  const pnlPct = account.unrealized_pnl_pct;
+  const pnlPct = account.unrealized_pnl_pct ?? 0;
   const formattedValue = new Intl.NumberFormat('en-US', {
     style: 'currency',
     currency: 'USD',

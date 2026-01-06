@@ -109,7 +109,6 @@ const PortfolioWorkspace: React.FC = () => {
 
   useEffect(() => {
     fetchAll();
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [selected]);
 
   // Load history for selected symbol

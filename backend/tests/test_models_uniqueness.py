@@ -68,10 +68,11 @@ def test_trade_unique_account_execution(db, broker_account):
         price=100.0,
         execution_id="exec-1",
     )
+    nested = db.begin_nested()
     db.add(t2)
     with pytest.raises(IntegrityError):
-        db.commit()
-    db.rollback()
+        db.flush()
+    nested.rollback()
 
 
 def test_trade_unique_account_order(db, broker_account):
@@ -94,10 +95,11 @@ def test_trade_unique_account_order(db, broker_account):
         price=100.0,
         order_id="ord-1",
     )
+    nested = db.begin_nested()
     db.add(t2)
     with pytest.raises(IntegrityError):
-        db.commit()
-    db.rollback()
+        db.flush()
+    nested.rollback()
 
 
 def test_transaction_unique_external_and_execution(db, broker_account):
@@ -126,10 +128,11 @@ def test_transaction_unique_external_and_execution(db, broker_account):
         currency="USD",
         transaction_date=datetime.utcnow(),
     )
+    nested = db.begin_nested()
     db.add(tx2)
     with pytest.raises(IntegrityError):
-        db.commit()
-    db.rollback()
+        db.flush()
+    nested.rollback()
 
     tx3 = Transaction(
         account_id=broker_account.id,
@@ -156,10 +159,11 @@ def test_transaction_unique_external_and_execution(db, broker_account):
         currency="USD",
         transaction_date=datetime.utcnow(),
     )
+    nested = db.begin_nested()
     db.add(tx4)
     with pytest.raises(IntegrityError):
-        db.commit()
-    db.rollback()
+        db.flush()
+    nested.rollback()
 
 
 def test_option_position_unique_contract(db, broker_account):
@@ -188,7 +192,8 @@ def test_option_position_unique_contract(db, broker_account):
         open_quantity=1,
         multiplier=100,
     )
+    nested = db.begin_nested()
     db.add(op2)
     with pytest.raises(IntegrityError):
-        db.commit()
-    db.rollback()
+        db.flush()
+    nested.rollback()

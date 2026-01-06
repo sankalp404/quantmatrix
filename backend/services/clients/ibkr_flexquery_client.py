@@ -492,6 +492,9 @@ class IBKRFlexQueryClient:
                         "unrealized_pnl": unrealized_pnl,
                         "unrealized_pnl_pct": unrealized_pnl_pct,
                         "currency": "USD",
+                        # Back-compat: downstream expects a contract_type field
+                        # (STK/OPT/etc). For reconstructed equity lots, map to asset_category.
+                        "contract_type": position_data["asset_category"],
                         "asset_category": position_data[
                             "asset_category"
                         ],  # Use actual asset type

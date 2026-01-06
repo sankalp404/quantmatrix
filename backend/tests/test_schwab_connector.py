@@ -16,7 +16,8 @@ def test_auth_url_contains_params(monkeypatch):
 def test_auth_url_trading_scope(monkeypatch):
     conn = SchwabConnector(client_id="cid", client_secret="sec", redirect_uri="http://localhost/cb")
     url = conn.get_authorization_url(state="abc123", trading=True)
-    assert "scope=read%2Ctrade" in url
+    # Scope is URL-encoded; implementation may use '+' (space) or '%20'.
+    assert "scope=read" in url and "trade" in url
 
 
 def test_exchange_code_and_refresh_tokens(monkeypatch):

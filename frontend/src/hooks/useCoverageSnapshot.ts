@@ -33,7 +33,7 @@ const useCoverageSnapshot = (): UseCoverageSnapshotResult => {
       const response = await api.get('/market-data/coverage');
       setSnapshot(response.data || null);
     } catch (error) {
-      if (process.env.NODE_ENV !== 'production') {
+      if (import.meta.env.DEV) {
         console.error('Failed to load coverage snapshot', error);
       }
       setSnapshot(null);

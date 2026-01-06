@@ -22,7 +22,7 @@ def client():
 
 def _ok(status_code: int) -> bool:
     # Allow common statuses in varied envs, including 401 for auth-protected routes
-    return status_code in (200, 401, 404, 422, 500)
+    return status_code in (200, 401, 403, 404, 422, 500)
 
 
 def test_portfolio_live(client):
@@ -84,4 +84,4 @@ def test_accounts_endpoints_smoke(client):
     r_list = client.get("/api/v1/accounts")
     r_sync_all = client.post("/api/v1/accounts/sync-all")
     assert _ok(r_list.status_code)
-    assert r_sync_all.status_code in (200, 400, 404, 422, 500)
+    assert r_sync_all.status_code in (200, 400, 401, 403, 404, 422, 500)

@@ -39,8 +39,6 @@ export const system = createSystem(
         color: "fg.default",
       },
       body: {
-        WebkitFontSmoothing: "antialiased",
-        MozOsxFontSmoothing: "grayscale",
       },
     },
     theme: {

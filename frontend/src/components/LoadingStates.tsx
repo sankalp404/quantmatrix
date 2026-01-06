@@ -235,13 +235,17 @@ export const LoadingSpinner: React.FC<{
   return (
     <Flex direction="column" align="center" justify="center" py={12} px={6} minH="200px">
       <VStack gap={4}>
-        <Spinner size={size} color="brand.500" thickness="3px" speed="0.8s" />
+        <Spinner size={size} color="brand.500" />
         <Text fontSize="lg" color="fg.muted" textAlign="center">
           {message}
         </Text>
         {showProgress && (
           <Box w="200px">
-            <Progress value={progress} colorScheme="blue" size="sm" borderRadius="full" />
+            <Progress.Root value={progress} max={100}>
+              <Progress.Track borderRadius="full">
+                <Progress.Range />
+              </Progress.Track>
+            </Progress.Root>
             <Text fontSize="sm" color="fg.muted" textAlign="center" mt={1}>
               {progress}%
             </Text>
@@ -280,15 +284,8 @@ export const LoadingOverlay: React.FC<{
 };
 
 // Mini loading indicator for buttons
-export const MiniSpinner: React.FC<{ size?: string }> = ({ size = '16px' }) => {
-  return (
-    <Spinner
-      size={size}
-      color="currentColor"
-      thickness="2px"
-      speed="0.8s"
-    />
-  );
+export const MiniSpinner: React.FC<{ size?: 'sm' | 'md' | 'lg' | 'xl' }> = ({ size = 'sm' }) => {
+  return <Spinner size={size} color="currentColor" />;
 };
 
 export default {

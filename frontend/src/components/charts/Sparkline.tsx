@@ -14,7 +14,7 @@ const Sparkline: React.FC<SparklineProps> = ({ values = [], max, color = 'brand.
   }
   const safeMax = typeof max === 'number' ? max : Math.max(...values, 1);
   return (
-    <HStack align="flex-end" spacing={0.5} h={`${height}px`}>
+    <HStack align="flex-end" gap={0.5} h={`${height}px`}>
       {values.map((value, idx) => {
         const normalized = safeMax ? Math.max((value / safeMax) * 100, 5) : 0;
         return (
