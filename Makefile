@@ -1,4 +1,8 @@
-.PHONY: up down down-reset ps logs build ladle-up ladle-down ladle-logs ladle-build test-up test test-down
+.PHONY: up down down-reset ps logs build ladle-up ladle-down ladle-logs ladle-build \
+	test-up test test-down \
+	backend-shell frontend-shell \
+	migrate-create migrate-up migrate-down migrate-stamp-head \
+	frontend-lint frontend-typecheck frontend-test
 
 DOCKER ?= docker
 PROJECT ?= quantmatrix
@@ -49,5 +53,42 @@ test:
 
 test-down:
 	$(COMPOSE_TEST) down -v
+
+backend-shell:
+	$(COMPOSE_DEV) exec backend bash
+
+frontend-shell:
+	$(COMPOSE_DEV) exec frontend sh
+
+# Alembic migrations (dev DB only; tests run migrations against postgres_test via pytest)
+# Usage:
+# - make migrate-create MSG="add foo table"
+# - make migrate-up
+# - make migrate-down REV=-1
+# - make migrate-stamp-head
+MSG ?=
+REV ?=
+migrate-create:
+	@if [ -z "$(MSG)" ]; then echo "Usage: make migrate-create MSG=\"message\""; exit 2; fi
+	$(COMPOSE_DEV) exec backend alembic -c backend/alembic.ini revision --autogenerate -m "$(MSG)"
+
+migrate-up:
+	$(COMPOSE_DEV) exec backend alembic -c backend/alembic.ini upgrade head
+
+migrate-down:
+	@if [ -z "$(REV)" ]; then echo "Usage: make migrate-down REV=<revision| -1>"; exit 2; fi
+	$(COMPOSE_DEV) exec backend alembic -c backend/alembic.ini downgrade "$(REV)"
+
+migrate-stamp-head:
+	$(COMPOSE_DEV) exec backend alembic -c backend/alembic.ini stamp head
+
+frontend-lint:
+	$(COMPOSE_DEV) exec frontend npm run lint
+
+frontend-typecheck:
+	$(COMPOSE_DEV) exec frontend npm run type-check
+
+frontend-test:
+	$(COMPOSE_DEV) exec frontend npm run test
 
 

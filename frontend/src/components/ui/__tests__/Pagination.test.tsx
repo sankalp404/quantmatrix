@@ -1,8 +1,7 @@
 import React from 'react';
 import { describe, it, expect, vi } from 'vitest';
-import { ChakraProvider } from '@chakra-ui/react';
-import { render, screen, fireEvent } from '@testing-library/react';
-import { system } from '../../../theme/system';
+import { screen, fireEvent } from '@testing-library/react';
+import { renderWithProviders } from '../../../test/render';
 import Pagination from '../Pagination';
 
 describe('Pagination', () => {
@@ -10,16 +9,14 @@ describe('Pagination', () => {
     const onPageChange = vi.fn();
     const onPageSizeChange = vi.fn();
 
-    render(
-      <ChakraProvider value={system}>
-        <Pagination
-          page={1}
-          pageSize={25}
-          total={4585}
-          onPageChange={onPageChange}
-          onPageSizeChange={onPageSizeChange}
-        />
-      </ChakraProvider>,
+    renderWithProviders(
+      <Pagination
+        page={1}
+        pageSize={25}
+        total={4585}
+        onPageChange={onPageChange}
+        onPageSizeChange={onPageSizeChange}
+      />,
     );
 
     expect(screen.getByText('1–25 of 4585')).toBeInTheDocument();
@@ -31,16 +28,14 @@ describe('Pagination', () => {
     const onPageChange = vi.fn();
     const onPageSizeChange = vi.fn();
 
-    render(
-      <ChakraProvider value={system}>
-        <Pagination
-          page={50}
-          pageSize={25}
-          total={4585} // 184 pages
-          onPageChange={onPageChange}
-          onPageSizeChange={onPageSizeChange}
-        />
-      </ChakraProvider>,
+    renderWithProviders(
+      <Pagination
+        page={50}
+        pageSize={25}
+        total={4585} // 184 pages
+        onPageChange={onPageChange}
+        onPageSizeChange={onPageSizeChange}
+      />,
     );
 
     expect(screen.getAllByRole('button', { name: '1' }).length).toBeGreaterThan(0);

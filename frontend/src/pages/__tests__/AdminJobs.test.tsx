@@ -1,10 +1,9 @@
 import React from 'react';
 import { describe, it, expect, vi, beforeEach } from 'vitest';
-import { ChakraProvider } from '@chakra-ui/react';
 import { render, screen, waitFor, fireEvent } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
-import { system } from '../../theme/system';
 import AdminJobs from '../AdminJobs';
+import { renderWithProviders } from '../../test/render';
 
 const apiGet = vi.fn();
 
@@ -33,11 +32,7 @@ describe('AdminJobs', () => {
       data: { jobs: [{ id: 1, task_name: 'monitor_coverage_health', status: 'ok' }], total: 200 },
     });
 
-    render(
-      <ChakraProvider value={system}>
-        <AdminJobs />
-      </ChakraProvider>,
-    );
+    renderWithProviders(<AdminJobs />);
 
     await waitFor(() => {
       expect(apiGet).toHaveBeenCalledWith('/market-data/admin/jobs', { params: { limit: 25, offset: 0 } });
@@ -53,11 +48,7 @@ describe('AdminJobs', () => {
       .mockResolvedValueOnce({ data: { jobs: [], total: 4585 } }) // initial
       .mockResolvedValueOnce({ data: { jobs: [], total: 4585 } }); // after page size change
 
-    render(
-      <ChakraProvider value={system}>
-        <AdminJobs />
-      </ChakraProvider>,
-    );
+    renderWithProviders(<AdminJobs />);
 
     await waitFor(() => {
       expect(apiGet).toHaveBeenCalledWith('/market-data/admin/jobs', { params: { limit: 25, offset: 0 } });
@@ -89,11 +80,7 @@ describe('AdminJobs', () => {
       },
     });
 
-    render(
-      <ChakraProvider value={system}>
-        <AdminJobs />
-      </ChakraProvider>,
-    );
+    renderWithProviders(<AdminJobs />);
 
     expect(await screen.findByText(/update_tracked_symbol_cache/i)).toBeInTheDocument();
     fireEvent.click(screen.getAllByRole('button', { name: /Details/i })[0]);

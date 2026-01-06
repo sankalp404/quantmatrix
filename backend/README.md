@@ -7,13 +7,15 @@ FastAPI + SQLAlchemy + Alembic backend that unifies multi-broker data (IBKR, Tas
 
 Runbook (Docker)
 ----------------
-- Build and start: `docker-compose up -d --build`
-- Logs: `docker-compose logs -f backend | cat`
-- Shell: `docker-compose exec backend bash`
-- Tests: `docker-compose exec backend pytest -q`
-- Migrations:
-  - Autogenerate: `docker-compose exec backend alembic revision -m "message" --autogenerate`
-  - Upgrade: `docker-compose exec backend alembic upgrade head`
+- Preferred local entrypoint (from repo root):
+  - Start dev stack: `./run.sh start` (or `make up`)
+  - Logs: `./run.sh logs`
+  - Shell: `make backend-shell`
+  - Tests (safe, isolated DB): `./run.sh test`
+  - Migrations (dev DB):
+    - Apply: `./run.sh migrate`
+    - Autogenerate: `./run.sh makemigration "message"`
+    - Downgrade: `./run.sh downgrade -1`
 
 Dependencies: Pydantic vs pydantic-settings
 -------------------------------------------

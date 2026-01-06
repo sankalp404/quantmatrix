@@ -15,6 +15,10 @@ Quick Start
 - Backend: http://localhost:8000/docs
 - Frontend: http://localhost:3000
 
+Onboarding
+----------
+- Start here: `docs/ONBOARDING.md`
+
 Environment Files
 -----------------
 - Dev stack uses `infra/env.dev` (copy from `infra/env.dev.example`).
@@ -24,6 +28,11 @@ Environment Files
 Tests (Isolated DB)
 -------------------
 - `make test` (brings up isolated test deps, runs pytest, then tears down)
+
+PR Automation
+-------------
+- Dependabot PRs can auto-merge after CI passes.
+- For agent/human changes, use `scripts/open_pr.sh` (details in `docs/PR_AUTOMATION.md`).
 
 Migrations
 ----------

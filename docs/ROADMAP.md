@@ -7,7 +7,7 @@ Helpful Commands
 - Restart stack: `./run.sh restart`
 - Status: `./run.sh status`
 - Logs (backend): `./run.sh logs`
-- Tests: `./run.sh test` (requires `TEST_DATABASE_URL`)
+- Tests: `./run.sh test` (runs in isolated Docker test DB; no dev DB access)
 - Migrations: `./run.sh migrate`
 - Create migration: `./run.sh makemigration "message"`
 - Downgrade: `./run.sh downgrade <rev>`

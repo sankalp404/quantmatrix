@@ -2,13 +2,21 @@ import os
 import uuid
 import pytest
 from sqlalchemy import text
-from backend.api.main import app
+from backend.utils.db_safety import check_test_database_url
 
 
-@pytest.mark.no_db
-def test_requires_test_database_url_env_guard():
-    # This test only documents behavior in conftest when TEST_DATABASE_URL is missing.
-    assert True
+def test_database_url_is_forced_to_safe_test_db():
+    test_db_url = os.getenv("TEST_DATABASE_URL", "")
+    app_db_url = os.getenv("DATABASE_URL", "")
+    assert test_db_url, "TEST_DATABASE_URL must be set in the test environment"
+    assert app_db_url == test_db_url, "DATABASE_URL must equal TEST_DATABASE_URL in tests"
+
+    expected_host = os.getenv("TEST_DB_EXPECTED_HOST", "postgres_test")
+    required_user = os.getenv("POSTGRES_TEST_USER") or None
+    chk = check_test_database_url(
+        test_db_url, expected_host=expected_host, required_user=required_user
+    )
+    assert chk.ok, f"Unsafe TEST_DATABASE_URL: {chk.reason}"
 
 
 def test_alembic_head_and_isolation(db_session):
