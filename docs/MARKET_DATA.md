@@ -199,3 +199,25 @@ Troubleshooting:
 - **Admin Dashboard “Refresh coverage now”** calls `POST /api/v1/market-data/admin/coverage/refresh` which enqueues `monitor_coverage_health`.
 - **Auto-refresh**: Admin Dashboard will auto-trigger a refresh when the cached snapshot is missing or older than ~15 minutes, but still renders immediately using the current response.
 - **Cache vs DB**: `GET /api/v1/market-data/coverage` returns `meta.source` (`cache` or `db`) and `meta.updated_at` so you can see whether you’re looking at the last monitor run or a direct DB fallback.
+
+## Operator Runbook (recommended)
+
+### Goal: restore Daily coverage to green (tracked universe)
+
+- **Use this when**: Coverage shows `>48h` or `none` buckets, or Daily % drops.\n
+- **Primary button** (Settings → Admin → Dashboard): **Restore Daily Coverage (Tracked)**\n
+  - Enqueues: `bootstrap_daily_coverage_tracked`\n
+  - What it does (no 5m): refresh constituents → update tracked → backfill last-200 daily bars (tracked) → recompute indicators → record history → refresh coverage cache.\n
+
+### Fast fix: stale-only backfill
+
+- **Use this when**: Only a subset of symbols are stale.\n
+- Click **Backfill Daily (Stale Only)**\n
+  - Calls: `POST /api/v1/market-data/admin/coverage/backfill-stale-daily` then refreshes coverage.\n
+
+### Advanced: index-only vs tracked-universe
+
+- **Backfill Indices (Daily)** (`POST /api/v1/market-data/backfill/index-universe?batch_size=...`)\n
+  - Index constituents only; default batch size is **20** (can raise up to 100).\n
+- **Backfill Last-200 (Tracked)** (`POST /api/v1/market-data/backfill/last-200`)\n
+  - Full tracked universe; slower but comprehensive.\n

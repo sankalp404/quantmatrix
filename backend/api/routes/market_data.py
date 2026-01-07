@@ -41,6 +41,7 @@ from backend.api.routes.utils import serialize_job_runs
 from backend.tasks.market_data_tasks import backfill_5m_last_n_days, enforce_price_data_retention, backfill_5m_for_symbols
 from backend.tasks.market_data_tasks import bootstrap_universe
 from backend.tasks.market_data_tasks import monitor_coverage_health
+from backend.tasks.market_data_tasks import bootstrap_daily_coverage_tracked
 from backend.config import settings
 
 logger = logging.getLogger(__name__)
@@ -912,6 +913,14 @@ async def admin_refresh_coverage(
 ) -> Dict[str, Any]:
     """Trigger the coverage health monitor to refresh Redis cache + history."""
     return _enqueue_task(monitor_coverage_health)
+
+
+@router.post("/admin/coverage/restore-daily-tracked")
+async def admin_restore_daily_tracked(
+    admin_user: User = Depends(get_admin_user),
+) -> Dict[str, Any]:
+    """Run the guided daily coverage restore chain for the tracked universe (no 5m)."""
+    return _enqueue_task(bootstrap_daily_coverage_tracked)
 
 
 @router.get("/coverage/{symbol}")

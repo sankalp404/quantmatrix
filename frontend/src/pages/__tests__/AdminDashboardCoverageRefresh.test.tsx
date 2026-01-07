@@ -7,12 +7,13 @@ import AdminDashboard from '../../pages/AdminDashboard';
 import { renderWithProviders } from '../../test/render';
 
 const apiPost = vi.fn().mockResolvedValue({ data: { task_id: 'task-123' } });
+const apiGet = vi.fn().mockResolvedValue({ data: {} });
 
 vi.mock('../../services/api', () => {
   return {
     default: {
       post: (...args: any[]) => apiPost(...args),
-      get: vi.fn(),
+      get: (...args: any[]) => apiGet(...args),
     },
   };
 });
@@ -54,13 +55,13 @@ vi.mock('../../components/coverage/CoverageSummaryCard', () => {
     CoverageKpiGrid: () => <div />,
     CoverageTrendGrid: () => <div />,
     CoverageBucketsGrid: () => <div />,
-    CoverageActionsList: () => <div />,
   };
 });
 
 describe('AdminDashboard coverage refresh', () => {
   beforeEach(() => {
     apiPost.mockClear();
+    apiGet.mockClear();
   });
 
   it('auto-triggers coverage refresh when snapshot is stale/missing cache', async () => {
@@ -72,10 +73,18 @@ describe('AdminDashboard coverage refresh', () => {
   it('allows manual refresh via button', async () => {
     const user = userEvent.setup();
     renderWithProviders(<AdminDashboard />, { route: '/settings/admin/dashboard' });
-    const btn = await screen.findByRole('button', { name: /refresh coverage now/i });
+    const btn = (await screen.findAllByRole('button', { name: /refresh coverage now/i }))[0];
     await user.click(btn);
     expect(apiPost).toHaveBeenCalledWith('/market-data/admin/coverage/refresh');
     expect(apiPost.mock.calls.filter((c) => c[0] === '/market-data/admin/coverage/refresh').length).toBeGreaterThanOrEqual(2);
+  });
+
+  it('renders guided actions', async () => {
+    renderWithProviders(<AdminDashboard />, { route: '/settings/admin/dashboard' });
+    const restore = await screen.findAllByRole('button', { name: /Restore Daily Coverage \(Tracked\)/i });
+    expect(restore.length).toBeGreaterThanOrEqual(1);
+    const stale = await screen.findAllByRole('button', { name: /Backfill Daily \(Stale Only\)/i });
+    expect(stale.length).toBeGreaterThanOrEqual(1);
   });
 });
 

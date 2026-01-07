@@ -36,3 +36,20 @@ def test_admin_refresh_coverage_enqueues_task(monkeypatch):
     assert payload.get("task_id") == "task-123"
 
 
+def test_admin_restore_daily_tracked_enqueues_task(monkeypatch):
+    from backend.api.routes import market_data as routes
+
+    class _StubTask:
+        @staticmethod
+        def delay(*_args, **_kwargs):
+            return SimpleNamespace(id="task-restore-123")
+
+    monkeypatch.setattr(routes, "bootstrap_daily_coverage_tracked", _StubTask)
+
+    client = TestClient(app, raise_server_exceptions=False)
+    resp = client.post("/api/v1/market-data/admin/coverage/restore-daily-tracked")
+    assert resp.status_code == 200
+    payload = resp.json()
+    assert payload.get("task_id") == "task-restore-123"
+
+

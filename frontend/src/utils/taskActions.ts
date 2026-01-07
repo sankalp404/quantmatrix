@@ -10,6 +10,7 @@ type TaskName =
   | 'recompute_indicators_universe'
   | 'record_daily_history'
   | 'monitor_coverage_health'
+  | 'restore_daily_coverage_tracked'
   | 'bootstrap_universe';
 
 const TASK_ENDPOINTS: Record<TaskName, () => Promise<any>> = {
@@ -22,6 +23,7 @@ const TASK_ENDPOINTS: Record<TaskName, () => Promise<any>> = {
   recompute_indicators_universe: () => api.post('/market-data/indicators/recompute-universe'),
   record_daily_history: () => api.post('/market-data/admin/history/record'),
   monitor_coverage_health: () => api.post('/market-data/admin/coverage/refresh'),
+  restore_daily_coverage_tracked: () => api.post('/market-data/admin/coverage/restore-daily-tracked'),
   bootstrap_universe: () => api.post('/market-data/admin/bootstrap'),
 };
 
