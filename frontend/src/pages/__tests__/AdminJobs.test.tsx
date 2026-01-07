@@ -40,7 +40,7 @@ describe('AdminJobs', () => {
 
     expect(await screen.findByText(/Admin Jobs/i)).toBeInTheDocument();
     expect(screen.getByText(/monitor_coverage_health/i)).toBeInTheDocument();
-    expect(screen.getByText(/Showing 1 of 200 total/i)).toBeInTheDocument();
+    // Count summary is shown in pagination footer; top-level summary is intentionally omitted.
   });
 
   it('changes page size via pagination menu and refetches', async () => {

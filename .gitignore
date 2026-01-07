@@ -9,6 +9,10 @@
 infra/env.dev
 infra/env.test
 
+# Local env exports / scratch copies (never commit secrets)
+env.txt
+infra/*.local
+
 # Python
 __pycache__/
 *.py[cod]
