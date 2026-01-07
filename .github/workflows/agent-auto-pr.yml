@@ -8,6 +8,7 @@ name: Auto-open PR for agent branches
 permissions:
   contents: read
   pull-requests: write
+  actions: write
 
 jobs:
   open_pr:
@@ -40,5 +41,9 @@ jobs:
             --head "$BRANCH" \
             --title "$TITLE" \
             --body "Auto-created PR for branch \`$BRANCH\`."
+
+          # If the PR was created by GitHub Actions, it may not trigger pull_request workflows.
+          # Dispatch CI explicitly to ensure required checks run.
+          gh workflow run "CI" --ref "$BRANCH"
 
 
