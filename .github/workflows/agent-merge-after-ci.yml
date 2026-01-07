@@ -1,0 +1,56 @@
+name: Auto-squash merge agent PRs after CI (when approved)
+
+on:
+  workflow_run:
+    workflows: ["CI"]
+    types: [completed]
+
+permissions:
+  contents: write
+  pull-requests: write
+
+jobs:
+  merge_if_approved:
+    name: Merge (squash) if approved
+    runs-on: ubuntu-latest
+    if: ${{ github.event.workflow_run.conclusion == 'success' }}
+    steps:
+      - name: Merge approved agent PR
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          BRANCH: ${{ github.event.workflow_run.head_branch }}
+          REPO: ${{ github.repository }}
+        run: |
+          set -euo pipefail
+
+          # Only handle agent branches
+          if [[ "$BRANCH" != agent/* ]]; then
+            echo "Skip: not an agent branch ($BRANCH)"
+            exit 0
+          fi
+
+          # Find the open PR for this head branch (if any)
+          PR_NUMBER="$(gh pr list --repo "$REPO" --head "$BRANCH" --state open --json number --jq '.[0].number')"
+          if [[ -z "${PR_NUMBER:-}" || "${PR_NUMBER}" == "null" ]]; then
+            echo "No open PR found for $BRANCH"
+            exit 0
+          fi
+
+          # Require that the PR is approved by sankalp404 (branch rules enforce this too,
+          # but we keep it as a hard gate here).
+          DECISION="$(gh pr view "$PR_NUMBER" --repo "$REPO" --json reviewDecision --jq '.reviewDecision')"
+          if [[ "$DECISION" != "APPROVED" ]]; then
+            echo "PR #$PR_NUMBER is not approved (reviewDecision=$DECISION)"
+            exit 0
+          fi
+
+          APPROVED_BY_OWNER="$(gh pr view "$PR_NUMBER" --repo "$REPO" --json reviews --jq '[.reviews[] | select(.state==\"APPROVED\") | .author.login] | any(. == \"sankalp404\")')"
+          if [[ "$APPROVED_BY_OWNER" != "true" ]]; then
+            echo "PR #$PR_NUMBER not approved by sankalp404"
+            exit 0
+          fi
+
+          # Merge now (CI just passed). This will still be blocked if ruleset isn't satisfied.
+          gh pr merge "$PR_NUMBER" --repo "$REPO" --squash --delete-branch
+
+

@@ -24,6 +24,12 @@ jobs:
           PR_URL: ${{ github.event.pull_request.html_url }}
         run: |
           set -euo pipefail
-          gh pr merge --auto --squash --delete-branch "$PR_URL"
+          # Prefer GitHub's "auto-merge" (merge when required checks pass), but some repos disable it.
+          # If it's disabled, don't fail the check; the workflow-run merger will handle it after CI passes.
+          if ! gh pr merge --auto --squash --delete-branch "$PR_URL"; then
+            echo "Auto-merge could not be enabled (repo setting may disable auto-merge)."
+            echo "This is non-fatal; PR will still auto-merge after CI completes successfully."
+            exit 0
+          fi
 
 
