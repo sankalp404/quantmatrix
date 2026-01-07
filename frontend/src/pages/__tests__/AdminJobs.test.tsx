@@ -7,6 +7,14 @@ import { renderWithProviders } from '../../test/render';
 
 const apiGet = vi.fn();
 
+vi.mock('../../hooks/useUserPreferences', () => ({
+  useUserPreferences: () => ({
+    currency: 'USD',
+    timezone: 'UTC',
+    tableDensity: 'comfortable',
+  }),
+}));
+
 vi.mock('../../services/api', () => {
   return {
     default: {

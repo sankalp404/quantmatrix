@@ -112,4 +112,9 @@ export const useAuth = () => {
   return ctx;
 };
 
+// Optional accessor for non-authenticated contexts (tests, public pages, storybook).
+export const useAuthOptional = () => {
+  return useContext(AuthContext);
+};
+
 

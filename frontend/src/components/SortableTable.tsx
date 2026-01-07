@@ -14,6 +14,7 @@ import {
 } from '@chakra-ui/react';
 import { FiChevronUp, FiChevronDown, FiMinus } from 'react-icons/fi';
 import EmptyState from './ui/EmptyState';
+import { useUserPreferences } from '../hooks/useUserPreferences';
 
 export interface Column<T = any> {
   key: string;
@@ -43,12 +44,14 @@ function SortableTable<T = any>({
   columns,
   defaultSortBy,
   defaultSortOrder = 'desc',
-  size = 'md',
+  size: sizeProp,
   variant = 'simple',
   showHeader = true,
   emptyMessage = 'No data available',
   maxHeight,
 }: SortableTableProps<T>) {
+  const { tableDensity } = useUserPreferences();
+  const size: 'sm' | 'md' | 'lg' = sizeProp ?? (tableDensity === 'compact' ? 'sm' : 'md');
   const [sortBy, setSortBy] = useState<string>(defaultSortBy || columns[0]?.key || '');
   const [sortOrder, setSortOrder] = useState<'asc' | 'desc'>(defaultSortOrder);
 

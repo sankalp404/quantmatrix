@@ -72,11 +72,11 @@ interface NavItemProps {
 }
 
 const NavItem: React.FC<NavItemProps> = ({ icon: Icon, label, isActive, onClick, badge, showLabel = true }) => {
-  const bg = 'gray.800';
-  const activeBg = 'gray.700';
-  const activeColor = 'white';
-  const color = 'gray.300';
-  const hoverColor = 'white';
+  const hoverBg = 'bg.muted';
+  const activeBg = 'bg.subtle';
+  const activeColor = 'fg.default';
+  const color = 'fg.muted';
+  const hoverColor = 'fg.default';
 
   return (
     <Flex
@@ -92,7 +92,7 @@ const NavItem: React.FC<NavItemProps> = ({ icon: Icon, label, isActive, onClick,
       bg={isActive ? activeBg : 'transparent'}
       color={isActive ? activeColor : color}
       _hover={{
-        bg: isActive ? activeBg : bg,
+        bg: isActive ? activeBg : hoverBg,
         color: isActive ? activeColor : hoverColor,
       }}
       onClick={onClick}
@@ -128,10 +128,10 @@ const NavItem: React.FC<NavItemProps> = ({ icon: Icon, label, isActive, onClick,
 const DashboardLayout: React.FC = () => {
   const location = useLocation();
   const navigate = useNavigate();
-  const sidebarBg = 'gray.900';
-  const headerBg = 'gray.950';
-  const borderColor = 'gray.800';
-  const appBg = 'gray.950';
+  const sidebarBg = 'bg.sidebar';
+  const headerBg = 'bg.header';
+  const borderColor = 'border.subtle';
+  const appBg = 'bg.canvas';
   const { accounts, loading: accountsLoading, selected, setSelected } = useAccountContext();
   const { user, logout } = useAuth();
   const [isSidebarOpen, setIsSidebarOpen] = useState<boolean>(true);
@@ -238,31 +238,31 @@ const DashboardLayout: React.FC = () => {
               <Box px={4} py={4} mt="auto">
                 <VStack gap={2} align="stretch">
                   <HStack justify="space-between">
-                    <Text fontSize="xs" fontWeight="semibold" color="gray.500">
+                    <Text fontSize="xs" fontWeight="semibold" color="fg.subtle">
                       {headerStats.label}
                     </Text>
-                    <Text fontSize="xs" fontWeight="semibold" color="gray.200">
+                    <Text fontSize="xs" fontWeight="semibold" color="fg.muted">
                       {headerStats.sublabel || formatSignedCurrency(totals.dayPnL)}
                     </Text>
                   </HStack>
                   <AppDivider />
-                  <Text fontSize="xs" fontWeight="semibold" color="gray.500" textTransform="uppercase">
+                  <Text fontSize="xs" fontWeight="semibold" color="fg.subtle" textTransform="uppercase">
                     Quick Stats
                   </Text>
                   <HStack justify="space-between">
-                    <Text fontSize="xs" color="gray.500">Day P&L</Text>
+                    <Text fontSize="xs" color="fg.subtle">Day P&L</Text>
                     <Text fontSize="xs" fontWeight="semibold" color={totals.dayPnL >= 0 ? 'green.400' : 'red.400'}>
                       {formatSignedCurrency(totals.dayPnL)}
                     </Text>
                   </HStack>
                   <HStack justify="space-between">
-                    <Text fontSize="xs" color="gray.500">Positions</Text>
+                    <Text fontSize="xs" color="fg.subtle">Positions</Text>
                     <Text fontSize="xs" fontWeight="semibold">
                       {totals.positions}
                     </Text>
                   </HStack>
                   <HStack justify="space-between">
-                    <Text fontSize="xs" color="gray.500">Margin Used</Text>
+                    <Text fontSize="xs" color="fg.subtle">Margin Used</Text>
                     <Text fontSize="xs" fontWeight="semibold" color="orange.400">
                       23%
                     </Text>
@@ -332,6 +332,7 @@ const DashboardLayout: React.FC = () => {
               aria-label="Menu"
               position="relative"
               zIndex={2}
+              color="fg.default"
               onClick={() => {
                 if (isDesktop) {
                   setIsSidebarOpen((v) => !v);
@@ -352,9 +353,9 @@ const DashboardLayout: React.FC = () => {
                 fontSize: 12,
                 padding: '6px 8px',
                 borderRadius: 8,
-                border: '1px solid #2d3748',
-                background: '#111827',
-                color: '#e5e7eb',
+                border: '1px solid var(--chakra-colors-border-subtle)',
+                background: 'var(--chakra-colors-bg-input)',
+                color: 'var(--chakra-colors-fg-default)',
               }}
             >
               <option value="all">All Accounts</option>
@@ -370,7 +371,7 @@ const DashboardLayout: React.FC = () => {
           </HStack>
 
           <HStack gap={4}>
-            <IconButton size="md" variant="ghost" aria-label="Notifications" position="relative">
+            <IconButton size="md" variant="ghost" aria-label="Notifications" position="relative" color="fg.default">
               <FiBell />
               <Badge
                 position="absolute"

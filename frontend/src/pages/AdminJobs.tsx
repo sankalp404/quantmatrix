@@ -25,8 +25,11 @@ import api from '../services/api';
 import { FiInfo } from 'react-icons/fi';
 import Pagination from '../components/ui/Pagination';
 import SortableTable, { type Column } from '../components/SortableTable';
+import { useUserPreferences } from '../hooks/useUserPreferences';
+import { formatDateTime } from '../utils/format';
 
 const AdminJobs: React.FC = () => {
+  const { timezone } = useUserPreferences();
   const [loading, setLoading] = React.useState(false);
   const [data, setData] = React.useState<{ jobs: any[]; total?: number; limit?: number; offset?: number } | null>(null);
   const [selectedJob, setSelectedJob] = React.useState<any | null>(null);
@@ -209,7 +212,7 @@ const AdminJobs: React.FC = () => {
                 sortType: 'date',
                 render: (v) => (
                   <Text fontSize="12px" color="fg.muted">
-                    {v ? new Date(v).toLocaleString() : '—'}
+                    {formatDateTime(v, timezone)}
                   </Text>
                 ),
                 width: '200px',
@@ -222,7 +225,7 @@ const AdminJobs: React.FC = () => {
                 sortType: 'date',
                 render: (v) => (
                   <Text fontSize="12px" color="fg.muted">
-                    {v ? new Date(v).toLocaleString() : '—'}
+                    {formatDateTime(v, timezone)}
                   </Text>
                 ),
                 width: '200px',
@@ -297,10 +300,10 @@ const AdminJobs: React.FC = () => {
                     id: {selectedJob?.id ?? '—'}
                   </Text>
                   <Text fontSize="xs" color="fg.muted">
-                    started: {selectedJob?.started_at ? new Date(selectedJob.started_at).toLocaleString() : '—'}
+                    started: {formatDateTime(selectedJob?.started_at, timezone)}
                   </Text>
                   <Text fontSize="xs" color="fg.muted">
-                    finished: {selectedJob?.finished_at ? new Date(selectedJob.finished_at).toLocaleString() : '—'}
+                    finished: {formatDateTime(selectedJob?.finished_at, timezone)}
                   </Text>
                 </HStack>
 

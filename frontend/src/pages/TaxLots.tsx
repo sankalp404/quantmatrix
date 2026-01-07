@@ -42,9 +42,8 @@ import { PieChart, Pie, Cell, ResponsiveContainer, Tooltip as RechartsTooltip, L
 import AccountFilterWrapper from '../components/ui/AccountFilterWrapper';
 import { portfolioApi } from '../services/api';
 import { transformPortfolioToAccounts } from '../hooks/useAccountFilter';
-
-// Chakra v3 migration shim: prefer dark values until we reintroduce color-mode properly.
-const useColorModeValue = <T,>(_light: T, dark: T) => dark;
+import { useUserPreferences } from '../hooks/useUserPreferences';
+import { formatMoney } from '../utils/format';
 
 // Interface for tax lot data from API
 interface TaxLot {
@@ -86,6 +85,7 @@ interface TaxLotSummary {
 const CHART_COLORS = ['#0088FE', '#00C49F', '#FFBB28', '#FF8042', '#8884D8', '#82CA9D'];
 
 const TaxLots: React.FC = () => {
+  const { currency } = useUserPreferences();
   const [taxLots, setTaxLots] = useState<TaxLot[]>([]);
   const [summary, setSummary] = useState<TaxLotSummary | null>(null);
   const [portfolioData, setPortfolioData] = useState<any>(null);
@@ -97,8 +97,8 @@ const TaxLots: React.FC = () => {
   const [sortBy, setSortBy] = useState('purchase_date');
   const [sortOrder, setSortOrder] = useState<'asc' | 'desc'>('desc');
 
-  const cardBg = useColorModeValue('white', 'gray.800');
-  const borderColor = useColorModeValue('gray.200', 'gray.700');
+  const cardBg = 'bg.card';
+  const borderColor = 'border.subtle';
   // Temporary shim: preserve legacy `toast({title, status, description})` call sites.
   const toast = (args: { title: string; description?: string; status?: 'success' | 'error' | 'info' | 'warning'; duration?: number; isClosable?: boolean }) => {
     const msg = args.description ? `${args.title}: ${args.description}` : args.title;
@@ -307,7 +307,14 @@ const TaxLots: React.FC = () => {
                       <select
                         value={filterMethod}
                         onChange={(e: React.ChangeEvent<HTMLSelectElement>) => setFilterMethod(e.target.value)}
-                        style={{ maxWidth: 200, padding: '8px 10px', borderRadius: 10, border: `1px solid ${String(borderColor)}`, background: String(cardBg) }}
+                        style={{
+                          maxWidth: 200,
+                          padding: '8px 10px',
+                          borderRadius: 10,
+                          border: '1px solid var(--chakra-colors-border-subtle)',
+                          background: 'var(--chakra-colors-bg-input)',
+                          color: 'var(--chakra-colors-fg-default)',
+                        }}
                       >
                         <option value="all">All Tax Lots</option>
                         <option value="short_term">Short Term (&lt; 1 year)</option>
@@ -317,7 +324,14 @@ const TaxLots: React.FC = () => {
                       <select
                         value={sortBy}
                         onChange={(e: React.ChangeEvent<HTMLSelectElement>) => setSortBy(e.target.value)}
-                        style={{ maxWidth: 200, padding: '8px 10px', borderRadius: 10, border: `1px solid ${String(borderColor)}`, background: String(cardBg) }}
+                        style={{
+                          maxWidth: 200,
+                          padding: '8px 10px',
+                          borderRadius: 10,
+                          border: '1px solid var(--chakra-colors-border-subtle)',
+                          background: 'var(--chakra-colors-bg-input)',
+                          color: 'var(--chakra-colors-fg-default)',
+                        }}
                       >
                         <option value="purchase_date">Purchase Date</option>
                         <option value="symbol">Symbol</option>
@@ -328,7 +342,14 @@ const TaxLots: React.FC = () => {
                       <select
                         value={sortOrder}
                         onChange={(e: React.ChangeEvent<HTMLSelectElement>) => setSortOrder(e.target.value as 'asc' | 'desc')}
-                        style={{ maxWidth: 150, padding: '8px 10px', borderRadius: 10, border: `1px solid ${String(borderColor)}`, background: String(cardBg) }}
+                        style={{
+                          maxWidth: 150,
+                          padding: '8px 10px',
+                          borderRadius: 10,
+                          border: '1px solid var(--chakra-colors-border-subtle)',
+                          background: 'var(--chakra-colors-bg-input)',
+                          color: 'var(--chakra-colors-fg-default)',
+                        }}
                       >
                         <option value="desc">Descending</option>
                         <option value="asc">Ascending</option>
@@ -355,17 +376,17 @@ const TaxLots: React.FC = () => {
                         </StatRoot>
                         <StatRoot size="sm">
                           <StatLabel>Total Cost Basis</StatLabel>
-                          <StatValueText>{new Intl.NumberFormat('en-US', { style: 'currency', currency: 'USD' }).format(summary.total_cost_basis)}</StatValueText>
+                          <StatValueText>{formatMoney(summary.total_cost_basis, currency, { maximumFractionDigits: 0 })}</StatValueText>
                         </StatRoot>
                         <StatRoot size="sm">
                           <StatLabel>Current Value</StatLabel>
-                          <StatValueText>{new Intl.NumberFormat('en-US', { style: 'currency', currency: 'USD' }).format(summary.total_market_value)}</StatValueText>
+                          <StatValueText>{formatMoney(summary.total_market_value, currency, { maximumFractionDigits: 0 })}</StatValueText>
                         </StatRoot>
                         <StatRoot size="sm">
                           <StatLabel>Unrealized P&L</StatLabel>
                           <StatValueText color={summary.total_unrealized_pnl >= 0 ? 'green.500' : 'red.500'}>
                             {summary.total_unrealized_pnl >= 0 ? <StatUpIndicator /> : <StatDownIndicator />}
-                            {new Intl.NumberFormat('en-US', { style: 'currency', currency: 'USD' }).format(Math.abs(summary.total_unrealized_pnl))}
+                            {formatMoney(Math.abs(summary.total_unrealized_pnl), currency, { maximumFractionDigits: 0 })}
                           </StatValueText>
                           <StatHelpText>
                             {summary.total_unrealized_pnl_pct.toFixed(2)}%
@@ -409,12 +430,13 @@ const TaxLots: React.FC = () => {
                             <TableCell>{lot.account_id}</TableCell>
                             <TableCell>{lot.purchase_date}</TableCell>
                             <TableCell textAlign="end">{lot.shares_purchased.toLocaleString()}</TableCell>
-                            <TableCell textAlign="end">${lot.cost_per_share.toFixed(2)}</TableCell>
-                            <TableCell textAlign="end">${lot.current_price.toFixed(2)}</TableCell>
-                            <TableCell textAlign="end">${lot.cost_basis.toLocaleString('en-US', { minimumFractionDigits: 0, maximumFractionDigits: 0 })}</TableCell>
-                            <TableCell textAlign="end">${lot.market_value.toLocaleString('en-US', { minimumFractionDigits: 0, maximumFractionDigits: 0 })}</TableCell>
+                            <TableCell textAlign="end">{formatMoney(lot.cost_per_share, currency, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</TableCell>
+                            <TableCell textAlign="end">{formatMoney(lot.current_price, currency, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</TableCell>
+                            <TableCell textAlign="end">{formatMoney(lot.cost_basis, currency, { maximumFractionDigits: 0 })}</TableCell>
+                            <TableCell textAlign="end">{formatMoney(lot.market_value, currency, { maximumFractionDigits: 0 })}</TableCell>
                             <TableCell textAlign="end" color={lot.unrealized_pnl >= 0 ? 'green.500' : 'red.500'}>
-                              {lot.unrealized_pnl >= 0 ? '+' : ''}${lot.unrealized_pnl.toLocaleString('en-US', { minimumFractionDigits: 0, maximumFractionDigits: 0 })}
+                              {lot.unrealized_pnl >= 0 ? '+' : ''}
+                              {formatMoney(lot.unrealized_pnl, currency, { maximumFractionDigits: 0 })}
                             </TableCell>
                             <TableCell textAlign="end" color={lot.unrealized_pnl_pct >= 0 ? 'green.500' : 'red.500'}>
                               {lot.unrealized_pnl_pct >= 0 ? '+' : ''}{lot.unrealized_pnl_pct.toFixed(2)}%
@@ -460,7 +482,7 @@ const TaxLots: React.FC = () => {
                         <YAxis />
                         <RechartsTooltip
                           formatter={(value, name) => [
-                            name === 'count' ? `${value} positions` : `$${Number(value).toLocaleString()}`,
+                            name === 'count' ? `${value} positions` : formatMoney(Number(value), currency, { maximumFractionDigits: 0 }),
                             name === 'count' ? 'Positions' : 'Value'
                           ]}
                         />
@@ -515,7 +537,8 @@ const TaxLots: React.FC = () => {
                         <Text fontWeight="semibold">Long-term Capital Gains/Losses</Text>
                         <StatRoot>
                           <StatValueText color={(summary?.long_term_value || 0) >= 0 ? 'green.500' : 'red.500'}>
-                            {(summary?.long_term_value || 0) >= 0 ? '+' : ''}${(summary?.long_term_value || 0).toLocaleString('en-US', { minimumFractionDigits: 0, maximumFractionDigits: 0 })}
+                            {(summary?.long_term_value || 0) >= 0 ? '+' : ''}
+                            {formatMoney(summary?.long_term_value || 0, currency, { maximumFractionDigits: 0 })}
                           </StatValueText>
                           <StatHelpText>If realized today</StatHelpText>
                         </StatRoot>
@@ -523,7 +546,8 @@ const TaxLots: React.FC = () => {
                         <Text fontWeight="semibold">Short-term Capital Gains/Losses</Text>
                         <StatRoot>
                           <StatValueText color={(summary?.short_term_value || 0) >= 0 ? 'green.500' : 'red.500'}>
-                            {(summary?.short_term_value || 0) >= 0 ? '+' : ''}${(summary?.short_term_value || 0).toLocaleString('en-US', { minimumFractionDigits: 0, maximumFractionDigits: 0 })}
+                            {(summary?.short_term_value || 0) >= 0 ? '+' : ''}
+                            {formatMoney(summary?.short_term_value || 0, currency, { maximumFractionDigits: 0 })}
                           </StatValueText>
                           <StatHelpText>If realized today</StatHelpText>
                         </StatRoot>
@@ -569,7 +593,7 @@ const TaxLots: React.FC = () => {
                         <XAxis dataKey="type" />
                         <YAxis />
                         <RechartsTooltip
-                          formatter={(value) => [`$${Number(value).toLocaleString()}`, 'Amount']}
+                          formatter={(value) => [formatMoney(Number(value), currency, { maximumFractionDigits: 0 }), 'Amount']}
                         />
                         <Bar dataKey="value" fill="#4299E1" />
                       </BarChart>

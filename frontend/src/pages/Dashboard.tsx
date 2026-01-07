@@ -41,6 +41,8 @@ import AccountFilterWrapper from '../components/ui/AccountFilterWrapper';
 import { transformPortfolioToAccounts } from '../hooks/useAccountFilter';
 import AppDivider from '../components/ui/AppDivider';
 import toast from 'react-hot-toast';
+import { useUserPreferences } from '../hooks/useUserPreferences';
+import { formatMoney, formatTime } from '../utils/format';
 
 interface DashboardData {
   total_value: number;
@@ -99,6 +101,7 @@ const Dashboard: React.FC = () => {
   const [syncing, setSyncing] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [selectedBrokerage, setSelectedBrokerage] = useState<string>('all');
+  const { currency, timezone } = useUserPreferences();
 
   const cardBg = 'bg.card';
   const borderColor = 'border.subtle';
@@ -153,12 +156,7 @@ const Dashboard: React.FC = () => {
   };
 
   const formatCurrency = (value: number) => {
-    return new Intl.NumberFormat('en-US', {
-      style: 'currency',
-      currency: 'USD',
-      minimumFractionDigits: 0,
-      maximumFractionDigits: 0,
-    }).format(value);
+    return formatMoney(value, currency, { minimumFractionDigits: 0, maximumFractionDigits: 0 });
   };
 
   const formatPercent = (value: number | undefined | null) => {
@@ -222,7 +220,7 @@ const Dashboard: React.FC = () => {
         <Box>
           <Heading size="lg" mb={2}>Portfolio Dashboard</Heading>
           <Text color="gray.500" fontSize="sm">
-            Real-time data from IBKR • Last updated: {new Date(dashboardData.last_updated).toLocaleTimeString()}
+            Real-time data from IBKR • Last updated: {formatTime(dashboardData.last_updated, timezone)}
           </Text>
         </Box>
 

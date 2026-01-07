@@ -23,6 +23,8 @@ import {
 } from '@chakra-ui/react';
 import { FiInfo, FiTrendingUp, FiTrendingDown, FiDollarSign } from 'react-icons/fi';
 import AppDivider from './AppDivider';
+import { useUserPreferences } from '../../hooks/useUserPreferences';
+import { formatMoney } from '../../utils/format';
 
 export interface AccountData {
   account_id: string;
@@ -62,6 +64,7 @@ const AccountSelector: React.FC<AccountSelectorProps> = ({
   const bgColor = 'bg.card';
   const borderColor = 'border.subtle';
   const hoverBg = 'bg.panel';
+  const { currency } = useUserPreferences();
 
   // Calculate totals
   const totalValue = accounts.reduce((sum, acc) => sum + acc.total_value, 0);
@@ -70,12 +73,7 @@ const AccountSelector: React.FC<AccountSelectorProps> = ({
   const totalPositions = accounts.reduce((sum, acc) => sum + acc.positions_count, 0);
 
   const formatCurrency = (amount: number) =>
-    new Intl.NumberFormat('en-US', {
-      style: 'currency',
-      currency: 'USD',
-      minimumFractionDigits: 0,
-      maximumFractionDigits: 0,
-    }).format(amount || 0);
+    formatMoney(amount || 0, currency, { maximumFractionDigits: 0, minimumFractionDigits: 0 });
 
   const formatPercentage = (pct: number | undefined) => {
     if (pct === undefined || pct === null || Number.isNaN(pct)) return '0.00%';
@@ -99,9 +97,9 @@ const AccountSelector: React.FC<AccountSelectorProps> = ({
           maxWidth: 250,
           padding: '8px 10px',
           borderRadius: 10,
-          border: '1px solid rgba(255,255,255,0.14)',
-          background: 'var(--chakra-colors-bg-input, #0b1220)',
-          color: 'var(--chakra-colors-fg-default, #e5e7eb)',
+          border: '1px solid var(--chakra-colors-border-subtle)',
+          background: 'var(--chakra-colors-bg-input)',
+          color: 'var(--chakra-colors-fg-default)',
           fontSize: 14,
         }}
       >

@@ -14,8 +14,11 @@ import {
 } from '@chakra-ui/react';
 import toast from 'react-hot-toast';
 import api from '../services/api';
+import { useUserPreferences } from '../hooks/useUserPreferences';
+import { formatDateTime } from '../utils/format';
 
 const MarketTracked: React.FC = () => {
+  const { timezone } = useUserPreferences();
   const [data, setData] = React.useState<any>({ all: [], details: {}, meta: {} });
   const [sortKey, setSortKey] = React.useState<'symbol' | 'market_cap' | 'stage'>('symbol');
   const [sortDir, setSortDir] = React.useState<'asc' | 'desc'>('asc');
@@ -96,7 +99,7 @@ const MarketTracked: React.FC = () => {
                 <TableCell>{fmtCompact(row.market_cap)}</TableCell>
                 <TableCell>{row.stage_label || '—'}</TableCell>
                 <TableCell>{row.atr_value ? row.atr_value.toFixed(2) : '—'}</TableCell>
-                <TableCell>{row.last_snapshot_at ? new Date(row.last_snapshot_at).toLocaleString() : '—'}</TableCell>
+                <TableCell>{formatDateTime(row.last_snapshot_at, timezone)}</TableCell>
                 <TableCell>
                   <Text>{row.sector || '—'}</Text>
                   <Text fontSize="xs" color="gray.500">{row.industry || ''}</Text>

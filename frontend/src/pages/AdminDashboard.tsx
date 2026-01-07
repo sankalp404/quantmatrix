@@ -4,6 +4,8 @@ import toast from 'react-hot-toast';
 import api from '../services/api';
 import { triggerTaskByName } from '../utils/taskActions';
 import useCoverageSnapshot from '../hooks/useCoverageSnapshot';
+import { useUserPreferences } from '../hooks/useUserPreferences';
+import { formatDateTime } from '../utils/format';
 import {
   CoverageBucketsGrid,
   CoverageKpiGrid,
@@ -12,6 +14,7 @@ import {
 } from '../components/coverage/CoverageSummaryCard';
 
 const AdminDashboard: React.FC = () => {
+  const { timezone } = useUserPreferences();
   const [backfill5mEnabled, setBackfill5mEnabled] = React.useState<boolean>(true);
   const [toggling5m, setToggling5m] = React.useState<boolean>(false);
   const [refreshingCoverage, setRefreshingCoverage] = React.useState<boolean>(false);
@@ -153,7 +156,7 @@ const AdminDashboard: React.FC = () => {
   const fmtLastRun = (key: string) => {
     const raw = (taskStatus || {})[key];
     const ts = raw?.ts;
-    return ts ? new Date(ts).toLocaleString() : '—';
+    return formatDateTime(ts, timezone);
   };
 
   return (
@@ -169,7 +172,7 @@ const AdminDashboard: React.FC = () => {
             <Box>
               <Text fontSize="xs" color="gray.400">
                 Source: <Text as="span" color="gray.200">{String(coverage?.meta?.source || '—')}</Text> •{' '}
-                Last refresh: <Text as="span" color="gray.200">{coverage?.meta?.updated_at ? new Date(coverage.meta.updated_at).toLocaleString() : '—'}</Text>
+                Last refresh: <Text as="span" color="gray.200">{formatDateTime(coverage?.meta?.updated_at, timezone)}</Text>
                 {' '}• Monitor last run:{' '}
                 <Text as="span" color="gray.200">{fmtLastRun('taskstatus:monitor_coverage_health:last')}</Text>
               </Text>
