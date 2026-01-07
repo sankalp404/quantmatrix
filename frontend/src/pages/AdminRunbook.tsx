@@ -8,7 +8,6 @@ import {
   VStack,
   HStack,
   Badge,
-  Icon,
   useDisclosure,
   DialogRoot,
   DialogBackdrop,
@@ -30,7 +29,7 @@ const runbooks = [
   {
     title: 'Restore Daily Coverage (Tracked)',
     description: 'Primary operator flow: refresh → tracked → daily backfill → recompute → history → refresh coverage (no 5m).',
-    icon: FiShield,
+    iconKey: 'shield' as const,
     accent: 'orange.300',
     steps: [
       { label: 'Restore Daily Coverage (Tracked)', task: 'restore_daily_coverage_tracked' },
@@ -47,7 +46,7 @@ const runbooks = [
   {
     title: 'Troubleshoot Coverage',
     description: 'Fast path when Daily Freshness shows >48h/none.',
-    icon: FiTool,
+    iconKey: 'tool' as const,
     accent: 'teal.300',
     steps: [
       { label: 'Backfill Daily (Stale Only)', task: 'backfill_stale_daily' },
@@ -145,7 +144,11 @@ const AdminRunbook: React.FC = () => {
                 alignItems="center"
                 justifyContent="center"
               >
-                <Icon as={book.icon} color={book.accent} boxSize={5} />
+                {book.iconKey === 'shield' ? (
+                  <FiShield color="currentColor" />
+                ) : (
+                  <FiTool color="currentColor" />
+                )}
               </Box>
               <Box>
                 <Heading size="sm" color={headingColor}>{book.title}</Heading>
