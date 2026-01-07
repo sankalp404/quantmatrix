@@ -1,0 +1,29 @@
+name: Auto-squash merge on maintainer approval (agent PRs)
+
+on:
+  pull_request_review:
+    types: [submitted]
+
+permissions:
+  contents: write
+  pull-requests: write
+
+jobs:
+  enable_automerge:
+    name: Enable auto-merge (squash)
+    runs-on: ubuntu-latest
+    if: >
+      github.event.review.state == 'approved' &&
+      github.event.review.user.login == 'sankalp404' &&
+      github.event.pull_request.head.repo.full_name == github.repository &&
+      startsWith(github.event.pull_request.head.ref, 'agent/')
+    steps:
+      - name: Enable auto-merge (squash) for this PR
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          PR_URL: ${{ github.event.pull_request.html_url }}
+        run: |
+          set -euo pipefail
+          gh pr merge --auto --squash --delete-branch "$PR_URL"
+
+
