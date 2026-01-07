@@ -40,6 +40,7 @@ from backend.models.market_data import JobRun
 from backend.api.routes.utils import serialize_job_runs
 from backend.tasks.market_data_tasks import backfill_5m_last_n_days, enforce_price_data_retention, backfill_5m_for_symbols
 from backend.tasks.market_data_tasks import bootstrap_universe
+from backend.tasks.market_data_tasks import monitor_coverage_health
 from backend.config import settings
 
 logger = logging.getLogger(__name__)
@@ -344,6 +345,7 @@ async def admin_task_status(
             "taskstatus:refresh_index_constituents:last",
             "taskstatus:recompute_indicators_universe:last",
             "taskstatus:record_daily_history:last",
+            "taskstatus:monitor_coverage_health:last",
         ]
         out: Dict[str, Any] = {}
         import json as _json
@@ -585,63 +587,141 @@ async def get_coverage(
             updated_at = snapshot.get("generated_at")
             source = "db"
 
+        # Ensure downstream status logic can see the 5m toggle (for ignore-5m behavior).
+        try:
+            snapshot.setdefault("meta", {})["backfill_5m_enabled"] = backfill_5m_enabled
+        except Exception:
+            # Any failure here should fall back to the previously computed/cached snapshot.
+            pass
+
         status_info = _ensure_status(snapshot)
 
-        # Recompute stale/freshness and counts directly from DB to avoid stale cache artifacts
+        # Recompute stale/freshness and counts directly from DB to avoid stale cache artifacts.
+        # IMPORTANT: This must also rebuild `daily.freshness` (and `m5.freshness`) so the UI buckets
+        # never render as zeros when stale counts are non-zero.
         try:
-            last_daily_rows = (
-                db.query(
-                    PriceData.symbol,
-                    PriceData.date,
+            # Determine the universe: prefer Redis tracked:all; fallback to symbols present in DB.
+            tracked_symbols: List[str] = []
+            try:
+                raw_tracked = svc.redis_client.get("tracked:all")
+                if raw_tracked:
+                    tracked_symbols = json.loads(raw_tracked.decode() if isinstance(raw_tracked, (bytes, bytearray)) else raw_tracked)  # type: ignore[arg-type]
+            except Exception:
+                tracked_symbols = []
+
+            tracked_symbols = sorted({str(s).upper() for s in (tracked_symbols or []) if s})
+
+            if not tracked_symbols:
+                tracked_symbols = sorted(
+                    {
+                        str(s).upper()
+                        for (s,) in db.query(PriceData.symbol).distinct().all()
+                        if s
+                    }
                 )
-                .filter(PriceData.interval == "1d")
-                .order_by(PriceData.symbol.asc(), PriceData.date.desc())
-                .distinct(PriceData.symbol)
-                .all()
-            )
-            total_symbols = len(last_daily_rows)
-            fresh_24 = 0
-            fresh_48 = 0
-            stale_daily = 0
+
+            total_symbols = len(tracked_symbols)
+            # If we're serving a cached snapshot and cannot determine any universe from
+            # Redis tracked:all nor DB price_data, do NOT overwrite the cached view.
+            # This keeps cache semantics stable and avoids flipping cached OK → IDLE.
+            if total_symbols == 0 and source == "cache":
+                raise RuntimeError("skip_db_recompute_no_universe")
+            sym_set = set(tracked_symbols)
+
             from datetime import timedelta
 
-            now_utc = datetime.utcnow()
-            stale_list = []
-            for sym, dt in last_daily_rows:
-                if not dt:
-                    stale_daily += 1
-                    stale_list.append(sym)
-                    continue
-                age = now_utc - dt
+            def _bucketize(ts: datetime | None, now_utc: datetime) -> str:
+                if not ts:
+                    return "none"
+                age = now_utc - ts
                 if age <= timedelta(hours=24):
-                    fresh_24 += 1
-                elif age <= timedelta(hours=48):
-                    fresh_48 += 1
-                else:
-                    stale_daily += 1
-                    stale_list.append(sym)
-            fresh_gt48 = max(0, total_symbols - fresh_24 - fresh_48 - stale_daily)
+                    return "<=24h"
+                if age <= timedelta(hours=48):
+                    return "24-48h"
+                return ">48h"
 
+            def _last_by_symbol(interval: str) -> Dict[str, datetime | None]:
+                last: Dict[str, datetime | None] = {sym: None for sym in tracked_symbols}
+                if not sym_set:
+                    return last
+                rows = (
+                    db.query(PriceData.symbol, PriceData.date)
+                    .filter(PriceData.interval == interval, PriceData.symbol.in_(sym_set))
+                    .order_by(PriceData.symbol.asc(), PriceData.date.desc())
+                    .distinct(PriceData.symbol)
+                    .all()
+                )
+                for sym, dt in rows:
+                    if sym and sym.upper() in last:
+                        last[sym.upper()] = dt
+                return last
+
+            def _build_interval_section(interval: str) -> Dict[str, Any]:
+                now_utc = datetime.utcnow()
+                last_dt_map = _last_by_symbol(interval)
+                # Serialize for API response
+                last_iso_map: Dict[str, str | None] = {
+                    sym: (dt.isoformat() if dt else None) for sym, dt in last_dt_map.items()
+                }
+
+                freshness = {"<=24h": 0, "24-48h": 0, ">48h": 0, "none": 0}
+                stale_items: List[Dict[str, Any]] = []
+                for sym, dt in last_dt_map.items():
+                    bucket = _bucketize(dt, now_utc)
+                    freshness[bucket] = freshness.get(bucket, 0) + 1
+                    if bucket in (">48h", "none"):
+                        stale_items.append(
+                            {
+                                "symbol": sym,
+                                "last": dt.isoformat() if dt else None,
+                                "bucket": bucket,
+                            }
+                        )
+                stale_items.sort(key=lambda item: (item.get("bucket") or "", item.get("last") or "", item.get("symbol") or ""))
+                stale_limit = int(getattr(settings, "COVERAGE_STALE_SAMPLE", 50))
+                stale_sample = stale_items[: max(0, stale_limit)]
+
+                fresh_24 = int(freshness["<=24h"])
+                fresh_48 = int(freshness["24-48h"])
+                stale_48h = int(freshness[">48h"])
+                missing = int(freshness["none"])
+
+                return {
+                    # Count = symbols within freshness SLA (<=48h). This drives daily_pct.
+                    "count": fresh_24 + fresh_48,
+                    "last": last_iso_map,
+                    "freshness": freshness,
+                    # Stale sample list for UI drilldowns (full counts are in freshness + status)
+                    "stale": stale_sample,
+                    "fresh_24h": fresh_24,
+                    "fresh_48h": fresh_48,
+                    "fresh_gt48h": 0,
+                    "stale_48h": stale_48h,
+                    "missing": missing,
+                }
+
+            daily_section = _build_interval_section("1d")
+            m5_section = _build_interval_section("5m")
+
+            stale_daily_total = int(daily_section.get("stale_48h") or 0) + int(daily_section.get("missing") or 0)
             daily_pct = 0.0
             if total_symbols > 0:
-                daily_pct = max(0.0, min(100.0, ((fresh_24 + fresh_48 + fresh_gt48) / total_symbols) * 100.0))
+                daily_pct = max(0.0, min(100.0, (float(daily_section.get("count") or 0) / total_symbols) * 100.0))
 
             status_info["daily_pct"] = daily_pct
             status_info["tracked_total"] = total_symbols
             status_info["universe"] = total_symbols
             status_info["symbols"] = total_symbols
-            status_info["stale_daily"] = stale_daily
+            status_info["stale_daily"] = stale_daily_total
 
-            snapshot["daily"] = {
-                "count": fresh_24 + fresh_48 + fresh_gt48,
-                "fresh_24h": fresh_24,
-                "fresh_48h": fresh_48,
-                "fresh_gt48h": fresh_gt48,
-                "stale_48h": stale_daily,
-                "stale": [{"symbol": s} for s in stale_list],
-            }
             snapshot["symbols"] = total_symbols
             snapshot["tracked_count"] = total_symbols
+            snapshot["daily"] = daily_section
+            snapshot["m5"] = m5_section
+
+            # Recompute status label/summary based on the rebuilt snapshot.
+            snapshot["status"] = compute_coverage_status(snapshot)
+            status_info = snapshot["status"] or status_info
         except Exception:
             pass
 
@@ -739,17 +819,19 @@ async def get_coverage(
 
         total_symbols = int(snapshot.get("symbols") or 0)
         daily_section = snapshot.get("daily", {}) or {}
-        stale_daily = int(status_info.get("stale_daily") or 0)
         fresh_24 = int(daily_section.get("fresh_24h") or 0)
         fresh_48 = int(daily_section.get("fresh_48h") or 0)
-        fresh_gt48 = max(0, total_symbols - fresh_24 - fresh_48 - stale_daily)
+        stale_48h = int(daily_section.get("stale_48h") or 0)
+        missing = int(daily_section.get("missing") or (daily_section.get("freshness") or {}).get("none") or 0)
+        fresh_gt48 = max(0, total_symbols - fresh_24 - fresh_48 - stale_48h - missing)
 
         snapshot["daily"] = {
             **daily_section,
             "fresh_24h": fresh_24,
             "fresh_48h": fresh_48,
             "fresh_gt48h": fresh_gt48,
-            "stale_48h": stale_daily,
+            "stale_48h": stale_48h,
+            "missing": missing,
             "count": daily_section.get("count", daily_section.get("daily_count")),
         }
 
@@ -822,6 +904,14 @@ async def backfill_stale_daily(
         raise HTTPException(status_code=500, detail=str(e))
     finally:
         session.close()
+
+
+@router.post("/admin/coverage/refresh")
+async def admin_refresh_coverage(
+    admin_user: User = Depends(get_admin_user),
+) -> Dict[str, Any]:
+    """Trigger the coverage health monitor to refresh Redis cache + history."""
+    return _enqueue_task(monitor_coverage_health)
 
 
 @router.get("/coverage/{symbol}")

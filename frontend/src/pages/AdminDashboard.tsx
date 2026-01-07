@@ -15,13 +15,33 @@ import {
 const AdminDashboard: React.FC = () => {
   const [backfill5mEnabled, setBackfill5mEnabled] = React.useState<boolean>(true);
   const [toggling5m, setToggling5m] = React.useState<boolean>(false);
+  const [refreshingCoverage, setRefreshingCoverage] = React.useState<boolean>(false);
   const { snapshot: coverage, refresh: refreshCoverage, sparkline, kpis, actions: coverageActions, hero } = useCoverageSnapshot();
+  const autoRefreshAttemptedRef = React.useRef(false);
 
   React.useEffect(() => {
     if (coverage?.meta?.backfill_5m_enabled !== undefined) {
       setBackfill5mEnabled(Boolean(coverage.meta.backfill_5m_enabled));
     }
   }, [coverage]);
+
+  const refreshCoverageNow = async (origin: 'manual' | 'auto') => {
+    if (refreshingCoverage) return;
+    setRefreshingCoverage(true);
+    try {
+      const res = await api.post('/market-data/admin/coverage/refresh');
+      const taskId = res?.data?.task_id;
+      toast.success(origin === 'auto' ? 'Coverage refresh queued (auto)' : 'Coverage refresh queued');
+      // Task may take a moment; do a couple of lightweight refreshes.
+      setTimeout(() => void refreshCoverage(), 1500);
+      setTimeout(() => void refreshCoverage(), 4500);
+      void taskId;
+    } catch (err: any) {
+      toast.error(err?.response?.data?.detail || err?.message || 'Failed to refresh coverage');
+    } finally {
+      setRefreshingCoverage(false);
+    }
+  };
 
   const runNamedTask = async (taskName: string, label?: string) => {
     // Special-case: schedule coverage monitor as an hourly beat entry
@@ -66,6 +86,18 @@ const AdminDashboard: React.FC = () => {
     }
   };
 
+  // Auto-trigger coverage monitor when cache is missing/stale.
+  React.useEffect(() => {
+    if (!coverage || autoRefreshAttemptedRef.current) return;
+    const age = Number(coverage?.meta?.snapshot_age_seconds ?? NaN);
+    const source = String(coverage?.meta?.source || '');
+    const stale = !Number.isFinite(age) || age > 15 * 60 || source !== 'cache';
+    if (stale) {
+      autoRefreshAttemptedRef.current = true;
+      void refreshCoverageNow('auto');
+    }
+  }, [coverage]);
+
   return (
     <Box p={4}>
       <Heading size="md" mb={4}>Admin Dashboard</Heading>
@@ -75,6 +107,17 @@ const AdminDashboard: React.FC = () => {
           <CoverageKpiGrid kpis={kpis} variant="stat" />
           <CoverageTrendGrid sparkline={sparkline} />
           <CoverageBucketsGrid groups={hero?.buckets || []} />
+          <Box mt={3} display="flex" alignItems="center" justifyContent="space-between" gap={3} flexWrap="wrap">
+            <Box>
+              <Text fontSize="xs" color="gray.400">
+                Source: <Text as="span" color="gray.200">{String(coverage?.meta?.source || '—')}</Text> •{' '}
+                Last refresh: <Text as="span" color="gray.200">{coverage?.meta?.updated_at ? new Date(coverage.meta.updated_at).toLocaleString() : '—'}</Text>
+              </Text>
+            </Box>
+            <Button size="sm" variant="outline" loading={refreshingCoverage} onClick={() => void refreshCoverageNow('manual')}>
+              Refresh coverage now
+            </Button>
+          </Box>
           <Box mt={3} display="flex" alignItems="center" gap={3}>
             <input
               type="checkbox"

@@ -11,6 +11,13 @@
 - Provider priority (paid mode): FMP → Twelve Data → yfinance; (free mode): Finnhub → Twelve Data → yfinance
 - Redis cache for transient responses and computed indicators
 
+## Environment configuration (dev)
+
+- **Run dev via Makefile only**: `make up` (or `./run.sh start`) uses `docker compose --env-file infra/env.dev ...` and injects `infra/env.dev` into backend/celery containers.
+- **Source of truth**: put all dev secrets (FMP/Finnhub keys, Discord webhooks, etc.) into **`infra/env.dev`** (gitignored).
+- **Do not rely on root `.env`**: backend settings no longer implicitly load a repo-root `.env`. If you truly need an env file outside Docker, set `QM_ENV_FILE=/path/to/file`.
+- **Frontend safety**: the `frontend` and `ladle` containers do **not** receive `infra/env.dev` (to avoid leaking secrets). Only `VITE_*` variables explicitly passed in compose are available to the browser build.
+
 ## Data We Compute/Serve (indicator_engine)
 For each symbol:
 - RSI(14)
@@ -181,8 +188,14 @@ Troubleshooting:
 
 ## Coverage Health Monitor
 
-- Celery task `monitor_coverage_health` runs hourly (Admin Coverage button or default schedule) and caches:
+- Celery task `monitor_coverage_health` runs hourly (Admin schedule) and caches:
   - `generated_at`, total tracked symbols, index member counts
   - Daily + 5m coverage counts, freshness buckets, stale lists (first 50 symbols per bucket)
   - Status summary (`ok` / `degraded`) plus tracked symbols
 - Redis key `coverage:health:last` feeds Admin Dashboard/Coverage quick actions and SLA banners, enabling Discord/alert hooks to detect drift without hitting Postgres every refresh.
+
+### Manual refresh / UI behavior
+
+- **Admin Dashboard “Refresh coverage now”** calls `POST /api/v1/market-data/admin/coverage/refresh` which enqueues `monitor_coverage_health`.
+- **Auto-refresh**: Admin Dashboard will auto-trigger a refresh when the cached snapshot is missing or older than ~15 minutes, but still renders immediately using the current response.
+- **Cache vs DB**: `GET /api/v1/market-data/coverage` returns `meta.source` (`cache` or `db`) and `meta.updated_at` so you can see whether you’re looking at the last monitor run or a direct DB fallback.

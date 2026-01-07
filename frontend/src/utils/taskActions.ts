@@ -9,6 +9,7 @@ type TaskName =
   | 'backfill_5m_last_n_days'
   | 'recompute_indicators_universe'
   | 'record_daily_history'
+  | 'monitor_coverage_health'
   | 'bootstrap_universe';
 
 const TASK_ENDPOINTS: Record<TaskName, () => Promise<any>> = {
@@ -20,6 +21,7 @@ const TASK_ENDPOINTS: Record<TaskName, () => Promise<any>> = {
   backfill_5m_last_n_days: () => api.post('/market-data/backfill/5m'),
   recompute_indicators_universe: () => api.post('/market-data/indicators/recompute-universe'),
   record_daily_history: () => api.post('/market-data/admin/history/record'),
+  monitor_coverage_health: () => api.post('/market-data/admin/coverage/refresh'),
   bootstrap_universe: () => api.post('/market-data/admin/bootstrap'),
 };
 

@@ -60,8 +60,13 @@ def test_coverage_endpoint_buckets(monkeypatch, db_session):
         # Buckets should exist
         buckets = data["daily"]["freshness"]
         assert all(k in buckets for k in ["<=24h", "24-48h", ">48h", "none"])
-        # Sanity: counts sum to daily count
-        assert sum(buckets.values()) == data["daily"]["count"]
+        # Sanity: buckets cover the full universe; daily.count represents <=48h freshness.
+        assert sum(buckets.values()) == data["symbols"]
+        assert (
+            int(data["daily"].get("count") or 0)
+            + int(data["daily"].get("stale_48h") or 0)
+            + int(data["daily"].get("missing") or 0)
+        ) == data["symbols"]
         assert "status" in data
         assert "history" in data
     finally:

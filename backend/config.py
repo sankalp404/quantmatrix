@@ -1,3 +1,4 @@
+import os
 from typing import Optional
 from pydantic_settings import BaseSettings
 
@@ -90,10 +91,13 @@ class Settings(BaseSettings):
     # Toggle whether Coverage/Tracked sections are visible to all authenticated users
     MARKET_DATA_SECTION_PUBLIC: bool = False
 
+    # Source of truth should be runtime environment variables injected by Docker Compose
+    # (`infra/env.dev` via Makefile). We keep optional env-file support only when explicitly
+    # provided for non-Docker workflows (do not implicitly load a repo root `.env`).
     model_config = {
-        "env_file": ".env",
+        "env_file": os.getenv("QM_ENV_FILE") or None,
         "case_sensitive": True,
-        "extra": "ignore",  # Ignore extra fields from .env file
+        "extra": "ignore",  # Ignore extra fields from env / optional env_file
     }
 
 
