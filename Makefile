@@ -1,5 +1,5 @@
 .PHONY: up down down-reset ps logs build ladle-up ladle-down ladle-logs ladle-build \
-	test-up test test-down \
+	test-up test test-backend test-all test-down test-ui \
 	backend-shell frontend-shell \
 	migrate-create migrate-up migrate-down migrate-stamp-head \
 	frontend-install frontend-lint frontend-typecheck frontend-test \
@@ -49,13 +49,24 @@ ladle-build:
 test-up:
 	$(COMPOSE_TEST) up -d postgres_test redis_test
 
-test:
+test-backend:
 	@# Always use a fresh isolated test DB volume to prevent migration drift.
 	@# This never touches dev DB; it only resets the quantmatrix_test project volumes.
 	-$(COMPOSE_TEST) down -v
 	$(COMPOSE_TEST) up -d postgres_test redis_test
 	$(COMPOSE_TEST) run --rm backend_test
 	$(COMPOSE_TEST) down -v
+
+# Back-compat: historically `make test` meant backend tests only.
+test: test-backend
+
+# UI tests are unit tests (vitest). Keep them explicit so nobody assumes e2e.
+test-ui: ui-test
+
+# Convenience target (best-effort): backend tests (isolated) + UI checks.
+# Note: UI checks run against the dev compose stack; if `frontend` isn't up,
+# run `make up` first (or use CI which runs UI checks on the runner).
+test-all: test-backend ui-check
 
 test-down:
 	$(COMPOSE_TEST) down -v
