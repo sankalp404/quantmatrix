@@ -690,6 +690,78 @@ def bootstrap_universe() -> dict:
     return rollup
 
 
+# ============================= Coverage Restore (Daily, Tracked Universe) =============================
+@shared_task(name="backend.tasks.market_data_tasks.bootstrap_daily_coverage_tracked")
+@task_run("bootstrap_daily_coverage_tracked", lock_key=lambda: "bootstrap_daily_coverage_tracked")
+def bootstrap_daily_coverage_tracked() -> dict:
+    """Restore DAILY coverage for the tracked universe (no 5m).
+
+    Steps:
+    - Refresh index constituents (keeps constituents current)
+    - Update tracked universe cache (tracked:all)
+    - Backfill last ~200 daily bars for tracked universe
+    - Recompute indicators for tracked universe
+    - Record daily history
+    - Refresh coverage cache (monitor_coverage_health)
+    """
+
+    def _summarize(step: str, payload: dict | None) -> str:
+        data = payload or {}
+        if step == "refresh_index_constituents":
+            idx = data.get("indices") or {}
+            parts = [
+                f"{name}: {stats.get('fetched', 0)} via {stats.get('provider_used', 'n/a')}"
+                for name, stats in idx.items()
+            ]
+            return "; ".join(parts) or "Refreshed constituents"
+        if step == "update_tracked_symbol_cache":
+            return f"{data.get('tracked_all', 0)} tracked ({data.get('new', 0)} new)"
+        if step == "backfill_last_200_bars":
+            return f"Inserted {data.get('bars_inserted_total', 0)} bars across {data.get('tracked_total', 0)} tracked"
+        if step == "recompute_indicators_universe":
+            return f"Recomputed {data.get('processed', data.get('symbols', 0))} / {data.get('symbols', 0)}"
+        if step == "record_daily_history":
+            return f"Wrote {data.get('written', 0)} history rows"
+        if step == "monitor_coverage_health":
+            return f"Coverage: {data.get('daily_pct', 0)}% daily; stale={data.get('stale_daily', 0)}"
+        return data.get("status", "ok")
+
+    rollup: dict = {"steps": []}
+
+    def _append(step_name: str, result: dict) -> None:
+        rollup["steps"].append(
+            {
+                "name": step_name,
+                "summary": _summarize(step_name, result),
+                "result": result,
+            }
+        )
+
+    res1 = refresh_index_constituents()
+    _append("refresh_index_constituents", res1)
+
+    res2 = update_tracked_symbol_cache()
+    _append("update_tracked_symbol_cache", res2)
+
+    res3 = backfill_last_200_bars()
+    _append("backfill_last_200_bars", res3)
+
+    res4 = recompute_indicators_universe(batch_size=50)
+    _append("recompute_indicators_universe", res4)
+
+    res5 = record_daily_history()
+    _append("record_daily_history", res5)
+
+    res6 = monitor_coverage_health()
+    _append("monitor_coverage_health", res6)
+
+    rollup["status"] = "ok"
+    rollup["overall_summary"] = "; ".join(
+        step["summary"] for step in rollup["steps"] if step.get("summary")
+    )
+    return rollup
+
+
 # ============================= Recompute Indicators and Chart Metrics =============================
 
 

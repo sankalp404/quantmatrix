@@ -135,9 +135,6 @@ const AdminJobs: React.FC = () => {
           <Text fontSize="sm" color="fg.muted">
             Recent job runs recorded by the backend (task name, status, timings, and errors).
           </Text>
-          <Text fontSize="xs" color="fg.muted">
-            Showing {data?.jobs?.length ?? 0} of {data?.total ?? (data?.jobs?.length ?? 0)} total
-          </Text>
         </Box>
         <Button size="sm" onClick={load} loading={loading}>
           Reload

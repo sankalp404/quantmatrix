@@ -1146,8 +1146,28 @@ def compute_coverage_status(snapshot: Dict[str, Any]) -> Dict[str, Any]:
     m5 = snapshot.get("m5", {}) or {}
     daily_count = int(daily.get("count") or 0)
     m5_count = int(m5.get("count") or 0)
-    stale_daily = len(daily.get("stale") or [])
-    stale_m5 = len(m5.get("stale") or [])
+    # Stale counts should reflect the full universe, not just the sampled `stale` lists.
+    daily_freshness = daily.get("freshness") or {}
+    m5_freshness = m5.get("freshness") or {}
+    stale_daily = int(daily.get("stale_48h") or daily_freshness.get(">48h") or 0) + int(
+        daily.get("missing") or daily_freshness.get("none") or 0
+    )
+    stale_m5 = int(m5.get("stale_48h") or m5_freshness.get(">48h") or 0) + int(
+        m5.get("missing") or m5_freshness.get("none") or 0
+    )
+    # Fall back to list lengths only if no aggregate counts are available.
+    if stale_daily == 0 and not daily_freshness and daily.get("stale"):
+        stale_daily = len(daily.get("stale") or [])
+    if stale_m5 == 0 and not m5_freshness and m5.get("stale"):
+        stale_m5 = len(m5.get("stale") or [])
+
+    # If 5m backfill is explicitly disabled, 5m coverage should be informational only
+    # and must not drive degraded/warning states.
+    meta = snapshot.get("meta", {}) or {}
+    backfill_5m_enabled = meta.get("backfill_5m_enabled")
+    if backfill_5m_enabled is None:
+        backfill_5m_enabled = snapshot.get("backfill_5m_enabled")
+    backfill_5m_enabled = True if backfill_5m_enabled is None else bool(backfill_5m_enabled)
 
     def pct(count: int) -> float:
         return round((count / total_symbols) * 100.0, 1) if total_symbols else 0.0
@@ -1165,13 +1185,19 @@ def compute_coverage_status(snapshot: Dict[str, Any]) -> Dict[str, Any]:
         summary = f"Daily coverage {daily_pct}% below 90% SLA."
     elif stale_daily:
         label = "degraded"
-        summary = f"{stale_daily} symbols have daily bars older than 48h."
-    elif m5_pct == 0 and total_symbols:
-        label = "degraded"
-        summary = "5m coverage is 0% – run intraday backfill."
-    elif stale_m5:
-        label = "warning"
-        summary = f"{stale_m5} symbols missing 5m data."
+        none_n = int((daily.get("freshness") or {}).get("none") or daily.get("missing") or 0)
+        summary = (
+            f"{stale_daily} symbols have daily bars older than 48h."
+            if none_n == 0
+            else f"{stale_daily} symbols have daily bars older than 48h or missing."
+        )
+    elif backfill_5m_enabled:
+        if m5_pct == 0 and total_symbols:
+            label = "degraded"
+            summary = "5m coverage is 0% – run intraday backfill."
+        elif stale_m5:
+            label = "warning"
+            summary = f"{stale_m5} symbols missing 5m data."
 
     return {
         "label": label,
@@ -1182,7 +1208,10 @@ def compute_coverage_status(snapshot: Dict[str, Any]) -> Dict[str, Any]:
         "stale_m5": stale_m5,
         "symbols": total_symbols,
         "tracked_count": tracked,
-        "thresholds": {"daily_pct": 90, "m5_expectation": ">=1 refresh/day"},
+        "thresholds": {
+            "daily_pct": 90,
+            "m5_expectation": ">=1 refresh/day" if backfill_5m_enabled else "ignored (disabled by admin)",
+        },
     }
 
 
