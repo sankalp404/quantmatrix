@@ -27,7 +27,9 @@ Environment Files
 
 Tests (Isolated DB)
 -------------------
-- `make test` (brings up isolated test deps, runs pytest, then tears down)
+- Backend (isolated DB): `make test`
+- Frontend (unit): `make test-frontend`
+- Both: `make test-all`
 
 PR Automation
 -------------

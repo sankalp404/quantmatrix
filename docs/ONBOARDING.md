@@ -38,6 +38,11 @@ Run tests (safe, isolated DB)
 -----------------------------
 - `./run.sh test`
 
+Other useful targets:
+- Backend only (isolated DB): `make test`
+- Frontend unit checks: `make test-frontend`
+- Both: `make test-all`
+
 Notes:
 - This uses `infra/compose.test.yaml` with `postgres_test` + an isolated Docker volume.
 - `infra/env.test` is untracked; if missing, `./run.sh test` copies from `infra/env.test.example`.

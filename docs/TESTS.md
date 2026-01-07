@@ -37,7 +37,21 @@ Goals
 
 How to run
 ----------
-- Recommended:\n+  - `./run.sh test`\n+- Focused (still isolated):\n+  - `make test-up`\n+  - `docker compose --project-name quantmatrix_test --env-file infra/env.test -f infra/compose.test.yaml run --rm backend_test bash -lc \"python -m pytest backend/tests/test_client_tastytrade.py -q\"`
+- Recommended:
+  - `./run.sh test`
+
+- Backend only (isolated DB):
+  - `make test`
+
+- Frontend unit checks:
+  - `make test-frontend`
+
+- Both:
+  - `make test-all`
+
+- Focused (still isolated):
+  - `make test-up`
+  - `docker compose --project-name quantmatrix_test --env-file infra/env.test -f infra/compose.test.yaml run --rm backend_test bash -lc "python -m pytest backend/tests/test_client_tastytrade.py -q"`
 
 Scopes
 ------

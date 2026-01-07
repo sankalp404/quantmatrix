@@ -1,9 +1,8 @@
 .PHONY: up down down-reset ps logs build ladle-up ladle-down ladle-logs ladle-build \
-	test-up test test-backend test-all test-down test-ui \
+	test-up test test-frontend test-all test-down \
 	backend-shell frontend-shell \
 	migrate-create migrate-up migrate-down migrate-stamp-head \
-	frontend-install frontend-lint frontend-typecheck frontend-test \
-	ui ui-install ui-lint ui-typecheck ui-test ui-check
+	frontend-install frontend-lint frontend-typecheck frontend-test frontend-check
 
 DOCKER ?= docker
 PROJECT ?= quantmatrix
@@ -49,7 +48,7 @@ ladle-build:
 test-up:
 	$(COMPOSE_TEST) up -d postgres_test redis_test
 
-test-backend:
+test:
 	@# Always use a fresh isolated test DB volume to prevent migration drift.
 	@# This never touches dev DB; it only resets the quantmatrix_test project volumes.
 	-$(COMPOSE_TEST) down -v
@@ -57,16 +56,10 @@ test-backend:
 	$(COMPOSE_TEST) run --rm backend_test
 	$(COMPOSE_TEST) down -v
 
-# Back-compat: historically `make test` meant backend tests only.
-test: test-backend
+test-frontend: frontend-check
 
-# UI tests are unit tests (vitest). Keep them explicit so nobody assumes e2e.
-test-ui: ui-test
-
-# Convenience target (best-effort): backend tests (isolated) + UI checks.
-# Note: UI checks run against the dev compose stack; if `frontend` isn't up,
-# run `make up` first (or use CI which runs UI checks on the runner).
-test-all: test-backend ui-check
+# Run both suites
+test-all: test test-frontend
 
 test-down:
 	$(COMPOSE_TEST) down -v
@@ -111,23 +104,6 @@ frontend-typecheck:
 frontend-test:
 	$(COMPOSE_DEV) exec -T frontend npm run test
 
-# UI aliases (human-friendly)
-ui:
-	@echo "UI targets:"
-	@echo "  make ui-install    # npm ci (fixes missing deps in docker volume)"
-	@echo "  make ui-lint       # eslint"
-	@echo "  make ui-typecheck  # tsc --noEmit"
-	@echo "  make ui-test       # vitest"
-	@echo "  make ui-check      # lint + typecheck + test"
-
-ui-install: frontend-install
-
-ui-lint: frontend-lint
-
-ui-typecheck: frontend-typecheck
-
-ui-test: frontend-test
-
-ui-check: ui-install ui-lint ui-typecheck ui-test
+frontend-check: frontend-install frontend-lint frontend-typecheck frontend-test
 
 
