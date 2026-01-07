@@ -42,13 +42,6 @@ const MarketCoverage = React.lazy(() => import('./pages/MarketCoverage'));
 const MarketTracked = React.lazy(() => import('./pages/MarketTracked'));
 const AdminRunbook = React.lazy(() => import('./pages/AdminRunbook'));
 
-const surfacePalette = {
-  dark: {
-    panel: '#182233',
-    border: '#2F4461',
-  },
-};
-
 // Create a client for React Query
 const queryClient = new QueryClient({
   defaultOptions: {
@@ -115,9 +108,9 @@ function App() {
                     position="top-right"
                     toastOptions={{
                       style: {
-                        background: surfacePalette.dark.panel,
-                        color: '#F7F9FC',
-                        border: `1px solid ${surfacePalette.dark.border}`,
+                        background: 'var(--chakra-colors-bg-panel)',
+                        color: 'var(--chakra-colors-fg-default)',
+                        border: '1px solid var(--chakra-colors-border-subtle)',
                       },
                     }}
                   />

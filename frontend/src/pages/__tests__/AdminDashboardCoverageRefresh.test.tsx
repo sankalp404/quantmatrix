@@ -9,6 +9,14 @@ import { renderWithProviders } from '../../test/render';
 const apiPost = vi.fn().mockResolvedValue({ data: { task_id: 'task-123' } });
 const apiGet = vi.fn().mockResolvedValue({ data: {} });
 
+vi.mock('../../hooks/useUserPreferences', () => ({
+  useUserPreferences: () => ({
+    currency: 'USD',
+    timezone: 'UTC',
+    tableDensity: 'comfortable',
+  }),
+}));
+
 vi.mock('../../services/api', () => {
   return {
     default: {

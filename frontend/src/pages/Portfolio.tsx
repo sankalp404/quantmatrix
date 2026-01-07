@@ -6,6 +6,8 @@ import SortableTable, { type Column } from '../components/SortableTable';
 import FinvizHeatMap from '../components/charts/FinvizHeatMap';
 import AccountFilterWrapper from '../components/ui/AccountFilterWrapper';
 import { transformPortfolioToAccounts } from '../hooks/useAccountFilter';
+import { useUserPreferences } from '../hooks/useUserPreferences';
+import { formatMoney } from '../utils/format';
 
 type AnyPos = any;
 
@@ -18,6 +20,7 @@ const Portfolio: React.FC = () => {
   const q = usePortfolio();
   const data = (q.data as any) || {};
   const accounts = transformPortfolioToAccounts(data);
+  const { currency } = useUserPreferences();
 
   const positions: AnyPos[] = React.useMemo(() => {
     const accs = Object.values<any>(data?.accounts || {});
@@ -76,7 +79,7 @@ const Portfolio: React.FC = () => {
       isNumeric: true,
       render: (v) => (
         <Text fontSize="12px" color="fg.muted">
-          {Number(v || 0).toLocaleString(undefined, { style: 'currency', currency: 'USD', maximumFractionDigits: 0 })}
+          {formatMoney(Number(v || 0), currency, { maximumFractionDigits: 0 })}
         </Text>
       ),
       width: '160px',
@@ -90,7 +93,7 @@ const Portfolio: React.FC = () => {
       isNumeric: true,
       render: (v) => (
         <Text fontSize="12px" color={Number(v || 0) >= 0 ? 'green.500' : 'red.500'}>
-          {Number(v || 0).toLocaleString(undefined, { style: 'currency', currency: 'USD', maximumFractionDigits: 0 })}
+          {formatMoney(Number(v || 0), currency, { maximumFractionDigits: 0 })}
         </Text>
       ),
       width: '160px',

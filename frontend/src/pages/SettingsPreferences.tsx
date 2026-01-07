@@ -84,9 +84,9 @@ const SettingsPreferences: React.FC = () => {
                   fontSize: 12,
                   padding: '8px 10px',
                   borderRadius: 10,
-                  border: '1px solid rgba(255,255,255,0.14)',
-                  background: 'var(--chakra-colors-bg-input, #0b1220)',
-                  color: 'var(--chakra-colors-fg-default, #e5e7eb)',
+                  border: '1px solid var(--chakra-colors-border-subtle)',
+                  background: 'var(--chakra-colors-bg-input)',
+                  color: 'var(--chakra-colors-fg-default)',
                 }}
               >
                 <option value="system">Use system preference</option>
@@ -105,9 +105,9 @@ const SettingsPreferences: React.FC = () => {
                   fontSize: 12,
                   padding: '8px 10px',
                   borderRadius: 10,
-                  border: '1px solid rgba(255,255,255,0.14)',
-                  background: 'var(--chakra-colors-bg-input, #0b1220)',
-                  color: 'var(--chakra-colors-fg-default, #e5e7eb)',
+                  border: '1px solid var(--chakra-colors-border-subtle)',
+                  background: 'var(--chakra-colors-bg-input)',
+                  color: 'var(--chakra-colors-fg-default)',
                 }}
               >
                 <option value="comfortable">Comfortable</option>
@@ -131,9 +131,9 @@ const SettingsPreferences: React.FC = () => {
                     fontSize: 12,
                     padding: '8px 10px',
                     borderRadius: 10,
-                    border: '1px solid rgba(255,255,255,0.14)',
-                    background: 'var(--chakra-colors-bg-input, #0b1220)',
-                    color: 'var(--chakra-colors-fg-default, #e5e7eb)',
+                    border: '1px solid var(--chakra-colors-border-subtle)',
+                    background: 'var(--chakra-colors-bg-input)',
+                    color: 'var(--chakra-colors-fg-default)',
                   }}
                 >
                   {timezones.map((tz) => (

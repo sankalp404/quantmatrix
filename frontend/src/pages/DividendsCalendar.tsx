@@ -4,10 +4,13 @@ import { FiRefreshCw } from 'react-icons/fi';
 import { useQuery } from 'react-query';
 import SortableTable, { type Column } from '../components/SortableTable';
 import { portfolioApi } from '../services/api';
+import { useUserPreferences } from '../hooks/useUserPreferences';
+import { formatMoney } from '../utils/format';
 
 type DividendRow = any;
 
 const DividendsCalendar: React.FC = () => {
+  const { currency } = useUserPreferences();
   const q = useQuery(['dividends', 365], () => portfolioApi.getDividends(undefined, 365), {
     staleTime: 60_000,
     refetchInterval: 300_000,
@@ -46,7 +49,7 @@ const DividendsCalendar: React.FC = () => {
       isNumeric: true,
       render: (v) => (
         <Text fontSize="12px" color="fg.muted">
-          {Number(v || 0).toLocaleString(undefined, { style: 'currency', currency: 'USD', maximumFractionDigits: 2 })}
+          {formatMoney(Number(v || 0), currency, { maximumFractionDigits: 2 })}
         </Text>
       ),
       width: '160px',

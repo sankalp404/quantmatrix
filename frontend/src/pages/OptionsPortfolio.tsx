@@ -3,6 +3,8 @@ import { Box, HStack, Text, Button, Badge, CardRoot, CardBody } from '@chakra-ui
 import { FiRefreshCw } from 'react-icons/fi';
 import { usePortfolio } from '../hooks/usePortfolio';
 import SortableTable, { type Column } from '../components/SortableTable';
+import { useUserPreferences } from '../hooks/useUserPreferences';
+import { formatMoney } from '../utils/format';
 
 type AnyPos = any;
 
@@ -17,6 +19,7 @@ const OptionsPortfolio: React.FC = () => {
   const accounts = Object.values<any>(data?.accounts || {});
   const all: AnyPos[] = accounts.flatMap((a: any) => a?.all_positions || []);
   const options = all.filter(isOptionPosition);
+  const { currency } = useUserPreferences();
 
   const columns: Column<AnyPos>[] = [
     {
@@ -50,7 +53,7 @@ const OptionsPortfolio: React.FC = () => {
       isNumeric: true,
       render: (v) => (
         <Text fontSize="12px" color="fg.muted">
-          {Number(v || 0).toLocaleString(undefined, { style: 'currency', currency: 'USD', maximumFractionDigits: 0 })}
+          {formatMoney(Number(v || 0), currency, { maximumFractionDigits: 0 })}
         </Text>
       ),
       width: '160px',
@@ -64,7 +67,7 @@ const OptionsPortfolio: React.FC = () => {
       isNumeric: true,
       render: (v) => (
         <Text fontSize="12px" color={Number(v || 0) >= 0 ? 'green.500' : 'red.500'}>
-          {Number(v || 0).toLocaleString(undefined, { style: 'currency', currency: 'USD', maximumFractionDigits: 0 })}
+          {formatMoney(Number(v || 0), currency, { maximumFractionDigits: 0 })}
         </Text>
       ),
       width: '160px',

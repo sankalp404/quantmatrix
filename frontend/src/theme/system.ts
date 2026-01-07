@@ -81,6 +81,7 @@ export const system = createSystem(
               _dark: "#070B12",
             },
           },
+          // Slightly elevated surface behind cards/tables.
           "bg.panel": {
             value: {
               _light: "white",
@@ -91,6 +92,32 @@ export const system = createSystem(
             value: {
               _light: "white",
               _dark: "rgba(17, 24, 39, 0.72)",
+            },
+          },
+          // Subtle interactive surfaces (hover/selected states).
+          "bg.muted": {
+            value: {
+              _light: "rgba(15, 23, 42, 0.05)",
+              _dark: "rgba(255, 255, 255, 0.06)",
+            },
+          },
+          "bg.subtle": {
+            value: {
+              _light: "rgba(15, 23, 42, 0.08)",
+              _dark: "rgba(255, 255, 255, 0.10)",
+            },
+          },
+          // Layout surfaces (header/sidebar) so app chrome theme stays coherent.
+          "bg.header": {
+            value: {
+              _light: "white",
+              _dark: "#0B1220",
+            },
+          },
+          "bg.sidebar": {
+            value: {
+              _light: "white",
+              _dark: "#0B1220",
             },
           },
           "bg.input": {
