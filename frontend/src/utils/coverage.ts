@@ -81,14 +81,19 @@ const STATUS_COLOR_MAP: Record<string, string> = {
 
 const DEFAULT_COVERAGE_ACTIONS: CoverageAction[] = [
   {
-    label: 'Bootstrap Universe',
-    task_name: 'bootstrap_universe',
-    description: 'Runs refresh → tracked → backfills → recompute.',
+    label: 'Restore Daily Coverage (Tracked)',
+    task_name: 'restore_daily_coverage_tracked',
+    description: 'Guided operator flow: refresh → tracked → daily backfill → recompute → history → refresh coverage (no 5m).',
   },
   {
-    label: 'Schedule Coverage Monitor (hourly)',
-    task_name: 'schedule_coverage_monitor',
-    description: 'Creates an hourly schedule for monitor_coverage_health to refresh coverage cache.',
+    label: 'Backfill Daily (Stale Only)',
+    task_name: 'backfill_stale_daily',
+    description: 'Backfills daily bars only for symbols currently stale in coverage snapshot.',
+  },
+  {
+    label: 'Refresh Coverage Cache',
+    task_name: 'monitor_coverage_health',
+    description: 'Recomputes and caches the coverage snapshot.',
   },
   {
     label: 'Recompute Indicators',

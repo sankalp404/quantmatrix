@@ -222,12 +222,6 @@ const AdminDashboard: React.FC = () => {
                   <Button size="xs" variant="outline" onClick={() => void runNamedTask('update_tracked_symbol_cache', 'Update tracked')}>
                     Update Tracked
                   </Button>
-                  <Button size="xs" variant="outline" onClick={() => void runNamedTask('backfill_index_universe', 'Backfill indices (batch=20 default)')}>
-                    Backfill Indices (Daily)
-                  </Button>
-                  <Button size="xs" variant="outline" onClick={() => void runNamedTask('backfill_last_200_bars', 'Backfill last-200 (tracked)')}>
-                    Backfill Last-200 (Tracked)
-                  </Button>
                   <Button size="xs" variant="outline" onClick={() => void runNamedTask('recompute_indicators_universe', 'Recompute indicators')}>
                     Recompute Indicators
                   </Button>
