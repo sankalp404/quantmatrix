@@ -170,11 +170,11 @@ const AdminDashboard: React.FC = () => {
           <CoverageBucketsGrid groups={hero?.buckets || []} />
           <Box mt={3} display="flex" alignItems="center" justifyContent="space-between" gap={3} flexWrap="wrap">
             <Box>
-              <Text fontSize="xs" color="gray.400">
-                Source: <Text as="span" color="gray.200">{String(coverage?.meta?.source || '—')}</Text> •{' '}
-                Last refresh: <Text as="span" color="gray.200">{formatDateTime(coverage?.meta?.updated_at, timezone)}</Text>
-                {' '}• Monitor last run:{' '}
-                <Text as="span" color="gray.200">{fmtLastRun('taskstatus:monitor_coverage_health:last')}</Text>
+              <Text fontSize="xs" color="fg.muted">
+                Source: <Text as="span" color="fg.default">{String(coverage?.meta?.source || '—')}</Text> •{' '}
+                Last refresh: <Text as="span" color="fg.default">{formatDateTime(coverage?.meta?.updated_at, timezone)}</Text>
+                {' '}• Coverage monitor: <Text as="span" color="fg.default">{fmtLastRun('monitor_coverage_health')}</Text>
+                {' '}• Restore daily: <Text as="span" color="fg.default">{fmtLastRun('bootstrap_daily_coverage_tracked')}</Text>
               </Text>
             </Box>
             <Button size="sm" variant="outline" loading={refreshingCoverage} onClick={() => void refreshCoverageNow('manual')}>

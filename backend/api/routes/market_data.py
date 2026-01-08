@@ -328,29 +328,34 @@ async def get_snapshot(
 async def admin_task_status(
     user: User | None = Depends(get_optional_user),
 ) -> Dict[str, Any]:
-    """Return last-run status for key market-data tasks from Redis."""
+    """Return last-run status for key market-data tasks from Redis.
+
+    This endpoint intentionally returns a clean, task-name keyed payload (not raw Redis keys),
+    so UIs can render friendly labels without leaking storage details.
+    """
     try:
         from backend.services.market.market_data_service import market_data_service
 
         r = market_data_service.redis_client
-        keys = [
-            "taskstatus:refresh_index_constituents:last",
-            "taskstatus:update_tracked_symbol_cache:last",
-            "taskstatus:bootstrap_daily_coverage_tracked:last",
-            "taskstatus:backfill_last_200_bars:last",
-            "taskstatus:recompute_indicators_universe:last",
-            "taskstatus:record_daily_history:last",
-            "taskstatus:monitor_coverage_health:last",
+        tasks = [
+            "refresh_index_constituents",
+            "update_tracked_symbol_cache",
+            "bootstrap_daily_coverage_tracked",
+            "backfill_last_200_bars",
+            "recompute_indicators_universe",
+            "record_daily_history",
+            "monitor_coverage_health",
         ]
         out: Dict[str, Any] = {}
         import json as _json
 
-        for k in keys:
+        for task_name in tasks:
             try:
-                raw = r.get(k)
-                out[k] = _json.loads(raw) if raw else None
+                key = f"taskstatus:{task_name}:last"
+                raw = r.get(key)
+                out[task_name] = _json.loads(raw) if raw else None
             except Exception:
-                out[k] = None
+                out[task_name] = None
         return out
     except Exception as e:
         logger.error(f"task status error: {e}")
