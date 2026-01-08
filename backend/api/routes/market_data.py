@@ -334,11 +334,10 @@ async def admin_task_status(
 
         r = market_data_service.redis_client
         keys = [
-            "taskstatus:update_tracked_symbol_cache:last",
-            "taskstatus:backfill_new_tracked:last",
-            "taskstatus:backfill_last_200_bars:last",
-            "taskstatus:backfill_index_universe:last",
             "taskstatus:refresh_index_constituents:last",
+            "taskstatus:update_tracked_symbol_cache:last",
+            "taskstatus:bootstrap_daily_coverage_tracked:last",
+            "taskstatus:backfill_last_200_bars:last",
             "taskstatus:recompute_indicators_universe:last",
             "taskstatus:record_daily_history:last",
             "taskstatus:monitor_coverage_health:last",

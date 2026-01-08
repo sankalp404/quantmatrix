@@ -341,38 +341,6 @@ def update_tracked_symbol_cache() -> dict:
         session.close()
 
 
-@shared_task(name="backend.tasks.market_data_tasks.backfill_new_tracked")
-@task_run("backfill_new_tracked")
-def backfill_new_tracked(batch_size: int = 50) -> dict:
-    """Backfill OHLCV for symbols listed in Redis tracked:new, then clear it."""
-    _set_task_status("backfill_new_tracked", "running")
-    redis = market_data_service.redis_client
-    raw = redis.get("tracked:new")
-    if not raw:
-        res = {"status": "ok", "new": 0}
-        _set_task_status("backfill_new_tracked", "ok", res)
-        return res
-    try:
-        symbols = json.loads(raw)
-    except Exception:
-        symbols = []
-    if not symbols:
-        res = {"status": "ok", "new": 0}
-        _set_task_status("backfill_new_tracked", "ok", res)
-        return res
-    # Run batched backfill using existing helper
-    done = 0
-    for i in range(0, len(symbols), batch_size):
-        chunk = symbols[i : i + batch_size]
-        res = backfill_symbols(chunk)
-        done += int(res.get("backfilled", 0))
-    # Clear the new list after backfill
-    redis.delete("tracked:new")
-    res = {"status": "ok", "requested": len(symbols), "backfilled_batches": done}
-    _set_task_status("backfill_new_tracked", "ok", res)
-    return res
-
-
 # ============================= Backfill =============================
 
 
@@ -578,59 +546,6 @@ def backfill_symbols(symbols: List[str]) -> dict:
         session.close()
 
 
-@shared_task(name="backend.tasks.market_data_tasks.backfill_index_universe")
-@task_run("backfill_index_universe")
-def backfill_index_universe(batch_size: int = 100) -> dict:
-    """Bootstrap-only: backfill last-200 OHLCV for SP500/NASDAQ100/DOW30 (batched)."""
-    _set_task_status("backfill_index_universe", "running")
-    loop = _setup_event_loop()
-    symbols: Set[str] = set()
-    try:
-        for idx in ["SP500", "NASDAQ100", "DOW30"]:
-            try:
-                cons = loop.run_until_complete(market_data_service.get_index_constituents(idx))
-                symbols.update(cons)
-            except Exception:
-                continue
-    finally:
-        loop.close()
-    symbols = {s.upper() for s in symbols if s}
-    total = len(symbols)
-    done = 0
-    errors = 0
-    ordered = sorted(symbols)
-    provider_usage: Dict[str, int] = {}
-    throttle = getattr(settings, "MARKET_PROVIDER_POLICY", "paid").lower() != "paid"
-    sleep_fn = None
-    if throttle:
-        try:
-            import time as _time
-
-            sleep_fn = _time.sleep
-        except Exception:
-            sleep_fn = None
-    for i in range(0, total, batch_size):
-        chunk = ordered[i : i + batch_size]
-        res = backfill_symbols(chunk)
-        done += int(res.get("backfilled", 0))
-        errors += int(res.get("errors", 0))
-        for provider, count in (res.get("provider_usage") or {}).items():
-            provider_usage[provider] = provider_usage.get(provider, 0) + count
-        # Adaptive wait only in free-tier mode
-        if throttle and sleep_fn:
-            sleep_fn(2.5)
-    res = {
-        "status": "ok",
-        "total_symbols": total,
-        "completed_batches": (total + batch_size - 1) // batch_size,
-        "backfilled": done,
-        "errors": errors,
-        "provider_usage": provider_usage,
-    }
-    _set_task_status("backfill_index_universe", "ok", res)
-    return res
-
-
 # ============================= Index Constituents =============================
 
 
@@ -718,70 +633,6 @@ def refresh_index_constituents() -> dict:
     finally:
         session.close()
         loop.close()
-
-
-@shared_task(name="backend.tasks.market_data_tasks.bootstrap_universe")
-@task_run("bootstrap_universe", lock_key=lambda: "bootstrap_universe")
-def bootstrap_universe() -> dict:
-    """Run the full universe bootstrap chain in-process and return a rollup."""
-    def _summarize(step: str, payload: dict | None) -> str:
-        data = payload or {}
-        if step == "refresh_index_constituents":
-            idx = data.get("indices") or {}
-            parts = [f"{name}: {stats.get('fetched', 0)} symbols via {stats.get('provider_used', 'n/a')}" for name, stats in idx.items()]
-            return "; ".join(parts) or "Refreshed index members"
-        if step == "update_tracked_symbol_cache":
-            return f"{data.get('tracked_all', 0)} tracked ({data.get('new', 0)} new)"
-        if step == "backfill_index_universe":
-            return f"Backfilled {data.get('backfilled', 0)} of {data.get('total_symbols', 0)} symbols"
-        if step == "backfill_last_200_bars":
-            return f"Inserted {data.get('bars_inserted_total', 0)} bars across {data.get('tracked_total', 0)} tracked"
-        if step == "backfill_5m_last_n_days":
-            return f"5m processed {data.get('processed', 0)} symbols (n={data.get('symbols', 0)})"
-        if step == "recompute_indicators_universe":
-            return f"Recomputed indicators for {data.get('processed', data.get('symbols', 0))} symbols"
-        if step == "record_daily_history":
-            return f"Wrote {data.get('written', 0)} snapshot rows"
-        return data.get("status", "ok")
-
-    rollup: dict = {"steps": []}
-
-    def _append(step_name: str, result: dict) -> None:
-        rollup["steps"].append(
-            {
-                "name": step_name,
-                "summary": _summarize(step_name, result),
-                "result": result,
-            }
-        )
-
-    res1 = refresh_index_constituents()
-    _append("refresh_index_constituents", res1)
-
-    res2 = update_tracked_symbol_cache()
-    _append("update_tracked_symbol_cache", res2)
-
-    res3 = backfill_index_universe()
-    _append("backfill_index_universe", res3)
-
-    res4 = backfill_last_200_bars()
-    _append("backfill_last_200_bars", res4)
-
-    if _is_5m_backfill_enabled():
-        res5 = backfill_5m_last_n_days(n_days=1, batch_size=50)
-    else:
-        res5 = {"status": "skipped", "reason": "5m backfill disabled by admin toggle"}
-    _append("backfill_5m_last_n_days", res5)
-
-    res6 = recompute_indicators_universe(batch_size=50)
-    _append("recompute_indicators_universe", res6)
-
-    res7 = record_daily_history()
-    _append("record_daily_history", res7)
-
-    rollup["status"] = "ok"
-    rollup["overall_summary"] = "; ".join(step["summary"] for step in rollup["steps"] if step.get("summary"))
-    return rollup
 
 
 # ============================= Coverage Restore (Daily, Tracked Universe) =============================

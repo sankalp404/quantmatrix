@@ -8,8 +8,8 @@ End-to-end market data pipeline built around a simple, scalable principle: fetch
 Task Inventory
 --------------
 Backfill (writes `price_data`)
-- backfill_index_universe(batch_size=20): Fetch daily OHLCV for SP500/NASDAQ100/DOW30 (batched; delta-only).
-- backfill_last_200_bars(): Fetch daily OHLCV for portfolio-held symbols (delta-only).
+- backfill_last_200_bars(): Fetch last-year-ish daily OHLCV for tracked symbols (delta-only; concurrent fetch, bulk upsert).
+- backfill_symbols(symbols=[...]): Fetch last-year-ish daily OHLCV for a provided list (delta-only).
 
 Indicators (writes `market_analysis_cache`)
 - recompute_indicators_universe(batch_size=50): Consolidated compute for indices + portfolio from PriceData. Fills all core indicators (RSI, SMA/EMA, MACD, ATR, perf windows, MA bucket, distances) and chart metrics (TD counts, gaps, trendlines) in one pass.
@@ -17,7 +17,10 @@ Indicators (writes `market_analysis_cache`)
 Constituents (DB + cache)
 - refresh_index_constituents(): Persist SP500/NASDAQ100/DOW30 to `index_constituents`, track `is_active`/first/last seen.
 - update_tracked_symbol_cache(): Build Redis `tracked:all` and `tracked:new` from DB (index_constituents ∪ portfolio).
-- backfill_new_tracked(): Backfill only newly tracked symbols from Redis `tracked:new`, then clear it.
+
+Coverage & operator flow
+- bootstrap_daily_coverage_tracked(): Primary operator chain (refresh → tracked → daily backfill → recompute → history → coverage refresh; no 5m).
+- monitor_coverage_health(): Computes and caches coverage snapshot/history in Redis.
 
 History (writes `market_analysis_history`)
 - record_daily_history(symbols=None): Persist immutable daily snapshots (denormalized heads + full payload). Defaults to portfolio symbols.
@@ -25,21 +28,14 @@ History (writes `market_analysis_history`)
 Schedules (Celery Beat)
 -----------------------
 Configured in `backend/tasks/celery_app.py` (UTC):
-- weekly-refresh-index-constituents: weekly Sunday morning
-- update-tracked-symbol-cache: nightly build tracked set + delta list
-- backfill-new-tracked: nightly backfill of only additions
-- backfill-last-200: nightly safety backfill for portfolio
-- recompute-indicators-universe: nightly consolidated indicators + chart metrics
-- record-daily-history: after close
+- restore-daily-coverage-tracked: nightly guided operator chain
+- monitor-coverage-health-hourly: hourly coverage cache refresh
 - ibkr-daily-flex-sync: nightly comprehensive FlexQuery sync
 
 Runbooks
 --------
-Bootstrap (full universe)
-1) `backfill_index_universe.delay(batch_size=30)` (10–20m)
-2) `backfill_last_200_bars.delay()` (1–3m)
-3) `recompute_indicators_universe.delay(batch_size=60)` (fast; local-only)
-4) `record_daily_history.delay()` (optional)
+Daily restore (recommended)
+1) `bootstrap_daily_coverage_tracked.delay()`
 
 Daily manual refresh
 - `recompute_indicators_universe.delay(batch_size=60)`

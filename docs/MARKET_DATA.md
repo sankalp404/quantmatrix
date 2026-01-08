@@ -98,12 +98,8 @@ Notes on retention
    - `record_daily_history` writes one row per `(symbol, as_of_date)` into `MarketAnalysisHistory` with headline fields + full payload
 6) Scheduling
    - Celery Beat triggers:
-     - weekly index refresh → `refresh_index_constituents`
-     - nightly tracked set build → `update_tracked_symbol_cache`
-     - nightly backfill of new tracked symbols → `backfill_new_tracked`
-     - nightly delta backfill safety → `backfill_last_200_bars`
-     - nightly universe indicators recompute → `recompute_indicators_universe`
-     - nightly history write → `record_daily_history`
+     - nightly guided daily restore → `bootstrap_daily_coverage_tracked`
+     - hourly coverage cache refresh → `monitor_coverage_health`
      - nightly 5m backfill → `backfill_5m_last_n_days`
      - retention enforcement (5m) → `enforce_price_data_retention`
 

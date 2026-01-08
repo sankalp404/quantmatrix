@@ -56,29 +56,14 @@ ACCOUNT_BEAT_SCHEDULE = {
 
 MARKET_DATA_BEAT_SCHEDULE = {
     # Nightly (UTC) – Market Data
-    "update-tracked-symbol-cache": {
-        "task": "backend.tasks.market_data_tasks.update_tracked_symbol_cache",
-        "schedule": crontab(hour=2, minute=30),
-        "args": (),
-    },
-    "backfill-new-tracked": {
-        "task": "backend.tasks.market_data_tasks.backfill_new_tracked",
-        "schedule": crontab(hour=2, minute=45),
-        "args": (),
-    },
-    "backfill-last-200": {
-        "task": "backend.tasks.market_data_tasks.backfill_last_200_bars",
+    "restore-daily-coverage-tracked": {
+        "task": "backend.tasks.market_data_tasks.bootstrap_daily_coverage_tracked",
         "schedule": crontab(hour=3, minute=0),
         "args": (),
     },
-    "record-daily-history": {
-        "task": "backend.tasks.market_data_tasks.record_daily_history",
-        "schedule": crontab(hour=3, minute=20),
-        "args": (),
-    },
-    "recompute-indicators-universe": {
-        "task": "backend.tasks.market_data_tasks.recompute_indicators_universe",
-        "schedule": crontab(hour=3, minute=35),
+    "monitor-coverage-health-hourly": {
+        "task": "backend.tasks.market_data_tasks.monitor_coverage_health",
+        "schedule": crontab(minute=0, hour="*"),
         "args": (),
     },
 }
