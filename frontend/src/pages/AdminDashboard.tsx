@@ -85,8 +85,12 @@ const AdminDashboard: React.FC = () => {
     setBackfillingStale(true);
     try {
       const res = await api.post('/market-data/admin/coverage/backfill-stale-daily');
-      const backfilled = res?.data?.backfilled;
-      toast.success(typeof backfilled === 'number' ? `Queued stale-only backfill (${backfilled})` : 'Queued stale-only backfill');
+      const staleCandidates = res?.data?.stale_candidates;
+      toast.success(
+        typeof staleCandidates === 'number'
+          ? `Queued stale-only backfill (${staleCandidates} symbols)`
+          : 'Queued stale-only backfill',
+      );
       setTimeout(() => void refreshCoverage(), 1500);
       setTimeout(() => void refreshCoverage(), 4500);
       void loadTaskStatus();

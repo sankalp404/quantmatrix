@@ -38,6 +38,7 @@ from backend.api.routes.utils import serialize_job_runs
 from backend.tasks.market_data_tasks import backfill_5m_last_n_days, enforce_price_data_retention, backfill_5m_for_symbols
 from backend.tasks.market_data_tasks import monitor_coverage_health
 from backend.tasks.market_data_tasks import bootstrap_daily_coverage_tracked
+from backend.tasks.market_data_tasks import backfill_stale_daily_tracked
 from backend.config import settings
 
 logger = logging.getLogger(__name__)
@@ -860,23 +861,36 @@ async def set_backfill_5m_toggle(
 @router.post("/admin/coverage/backfill-stale-daily")
 async def backfill_stale_daily(
     admin_user: User = Depends(get_admin_user),
+    db: Session = Depends(get_db),
 ) -> Dict[str, Any]:
     """
     Backfill daily bars for symbols currently marked stale (>48h) in coverage snapshot.
     """
     svc = MarketDataService()
-    session = get_db()()
     try:
-        snap = svc.coverage_snapshot(session)
-        stale = [s.get("symbol") for s in snap.get("daily", {}).get("stale", []) if s.get("symbol")]
-        if not stale:
-            return {"status": "ok", "backfilled": 0, "symbols": []}
-        res = backfill_symbols(stale)
-        return {"status": "ok", "backfilled": res.get("backfilled"), "errors": res.get("errors"), "symbols": stale}
+        # Provide an estimate for UI (full stale+missing set, not sample-capped).
+        tracked: List[str] = []
+        try:
+            raw = svc.redis_client.get("tracked:all")
+            tracked = json.loads(raw.decode() if isinstance(raw, (bytes, bytearray)) else raw) if raw else []  # type: ignore[arg-type]
+        except Exception:
+            tracked = []
+        tracked = sorted({str(s).upper() for s in (tracked or []) if s})
+        if not tracked:
+            tracked = sorted({str(s).upper() for (s,) in db.query(PriceData.symbol).distinct().all() if s})
+
+        _, stale_full = svc._compute_interval_coverage_for_symbols(
+            db,
+            symbols=tracked,
+            interval="1d",
+            now_utc=datetime.utcnow(),
+            return_full_stale=True,
+        )
+        stale_candidates = len(stale_full or [])
+        enq = _enqueue_task(backfill_stale_daily_tracked)
+        return {**enq, "stale_candidates": stale_candidates}
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
-    finally:
-        session.close()
 
 
 @router.post("/admin/coverage/refresh")

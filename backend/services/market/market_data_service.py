@@ -5,6 +5,7 @@ import json
 import logging
 import random
 from datetime import datetime
+from datetime import timedelta
 from enum import Enum
 from typing import Any, Dict, List, Optional
 from datetime import timedelta
@@ -1122,56 +1123,97 @@ class MarketDataService:
         return await self.get_snapshot(symbol)
 
     # ---------------------- Coverage instrumentation ----------------------
-    def coverage_snapshot(self, db: Session) -> Dict[str, Any]:
-        """Compute coverage freshness, stale lists, and tracked stats for instrumentation/UI."""
-        now = datetime.utcnow()
+    def _compute_interval_coverage_for_symbols(
+        self,
+        db: Session,
+        *,
+        symbols: List[str],
+        interval: str,
+        now_utc: datetime | None = None,
+        stale_sample_limit: int | None = None,
+        return_full_stale: bool = False,
+    ) -> tuple[Dict[str, Any], List[str] | None]:
+        """Compute freshness buckets and stale/missing sets for a given symbol universe.
 
-        symbols = [s for (s,) in db.query(PriceData.symbol).distinct().all() if s]
+        - Includes missing symbols (no bars) in the `none` bucket.
+        - Returns a sampled `stale` list for UI, but can also return the full stale symbol list.
+        """
+        now = now_utc or datetime.utcnow()
+        safe_symbols = sorted({str(s).upper() for s in (symbols or []) if s})
+        sym_set = set(safe_symbols)
+        if stale_sample_limit is None:
+            stale_sample_limit = int(getattr(settings, "COVERAGE_STALE_SAMPLE", 50))
 
-        def bucketize(ts: Optional[datetime]) -> str:
+        last_dt: Dict[str, datetime | None] = {s: None for s in safe_symbols}
+        if sym_set:
+            rows = (
+                db.query(PriceData.symbol, PriceData.date)
+                .filter(PriceData.interval == interval, PriceData.symbol.in_(sym_set))
+                .order_by(PriceData.symbol.asc(), PriceData.date.desc())
+                .distinct(PriceData.symbol)
+                .all()
+            )
+            for sym, dt in rows:
+                if sym:
+                    last_dt[str(sym).upper()] = dt
+
+        def _bucketize(ts: datetime | None) -> str:
             if not ts:
                 return "none"
-            age = (now - ts).total_seconds()
-            if age <= 24 * 3600:
+            age = now - ts
+            if age <= timedelta(hours=24):
                 return "<=24h"
-            if age <= 48 * 3600:
+            if age <= timedelta(hours=48):
                 return "24-48h"
             return ">48h"
 
-        def last_map(interval: str) -> Dict[str, str | None]:
-            rows = (
-                db.query(PriceData.symbol, PriceData.date)
-                .filter(PriceData.interval == interval)
-                .order_by(PriceData.symbol.asc(), PriceData.date.desc())
-                .all()
+        freshness = {"<=24h": 0, "24-48h": 0, ">48h": 0, "none": 0}
+        stale_items: List[Dict[str, Any]] = []
+        stale_full: List[str] = []
+
+        for sym in safe_symbols:
+            dt = last_dt.get(sym)
+            bucket = _bucketize(dt)
+            freshness[bucket] = int(freshness.get(bucket, 0)) + 1
+            if bucket in (">48h", "none"):
+                stale_items.append(
+                    {"symbol": sym, "last": dt.isoformat() if dt else None, "bucket": bucket}
+                )
+                stale_full.append(sym)
+
+        stale_items.sort(
+            key=lambda item: (
+                item.get("bucket") or "",
+                item.get("last") or "",
+                item.get("symbol") or "",
             )
-            latest: Dict[str, str | None] = {}
-            for sym, ts in rows:
-                if sym not in latest:
-                    latest[sym] = ts.isoformat() if ts else None
-            return latest
+        )
+        stale_sample = stale_items[: max(0, int(stale_sample_limit))]
 
-        daily_last = last_map("1d")
-        m5_last = last_map("5m")
+        fresh_24 = int(freshness["<=24h"])
+        fresh_48 = int(freshness["24-48h"])
+        stale_48h = int(freshness[">48h"])
+        missing = int(freshness["none"])
 
-        def build_buckets(last_dict: Dict[str, str | None]) -> Dict[str, int]:
-            buckets = {"<=24h": 0, "24-48h": 0, ">48h": 0, "none": 0}
-            for iso in last_dict.values():
-                dt = datetime.fromisoformat(iso) if iso else None
-                buckets[bucketize(dt)] += 1
-            return buckets
+        last_iso_map: Dict[str, str | None] = {s: (last_dt[s].isoformat() if last_dt[s] else None) for s in safe_symbols}
 
-        stale_limit = int(getattr(settings, "COVERAGE_STALE_SAMPLE", 50))
+        section: Dict[str, Any] = {
+            # Count = within freshness SLA (<=48h).
+            "count": fresh_24 + fresh_48,
+            "last": last_iso_map,
+            "freshness": freshness,
+            "stale": stale_sample,
+            "fresh_24h": fresh_24,
+            "fresh_48h": fresh_48,
+            "fresh_gt48h": 0,
+            "stale_48h": stale_48h,
+            "missing": missing,
+        }
+        return section, (stale_full if return_full_stale else None)
 
-        def stale_details(last_dict: Dict[str, str | None]) -> List[Dict[str, Any]]:
-            items: List[Dict[str, Any]] = []
-            for sym, iso in last_dict.items():
-                dt = datetime.fromisoformat(iso) if iso else None
-                bucket = bucketize(dt)
-                if bucket in (">48h", "none"):
-                    items.append({"symbol": sym, "last": iso, "bucket": bucket})
-            items.sort(key=lambda item: item.get("last") or "")
-            return items[:stale_limit]
+    def coverage_snapshot(self, db: Session) -> Dict[str, Any]:
+        """Compute coverage freshness, stale lists, and tracked stats for instrumentation/UI."""
+        now = datetime.utcnow()
 
         idx_counts: Dict[str, int] = {}
         for idx in ("SP500", "NASDAQ100", "DOW30"):
@@ -1182,33 +1224,44 @@ class MarketDataService:
             )
 
         tracked_symbols: List[str] = []
+        tracked_from_redis = False
         try:
             raw = self.redis_client.get("tracked:all")
             tracked_symbols = json.loads(raw) if raw else []
         except Exception:
             tracked_symbols = []
         tracked_symbols = [str(s).upper() for s in tracked_symbols if s]
+        tracked_from_redis = bool(tracked_symbols)
         tracked_total = len(set(tracked_symbols))
-        total_symbols = tracked_total or len(set(symbols))
+        if tracked_total:
+            universe = sorted(set(tracked_symbols))
+        else:
+            universe = sorted({str(s).upper() for (s,) in db.query(PriceData.symbol).distinct().all() if s})
+        total_symbols = len(universe)
+
+        daily_section, _ = self._compute_interval_coverage_for_symbols(
+            db,
+            symbols=universe,
+            interval="1d",
+            now_utc=now,
+            return_full_stale=False,
+        )
+        m5_section, _ = self._compute_interval_coverage_for_symbols(
+            db,
+            symbols=universe,
+            interval="5m",
+            now_utc=now,
+            return_full_stale=False,
+        )
 
         snapshot = {
             "generated_at": now.isoformat(),
             "symbols": total_symbols,
-            "tracked_count": tracked_total,
+            "tracked_count": tracked_total if tracked_from_redis else total_symbols,
             "tracked_sample": tracked_symbols[:10],
             "indices": idx_counts,
-            "daily": {
-                "count": len(daily_last),
-                "last": daily_last,
-                "freshness": build_buckets(daily_last),
-                "stale": stale_details(daily_last),
-            },
-            "m5": {
-                "count": len(m5_last),
-                "last": m5_last,
-                "freshness": build_buckets(m5_last),
-                "stale": stale_details(m5_last),
-            },
+            "daily": daily_section,
+            "m5": m5_section,
         }
         snapshot["status"] = compute_coverage_status(snapshot)
         return snapshot

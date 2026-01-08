@@ -707,6 +707,69 @@ def bootstrap_daily_coverage_tracked() -> dict:
     return rollup
 
 
+# ============================= Backfill stale daily (Tracked universe) =============================
+@shared_task(name="backend.tasks.market_data_tasks.backfill_stale_daily_tracked")
+@task_run("backfill_stale_daily_tracked", lock_key=lambda: "backfill_stale_daily_tracked")
+def backfill_stale_daily_tracked() -> dict:
+    """Backfill daily bars for ALL stale/missing symbols in the tracked universe.
+
+    This is the safe replacement for any UI/operator flow that previously used a sampled
+    stale list (e.g., COVERAGE_STALE_SAMPLE). Here we compute the full stale+missing set.
+    """
+    _set_task_status("backfill_stale_daily_tracked", "running")
+    session = SessionLocal()
+    try:
+        # Universe: prefer Redis tracked:all; fallback to DB-derived tracked universe.
+        tracked: List[str] = []
+        try:
+            raw = market_data_service.redis_client.get("tracked:all")
+            tracked = json.loads(raw) if raw else []
+        except Exception:
+            tracked = []
+        tracked = sorted({str(s).upper() for s in (tracked or []) if s})
+        if not tracked:
+            tracked = sorted({s.upper() for s in _get_tracked_universe_from_db(session)})
+
+        # Compute stale+missing using the same bucketing logic as coverage.
+        section, stale_full = market_data_service._compute_interval_coverage_for_symbols(
+            session,
+            symbols=tracked,
+            interval="1d",
+            now_utc=datetime.utcnow(),
+            return_full_stale=True,
+        )
+        stale_symbols = stale_full or []
+
+        if not stale_symbols:
+            res = {
+                "status": "ok",
+                "tracked_total": len(tracked),
+                "stale_candidates": 0,
+                "note": "No stale/missing daily symbols detected",
+                "daily": {
+                    "freshness": section.get("freshness"),
+                    "stale_48h": section.get("stale_48h"),
+                    "missing": section.get("missing"),
+                },
+            }
+            _set_task_status("backfill_stale_daily_tracked", "ok", res)
+            return res
+
+        backfill_res = backfill_symbols(stale_symbols)
+        monitor_res = monitor_coverage_health()
+        res = {
+            "status": "ok",
+            "tracked_total": len(tracked),
+            "stale_candidates": len(stale_symbols),
+            "backfill": backfill_res,
+            "monitor": monitor_res,
+        }
+        _set_task_status("backfill_stale_daily_tracked", "ok", res)
+        return res
+    finally:
+        session.close()
+
+
 # ============================= Recompute Indicators and Chart Metrics =============================
 
 
@@ -982,61 +1045,14 @@ def monitor_coverage_health() -> dict:
     session = SessionLocal()
     try:
         snapshot = market_data_service.coverage_snapshot(session)
-
-        # Recompute freshness from DB to avoid stale cache artifacts
-        def recompute_from_db():
-            last_daily_rows = (
-                session.query(PriceData.symbol, PriceData.date)
-                .filter(PriceData.interval == "1d")
-                .order_by(PriceData.symbol.asc(), PriceData.date.desc())
-                .distinct(PriceData.symbol)
-                .all()
-            )
-            total = len(last_daily_rows)
-            fresh_24 = fresh_48 = 0
-            stale = 0
-            from datetime import timedelta
-
-            now = datetime.utcnow()
-            stale_symbols = []
-            for sym, dt in last_daily_rows:
-                if not dt:
-                    stale += 1
-                    stale_symbols.append(sym)
-                    continue
-                age = now - dt
-                if age <= timedelta(hours=24):
-                    fresh_24 += 1
-                elif age <= timedelta(hours=48):
-                    fresh_48 += 1
-                else:
-                    stale += 1
-                    stale_symbols.append(sym)
-
-            daily_count = fresh_24 + fresh_48
-            daily_pct = (daily_count / total * 100.0) if total > 0 else 0.0
-            daily_pct = max(0.0, min(100.0, daily_pct))
-
-            snapshot["symbols"] = total
-            snapshot["tracked_count"] = total
-            snapshot["daily"] = {
-                "count": daily_count,
-                "fresh_24h": fresh_24,
-                "fresh_48h": fresh_48,
-                "fresh_gt48h": 0,
-                "stale_48h": stale,
-                "stale": [{"symbol": s} for s in stale_symbols],
-            }
-            status = snapshot.get("status") or {}
-            status["daily_pct"] = daily_pct
-            status["stale_daily"] = stale
-            status["tracked_total"] = total
-            status["universe"] = total
-            status["symbols"] = total
-            snapshot["status"] = status
-            return status
-
-        status_info = recompute_from_db()
+        # Ensure status logic respects the 5m toggle (ignore-5m behavior).
+        try:
+            snapshot.setdefault("meta", {})["backfill_5m_enabled"] = _is_5m_backfill_enabled()
+        except Exception:
+            pass
+        from backend.services.market.market_data_service import compute_coverage_status
+        status_info = compute_coverage_status(snapshot)
+        snapshot["status"] = status_info
         payload = {
             "snapshot": snapshot,
             "updated_at": datetime.utcnow().isoformat(),
