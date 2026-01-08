@@ -3,6 +3,7 @@ from __future__ import annotations
 import asyncio
 import json
 import logging
+import random
 from datetime import datetime
 from enum import Enum
 from typing import Any, Dict, List, Optional
@@ -242,6 +243,75 @@ class MarketDataService:
         return False
 
     # ---------------------- Quotes and history ----------------------
+    @staticmethod
+    def _extract_http_status(exc: Exception) -> Optional[int]:
+        """Best-effort extraction of HTTP status code from provider exceptions."""
+        try:
+            # requests/httpx style
+            resp = getattr(exc, "response", None)
+            if resp is not None:
+                code = getattr(resp, "status_code", None)
+                if isinstance(code, int):
+                    return code
+        except Exception:
+            pass
+        for attr in ("status_code", "status"):
+            try:
+                code = getattr(exc, attr, None)
+                if isinstance(code, int):
+                    return code
+            except Exception:
+                continue
+        # Last resort: parse digits from message
+        try:
+            msg = str(exc)
+            for needle in ("429", "500", "502", "503", "504"):
+                if needle in msg:
+                    return int(needle)
+        except Exception:
+            pass
+        return None
+
+    async def _call_blocking_with_retries(
+        self,
+        fn,
+        *args,
+        attempts: Optional[int] = None,
+        max_delay_seconds: Optional[float] = None,
+        **kwargs,
+    ):
+        """Run a blocking provider call in a thread with bounded exponential backoff.
+
+        We use this to make provider calls concurrency-safe (they don't block the event loop),
+        and resilient (429/5xx/backoff and continue).
+        """
+        n = int(attempts or int(getattr(settings, "MARKET_BACKFILL_RETRY_ATTEMPTS", 6)))
+        max_delay = float(
+            max_delay_seconds
+            if max_delay_seconds is not None
+            else float(getattr(settings, "MARKET_BACKFILL_RETRY_MAX_DELAY_SECONDS", 60.0))
+        )
+        last_exc: Optional[Exception] = None
+        for i in range(max(1, n)):
+            try:
+                return await asyncio.to_thread(fn, *args, **kwargs)
+            except Exception as exc:  # noqa: BLE001 (provider libs raise wide exceptions)
+                last_exc = exc
+                status = self._extract_http_status(exc)
+                # Backoff for rate limits and transient upstream errors; otherwise keep it short.
+                is_rate_limited = status == 429 or "Too Many" in str(exc)
+                is_transient = status in (429, 500, 502, 503, 504) or is_rate_limited
+                if i >= n - 1:
+                    break
+                base = 0.8 if is_transient else 0.2
+                delay = min(max_delay, base * (2**i))
+                # jitter in [0.75x, 1.25x]
+                delay = delay * (0.75 + random.random() * 0.5)
+                await asyncio.sleep(delay)
+        if last_exc:
+            raise last_exc
+        raise RuntimeError("provider call failed without exception")
+
     async def get_current_price(self, symbol: str) -> Optional[float]:
         """Get current price for a symbol with provider policy and 60s Redis cache."""
         cache_key = f"price:{symbol}"
@@ -335,13 +405,13 @@ class MarketDataService:
                 if provider == APIProvider.FMP:
                     # Support daily and intraday (5m) for FMP
                     if interval == "5m":
-                        df = await self._get_historical_fmp_5m(symbol, period)
+                        df = await self._call_blocking_with_retries(self._get_historical_fmp_5m_sync, symbol, period)
                     else:
-                        df = await self._get_historical_fmp(symbol, period, interval)
+                        df = await self._call_blocking_with_retries(self._get_historical_fmp_sync, symbol, period, interval)
                 elif provider == APIProvider.TWELVE_DATA:
-                    df = await self._get_historical_twelve_data(symbol, period, interval)
+                    df = await self._call_blocking_with_retries(self._get_historical_twelve_data_sync, symbol, period, interval)
                 elif provider == APIProvider.YFINANCE:
-                    df = await self._get_historical_yfinance(symbol, period, interval)
+                    df = await self._call_blocking_with_retries(self._get_historical_yfinance_sync, symbol, period, interval)
                 elif provider == APIProvider.FINNHUB:
                     df = None  # not implemented
                 else:
@@ -359,7 +429,7 @@ class MarketDataService:
                 continue
         return (None, provider_used) if return_provider else None
 
-    async def _get_historical_yfinance(
+    def _get_historical_yfinance_sync(
         self, symbol: str, period: str, interval: str
     ) -> Optional[pd.DataFrame]:
         try:
@@ -375,7 +445,7 @@ class MarketDataService:
         except Exception:
             return None
 
-    async def _get_historical_fmp_5m(self, symbol: str, period: str) -> Optional[pd.DataFrame]:
+    def _get_historical_fmp_5m_sync(self, symbol: str, period: str) -> Optional[pd.DataFrame]:
         """Fetch intraday 5m bars from FMP historical_chart.
 
         FMP returns newest-first timestamps. `period` is best-effort: we trim using days.
@@ -408,7 +478,7 @@ class MarketDataService:
         except Exception:
             return None
 
-    async def _get_historical_twelve_data(
+    def _get_historical_twelve_data_sync(
         self, symbol: str, period: str, interval: str
     ) -> Optional[pd.DataFrame]:
         if not self.twelve_data_client:
@@ -444,7 +514,7 @@ class MarketDataService:
         except Exception:
             return None
 
-    async def _get_historical_fmp(
+    def _get_historical_fmp_sync(
         self, symbol: str, period: str, interval: str
     ) -> Optional[pd.DataFrame]:
         try:
@@ -822,12 +892,13 @@ class MarketDataService:
         except Exception as exc:
             raise RuntimeError("PostgreSQL dialect or models unavailable") from exc
 
-        executed = 0
-        # Iterate in chronological order for clarity
+        # Build rows in chronological order for clarity (and stable delta filtering).
         try:
             df_iter = df.sort_index(ascending=True).iterrows()
         except Exception:
             df_iter = df.iterrows()
+
+        rows: list[dict[str, Any]] = []
         for ts, row in df_iter:
             try:
                 pd_date = (
@@ -856,34 +927,39 @@ class MarketDataService:
                 else close_val
             )
             vol_val = int(row.get("Volume") or 0) if "Volume" in row else 0
-            stmt = pg_insert(PriceData).values(
-                symbol=symbol,
-                date=pd_date,
-                open_price=open_val,
-                high_price=high_val,
-                low_price=low_val,
-                close_price=close_val,
-                adjusted_close=close_val,
-                volume=vol_val,
-                interval=interval,
-                data_source=data_source,
-                is_adjusted=is_adjusted,
-            )
-            stmt = stmt.on_conflict_do_update(
-                constraint="uq_symbol_date_interval",
-                set_={
+            rows.append(
+                {
+                    "symbol": symbol,
+                    "date": pd_date,
+                    "open_price": open_val,
+                    "high_price": high_val,
+                    "low_price": low_val,
+                    "close_price": close_val,
+                    "adjusted_close": close_val,
+                    "volume": vol_val,
+                    "interval": interval,
                     "data_source": data_source,
-                },
-                where=or_(
-                    PriceData.data_source.is_(None),
-                    PriceData.data_source.in_(["provider", "fmp_td_yf"]),
-                ),
+                    "is_adjusted": is_adjusted,
+                }
             )
-            db.execute(stmt)
-            executed += 1
-        if executed:
-            db.commit()
-        return executed
+
+        if not rows:
+            return 0
+
+        stmt = pg_insert(PriceData).values(rows)
+        stmt = stmt.on_conflict_do_update(
+            constraint="uq_symbol_date_interval",
+            set_={
+                "data_source": data_source,
+            },
+            where=or_(
+                PriceData.data_source.is_(None),
+                PriceData.data_source.in_(["provider", "fmp_td_yf"]),
+            ),
+        )
+        db.execute(stmt)
+        db.commit()
+        return len(rows)
 
     async def backfill_daily_bars(
         self,

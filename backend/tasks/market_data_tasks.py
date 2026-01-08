@@ -398,21 +398,73 @@ def backfill_last_200_bars() -> dict:
             bars_inserted_total = 0
             errors = 0
             provider_usage: Dict[str, int] = {}
-            for symbol in sorted(symbols):
-                try:
-                    res = loop.run_until_complete(
-                        market_data_service.backfill_daily_bars(
-                            session, symbol, lookback_period="1y", max_bars=270
+
+            policy = str(getattr(settings, "MARKET_PROVIDER_POLICY", "paid")).lower()
+            paid = policy == "paid"
+            max_conc = int(getattr(settings, "MARKET_BACKFILL_CONCURRENCY_MAX", 100))
+            conc_default = int(getattr(settings, "MARKET_BACKFILL_CONCURRENCY_PAID" if paid else "MARKET_BACKFILL_CONCURRENCY_FREE", 25 if paid else 5))
+            concurrency = max(1, min(max_conc, conc_default))
+
+            async def _fetch_all() -> list[dict]:
+                sem = asyncio.Semaphore(concurrency)
+                out: list[dict] = []
+
+                async def _one(sym: str) -> dict:
+                    async with sem:
+                        df, provider = await market_data_service.get_historical_data(
+                            symbol=sym.upper(),
+                            period="1y",
+                            interval="1d",
+                            max_bars=None,
+                            return_provider=True,
                         )
+                        return {"symbol": sym.upper(), "df": df, "provider": provider}
+
+                tasks = [_one(s) for s in sorted(symbols)]
+                for coro in asyncio.as_completed(tasks):
+                    try:
+                        out.append(await coro)
+                    except Exception as e:
+                        out.append({"symbol": "?", "df": None, "provider": None, "error": str(e)})
+                return out
+
+            fetched = loop.run_until_complete(_fetch_all())
+
+            from backend.models import PriceData
+            for item in fetched:
+                sym = item.get("symbol")
+                if not sym or sym == "?":
+                    errors += 1
+                    continue
+                df = item.get("df")
+                provider = item.get("provider")
+                if df is None or getattr(df, "empty", True):
+                    skipped_empty += 1
+                    _increment_provider_usage(provider_usage, {"provider": provider})
+                    continue
+                try:
+                    last_date = (
+                        session.query(PriceData.date)
+                        .filter(PriceData.symbol == sym, PriceData.interval == "1d")
+                        .order_by(PriceData.date.desc())
+                        .limit(1)
+                        .scalar()
                     )
-                    status = (res or {}).get("status")
-                    inserted = int((res or {}).get("inserted") or 0)
-                    _increment_provider_usage(provider_usage, res)
-                    if status == "empty":
-                        skipped_empty += 1
-                    elif inserted > 0:
+                    # Bound to ~last year for downstream compute
+                    df = df.tail(270)
+                    inserted = market_data_service.persist_price_bars(
+                        session,
+                        sym,
+                        df,
+                        interval="1d",
+                        data_source=provider or "unknown",
+                        is_adjusted=True,
+                        delta_after=last_date,
+                    )
+                    _increment_provider_usage(provider_usage, {"provider": provider})
+                    if inserted > 0:
                         updated_total += 1
-                        bars_inserted_total += inserted
+                        bars_inserted_total += int(inserted)
                     else:
                         up_to_date_total += 1
                 except Exception:
@@ -439,40 +491,82 @@ def backfill_last_200_bars() -> dict:
 @shared_task(name="backend.tasks.market_data_tasks.backfill_symbols")
 @task_run("backfill_symbols")
 def backfill_symbols(symbols: List[str]) -> dict:
-    """Delta backfill last-200 daily bars for a provided symbol list."""
+    """Delta backfill last-year-ish daily bars for a provided symbol list (concurrent fetch, safe persist)."""
     session = SessionLocal()
     try:
         loop = _setup_event_loop()
-        throttle = getattr(settings, "MARKET_PROVIDER_POLICY", "paid").lower() != "paid"
-        sleep_fn = None
-        if throttle:
-            try:
-                import time as _time
-
-                sleep_fn = _time.sleep
-            except Exception:
-                sleep_fn = None
         try:
-            backfilled = 0
-            errors = 0
-            provider_usage: Dict[str, int] = {}
-            for symbol in [s.upper() for s in symbols or []]:
-                try:
-                    res = loop.run_until_complete(
-                        market_data_service.backfill_daily_bars(
-                            session, symbol, lookback_period="1y", max_bars=270
+            policy = str(getattr(settings, "MARKET_PROVIDER_POLICY", "paid")).lower()
+            paid = policy == "paid"
+            max_conc = int(getattr(settings, "MARKET_BACKFILL_CONCURRENCY_MAX", 100))
+            conc_default = int(getattr(settings, "MARKET_BACKFILL_CONCURRENCY_PAID" if paid else "MARKET_BACKFILL_CONCURRENCY_FREE", 25 if paid else 5))
+            concurrency = max(1, min(max_conc, conc_default))
+
+            async def _fetch_all() -> list[dict]:
+                sem = asyncio.Semaphore(concurrency)
+                out: list[dict] = []
+
+                async def _one(sym: str) -> dict:
+                    async with sem:
+                        df, provider = await market_data_service.get_historical_data(
+                            symbol=sym.upper(),
+                            period="1y",
+                            interval="1d",
+                            max_bars=None,
+                            return_provider=True,
                         )
-                    )
-                    if (res or {}).get("status") != "empty":
-                        backfilled += 1
-                    _increment_provider_usage(provider_usage, res)
-                except Exception:
-                    errors += 1
-                    session.rollback()
-                if throttle and sleep_fn:
-                    sleep_fn(0.6)
+                        return {"symbol": sym.upper(), "df": df, "provider": provider}
+
+                tasks = [_one(s) for s in [s.upper() for s in (symbols or []) if s]]
+                for coro in asyncio.as_completed(tasks):
+                    try:
+                        out.append(await coro)
+                    except Exception as e:
+                        out.append({"symbol": "?", "df": None, "provider": None, "error": str(e)})
+                return out
+
+            fetched = loop.run_until_complete(_fetch_all())
         finally:
             loop.close()
+
+        from backend.models import PriceData
+        backfilled = 0
+        errors = 0
+        provider_usage: Dict[str, int] = {}
+        for item in fetched:
+            sym = item.get("symbol")
+            if not sym or sym == "?":
+                errors += 1
+                continue
+            df = item.get("df")
+            provider = item.get("provider")
+            try:
+                if df is None or getattr(df, "empty", True):
+                    _increment_provider_usage(provider_usage, {"provider": provider})
+                    continue
+                last_date = (
+                    session.query(PriceData.date)
+                    .filter(PriceData.symbol == sym, PriceData.interval == "1d")
+                    .order_by(PriceData.date.desc())
+                    .limit(1)
+                    .scalar()
+                )
+                df = df.tail(270)
+                market_data_service.persist_price_bars(
+                    session,
+                    sym,
+                    df,
+                    interval="1d",
+                    data_source=provider or "unknown",
+                    is_adjusted=True,
+                    delta_after=last_date,
+                )
+                backfilled += 1
+                _increment_provider_usage(provider_usage, {"provider": provider})
+            except Exception:
+                errors += 1
+                session.rollback()
+
         return {
             "status": "ok",
             "symbols": len(symbols or []),

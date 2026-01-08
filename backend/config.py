@@ -88,6 +88,15 @@ class Settings(BaseSettings):
     MARKET_PROVIDER_POLICY: str = "paid"
     # Default cache TTL for market-data service (seconds)
     MARKET_DATA_CACHE_TTL: int = 300
+    # Daily backfill throughput controls (safe defaults; override via env in infra/env.dev)
+    # - paid: higher concurrency (FMP is the primary provider)
+    # - free: lower concurrency (avoid hammering free-tier sources)
+    MARKET_BACKFILL_CONCURRENCY_PAID: int = 25
+    MARKET_BACKFILL_CONCURRENCY_FREE: int = 5
+    MARKET_BACKFILL_CONCURRENCY_MAX: int = 100
+    # Provider retry/backoff (applies to transient provider failures like 429/5xx)
+    MARKET_BACKFILL_RETRY_ATTEMPTS: int = 6
+    MARKET_BACKFILL_RETRY_MAX_DELAY_SECONDS: float = 60.0
     # Toggle whether Coverage/Tracked sections are visible to all authenticated users
     MARKET_DATA_SECTION_PUBLIC: bool = False
 
