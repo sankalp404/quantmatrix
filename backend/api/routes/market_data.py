@@ -437,10 +437,13 @@ async def post_update_tracked(
 
 @router.post("/backfill/index-universe")
 async def post_backfill_index_universe(
-    batch_size: int = Query(20, ge=5, le=100),
+    batch_size: int | None = Query(None, ge=5, le=500),
     user: User | None = Depends(get_optional_user),
 ) -> Dict[str, Any]:
     """Bootstrap helper: enqueue batched backfill for SP500/NASDAQ100/DOW30 constituents."""
+    if batch_size is None:
+        policy = str(getattr(settings, "MARKET_PROVIDER_POLICY", "paid")).lower()
+        batch_size = 100 if policy == "paid" else 20
     return _enqueue_task(backfill_index_universe, batch_size=batch_size)
 
 
