@@ -26,13 +26,20 @@ import api from '../services/api';
 import FormField from '../components/ui/FormField';
 import { FiPlay, FiPause, FiTrash2, FiRotateCw } from 'react-icons/fi';
 import SortableTable, { type Column } from '../components/SortableTable';
+import { useUserPreferences } from '../hooks/useUserPreferences';
 
 const AdminSchedules: React.FC = () => {
+  const { timezone: userTimezone } = useUserPreferences();
   const [loading, setLoading] = React.useState(false);
   const [data, setData] = React.useState<{ schedules: any[]; mode?: string } | null>(null);
   const [creating, setCreating] = React.useState(false);
   const [createOpen, setCreateOpen] = React.useState(false);
-  const [form, setForm] = React.useState({ name: '', task: '', cron: '0 * * * *', timezone: 'UTC' });
+  const [form, setForm] = React.useState({ name: '', task: '', cron: '0 * * * *', timezone: userTimezone || 'UTC' });
+
+  React.useEffect(() => {
+    // Keep timezone aligned to user preference unless user already changed it in the form.
+    setForm((p) => (p.timezone && p.timezone !== 'UTC' ? p : { ...p, timezone: userTimezone || 'UTC' }));
+  }, [userTimezone]);
 
   const load = async () => {
     setLoading(true);
@@ -65,12 +72,62 @@ const AdminSchedules: React.FC = () => {
       });
       toast.success('Schedule created');
       setCreateOpen(false);
-      setForm({ name: '', task: '', cron: '0 * * * *', timezone: 'UTC' });
+      setForm({ name: '', task: '', cron: '0 * * * *', timezone: userTimezone || 'UTC' });
       await load();
     } catch (err: any) {
       toast.error(err?.response?.data?.detail || err?.message || 'Failed to create schedule');
     } finally {
       setCreating(false);
+    }
+  };
+
+  type Preset = { name: string; task: string; cron: string; description: string };
+  const presets: Preset[] = [
+    {
+      name: 'monitor-coverage-health-hourly',
+      task: 'backend.tasks.market_data_tasks.monitor_coverage_health',
+      cron: '0 * * * *',
+      description: 'Recompute coverage snapshot hourly (keeps dashboard fresh).',
+    },
+    {
+      name: 'restore-daily-coverage-tracked-nightly',
+      task: 'backend.tasks.market_data_tasks.bootstrap_daily_coverage_tracked',
+      cron: '15 2 * * *',
+      description: 'Nightly: refresh tracked → daily backfill → recompute → history → coverage (no 5m).',
+    },
+  ];
+
+  const upsertSchedule = async (p: Preset) => {
+    const tz = (userTimezone || form.timezone || 'UTC').trim();
+    try {
+      // Robust upsert:
+      // - Try update first (works even if the list hasn't loaded yet)
+      // - If schedule doesn't exist, create it
+      try {
+        await api.put(`/admin/schedules/${encodeURIComponent(p.name)}`, {
+          cron: p.cron,
+          timezone: tz,
+          args: [],
+          kwargs: {},
+        });
+        toast.success('Schedule updated');
+      } catch (err: any) {
+        const status = err?.response?.status;
+        if (status !== 404) throw err;
+        await api.post('/admin/schedules', {
+          name: p.name,
+          task: p.task,
+          cron: p.cron,
+          timezone: tz,
+          args: [],
+          kwargs: {},
+          enabled: true,
+        });
+        toast.success('Schedule created');
+      }
+      await load();
+    } catch (err: any) {
+      toast.error(err?.response?.data?.detail || err?.message || 'Failed to apply schedule');
     }
   };
 
@@ -126,6 +183,9 @@ const AdminSchedules: React.FC = () => {
           <Text fontSize="sm" color="fg.muted">
             Manage Celery beat schedules (RedBeat). Create, pause/resume, run-now, and delete.
           </Text>
+          <Text mt={1} fontSize="xs" color="fg.muted">
+            Note: schedules run only while backend + celery beat are running (your laptop/dev stack must be up).
+          </Text>
         </Box>
         <HStack gap={2}>
           <Button size="sm" variant="outline" onClick={() => setCreateOpen(true)}>
@@ -136,6 +196,35 @@ const AdminSchedules: React.FC = () => {
           </Button>
         </HStack>
       </HStack>
+
+      <Box mb={3} borderWidth="1px" borderColor="border.subtle" borderRadius="xl" bg="bg.card" p={3}>
+        <Text fontSize="sm" fontWeight="semibold" mb={2}>
+          Guided presets
+        </Text>
+        <Text fontSize="xs" color="fg.muted" mb={3}>
+          One-click setup for the recommended market-data schedules (timezone defaults to your preference: {userTimezone || 'UTC'}).
+        </Text>
+        <HStack gap={2} flexWrap="wrap">
+          {presets.map((p) => (
+            <Button
+              key={p.name}
+              size="sm"
+              variant="outline"
+              onClick={() => void upsertSchedule(p)}
+              loading={loading}
+            >
+              {p.name}
+            </Button>
+          ))}
+        </HStack>
+        <Box mt={2}>
+          {presets.map((p) => (
+            <Text key={`${p.name}-desc`} fontSize="xs" color="fg.muted">
+              <Text as="span" fontFamily="mono">{p.name}</Text>: {p.description} (cron: <Text as="span" fontFamily="mono">{p.cron}</Text>)
+            </Text>
+          ))}
+        </Box>
+      </Box>
 
       <Box w="full" borderWidth="1px" borderColor="border.subtle" borderRadius="xl" bg="bg.card">
         <SortableTable
