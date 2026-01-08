@@ -652,7 +652,7 @@ async def get_coverage(
                             }
                         )
                 stale_items.sort(key=lambda item: (item.get("bucket") or "", item.get("last") or "", item.get("symbol") or ""))
-                stale_limit = int(getattr(settings, "COVERAGE_STALE_SAMPLE", 50))
+                stale_limit = int(settings.COVERAGE_STALE_SAMPLE)
                 stale_sample = stale_items[: max(0, stale_limit)]
 
                 fresh_24 = int(freshness["<=24h"])

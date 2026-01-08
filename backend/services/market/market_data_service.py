@@ -1142,7 +1142,7 @@ class MarketDataService:
         safe_symbols = sorted({str(s).upper() for s in (symbols or []) if s})
         sym_set = set(safe_symbols)
         if stale_sample_limit is None:
-            stale_sample_limit = int(getattr(settings, "COVERAGE_STALE_SAMPLE", 50))
+            stale_sample_limit = int(settings.COVERAGE_STALE_SAMPLE)
 
         last_dt: Dict[str, datetime | None] = {s: None for s in safe_symbols}
         if sym_set:

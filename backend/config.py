@@ -99,6 +99,9 @@ class Settings(BaseSettings):
     MARKET_BACKFILL_RETRY_MAX_DELAY_SECONDS: float = 60.0
     # Toggle whether Coverage/Tracked sections are visible to all authenticated users
     MARKET_DATA_SECTION_PUBLIC: bool = False
+    # Coverage UI sampling only (must NOT affect correctness/backfills).
+    # Number of stale symbols to include in API/UI sample lists (full counts are computed separately).
+    COVERAGE_STALE_SAMPLE: int = 200
 
     # Source of truth should be runtime environment variables injected by Docker Compose
     # (`infra/env.dev` via Makefile). We keep optional env-file support only when explicitly
