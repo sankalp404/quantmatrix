@@ -196,6 +196,11 @@ const AdminRunbook: React.FC = () => {
                     />
                     <Text fontSize="sm">Show steps</Text>
                   </label>
+                  {showSteps ? (
+                    <Text mt={2} fontSize="xs" color="fg.muted">
+                      These are the internal steps executed by the orchestrator. They’re shown for transparency, but not triggered individually from this screen.
+                    </Text>
+                  ) : null}
                 </Box>
               ) : null}
               <VStack align="stretch" gap={3} mt={4}>
