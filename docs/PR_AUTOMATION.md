@@ -36,7 +36,7 @@ Automatic PR opening (on push)
 Automatic squash-merge after approval (agent branches only)
 ----------------------------------------------------------
 - Workflow: `.github/workflows/agent-merge-after-ci.yml`
-  - Triggers after `CI` completes successfully
+  - Triggers after `CI` completes successfully **or** when an approval review is submitted
   - Only considers `agent/**` branches
   - Requires:
     - PR is **not** Draft (must be marked Ready for review)

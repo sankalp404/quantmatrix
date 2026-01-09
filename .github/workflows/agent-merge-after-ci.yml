@@ -4,6 +4,8 @@ on:
   workflow_run:
     workflows: ["CI"]
     types: [completed]
+  pull_request_review:
+    types: [submitted]
 
 permissions:
   contents: write
@@ -14,16 +16,27 @@ jobs:
   merge_if_approved:
     name: Merge (squash) if approved
     runs-on: ubuntu-latest
-    if: ${{ github.event.workflow_run.conclusion == 'success' }}
+    if: ${{ github.event_name != 'workflow_run' || github.event.workflow_run.conclusion == 'success' }}
     steps:
       - name: Merge approved agent PR
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          BRANCH: ${{ github.event.workflow_run.head_branch }}
-          CI_SHA: ${{ github.event.workflow_run.head_sha }}
           REPO: ${{ github.repository }}
         run: |
           set -euo pipefail
+
+          EVENT="${{ github.event_name }}"
+
+          if [[ "$EVENT" == "workflow_run" ]]; then
+            BRANCH="${{ github.event.workflow_run.head_branch }}"
+            CI_SHA="${{ github.event.workflow_run.head_sha }}"
+          elif [[ "$EVENT" == "pull_request_review" ]]; then
+            BRANCH="${{ github.event.pull_request.head.ref }}"
+            CI_SHA=""  # not available/relevant for review-triggered runs
+          else
+            echo "Unsupported event: $EVENT"
+            exit 0
+          fi
 
           # Only handle agent branches
           if [[ "$BRANCH" != agent/* ]]; then
@@ -32,35 +45,33 @@ jobs:
           fi
 
           # Find the open PR for this head branch (if any)
-          PR_NUMBER="$(gh pr list --repo "$REPO" --head "$BRANCH" --state open --json number --jq '.[0].number')"
+          if [[ "$EVENT" == "pull_request_review" ]]; then
+            PR_NUMBER="${{ github.event.pull_request.number }}"
+          else
+            PR_NUMBER="$(gh pr list --repo "$REPO" --head "$BRANCH" --state open --json number --jq '.[0].number')"
+          fi
           if [[ -z "${PR_NUMBER:-}" || "${PR_NUMBER}" == "null" ]]; then
             echo "No open PR found for $BRANCH"
             exit 0
           fi
 
-          PR_JSON="$(gh pr view "$PR_NUMBER" --repo "$REPO" --json id,headRefOid,mergeStateStatus,reviewDecision,reviews,isDraft)"
+          PR_JSON="$(gh pr view "$PR_NUMBER" --repo "$REPO" --json id,headRefOid,mergeStateStatus,reviews,isDraft)"
           PR_ID="$(echo "$PR_JSON" | jq -r '.id')"
           HEAD_OID="$(echo "$PR_JSON" | jq -r '.headRefOid')"
           MERGE_STATE="$(echo "$PR_JSON" | jq -r '.mergeStateStatus')"
-          DECISION="$(echo "$PR_JSON" | jq -r '.reviewDecision')"
           IS_DRAFT="$(echo "$PR_JSON" | jq -r '.isDraft')"
 
-          # Ensure this workflow_run corresponds to the current PR head SHA.
-          if [[ "$HEAD_OID" != "$CI_SHA" ]]; then
-            echo "Skip: CI SHA ($CI_SHA) != PR head ($HEAD_OID). New commits likely pushed."
-            exit 0
+          # For workflow_run, ensure the run corresponds to the current PR head SHA.
+          if [[ "$EVENT" == "workflow_run" ]]; then
+            if [[ "$HEAD_OID" != "$CI_SHA" ]]; then
+              echo "Skip: CI SHA ($CI_SHA) != PR head ($HEAD_OID). New commits likely pushed."
+              exit 0
+            fi
           fi
 
           # Never auto-merge draft PRs (must be marked Ready for review first).
           if [[ "$IS_DRAFT" == "true" ]]; then
             echo "Skip: PR #$PR_NUMBER is draft"
-            exit 0
-          fi
-
-          # Require that the PR is approved by sankalp404 (branch rules enforce this too,
-          # but we keep it as a hard gate here).
-          if [[ "$DECISION" != "APPROVED" ]]; then
-            echo "PR #$PR_NUMBER is not approved (reviewDecision=$DECISION)"
             exit 0
           fi
 
@@ -86,7 +97,10 @@ jobs:
             exit 0
           fi
 
-          # Merge now (CI just passed). This will still be blocked if ruleset isn't satisfied.
-          gh pr merge "$PR_NUMBER" --repo "$REPO" --squash --delete-branch
+          # Merge:
+          # - If CI already passed, this merges immediately.
+          # - If checks are still running/pending (common when approval happens after CI dispatch),
+          #   enable auto-merge so GitHub merges as soon as required checks go green.
+          gh pr merge "$PR_NUMBER" --repo "$REPO" --auto --squash --delete-branch
 
 
