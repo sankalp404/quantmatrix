@@ -205,11 +205,18 @@ const AdminDashboard: React.FC = () => {
       return `hsl(${hue}, 70%, 45%)`;
     };
 
-    const maxBars = 28; // show last ~4 weeks of daily buckets by default
     const barMaxH = 36;
-    const bars = rows
-      .filter((r) => r.date !== 'none')
-      .slice(0, maxBars);
+    const countMap = new Map(rows.filter((r) => r.date !== 'none').map((r) => [r.date, r.count]));
+
+    // Build a continuous daily series from the 1st of the month (of the newest date) through newestDate.
+    // This makes month-to-date progress easy to read.
+    const newest = new Date(`${newestDate}T00:00:00Z`);
+    const start = new Date(Date.UTC(newest.getUTCFullYear(), newest.getUTCMonth(), 1));
+    const bars: Array<{ date: string; count: number }> = [];
+    for (let d = new Date(start); d.getTime() <= newest.getTime(); d = new Date(d.getTime() + 86400000)) {
+      const dateStr = d.toISOString().slice(0, 10);
+      bars.push({ date: dateStr, count: countMap.get(dateStr) || 0 });
+    }
 
     return (
       <Box mt={2}>
@@ -240,7 +247,7 @@ const AdminDashboard: React.FC = () => {
           </HStack>
         </Box>
         <Text mt={1} fontSize="xs" color="fg.muted">
-          Histogram bars (daily): height + color represent % of symbols whose latest daily bar is that date.
+          Histogram bars (daily, month-to-date): height + color represent % of symbols whose latest daily bar is that date.
         </Text>
       </Box>
     );
