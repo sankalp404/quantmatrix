@@ -262,11 +262,20 @@ def _set_task_status(task_name: str, status: str, payload: dict | None = None) -
 
 
 def _get_tracked_universe_from_db(session: SessionLocal) -> set[str]:
-    """Union of all seen index constituents (active or inactive) and portfolio symbols."""
+    """Union of active index constituents and portfolio symbols.
+
+    IMPORTANT:
+    - We intentionally exclude inactive index constituents, otherwise the tracked universe
+      accumulates delisted/removed tickers and coverage will look degraded forever.
+    """
     tracked: set[str] = set()
     # Index constituents table, if present
     try:
-        for (sym,) in session.query(IndexConstituent.symbol).distinct():
+        for (sym,) in (
+            session.query(IndexConstituent.symbol)
+            .filter(IndexConstituent.is_active.is_(True))
+            .distinct()
+        ):
             if sym:
                 tracked.add(sym.upper())
     except Exception:
