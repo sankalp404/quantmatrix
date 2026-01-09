@@ -351,7 +351,46 @@ async def get_snapshot(
     )
     if not row:
         raise HTTPException(status_code=404, detail="No snapshot found")
-    payload = {c.name: getattr(row, c.name) for c in row.__table__.columns}
+    # Keep response stable and human-friendly by ordering key columns first.
+    preferred = [
+        "symbol",
+        "analysis_type",
+        "analysis_timestamp",
+        "as_of_timestamp",
+        "expiry_timestamp",
+        "current_price",
+        "market_cap",
+        "sector",
+        "industry",
+        "sub_industry",
+        "stage_label",
+        "stage_label_5d_ago",
+        "rs_mansfield_pct",
+        "sma_5",
+        "sma_14",
+        "sma_21",
+        "sma_50",
+        "sma_100",
+        "sma_150",
+        "sma_200",
+        "atr_14",
+        "atr_30",
+        "atrp_14",
+        "atrp_30",
+        "atr_distance",
+        "atr_value",
+        "atr_percent",
+        "range_pos_20d",
+        "range_pos_50d",
+        "range_pos_52w",
+        "rsi",
+        "macd",
+        "macd_signal",
+    ]
+    col_names = [c.name for c in row.__table__.columns]
+    ordered_keys = [k for k in preferred if k in col_names]
+    ordered_keys.extend([k for k in col_names if k not in set(ordered_keys)])
+    payload = {k: getattr(row, k) for k in ordered_keys}
     return {"symbol": symbol.upper(), "snapshot": payload}
 
 
@@ -848,18 +887,20 @@ async def get_coverage(
                 now_utc = datetime.utcnow()
                 lookback = int(days if days is not None else getattr(settings, "COVERAGE_FILL_LOOKBACK_DAYS", 90))
                 start_dt = now_utc - timedelta(days=lookback)
+                # Prefer as-of timestamp (what date the snapshot represents), fallback to analysis timestamp.
+                snap_dt = func.coalesce(MarketSnapshot.as_of_timestamp, MarketSnapshot.analysis_timestamp)
                 rows = (
                     db.query(
-                        func.date(MarketSnapshot.analysis_timestamp).label("d"),
+                        func.date(snap_dt).label("d"),
                         func.count(distinct(MarketSnapshot.symbol)).label("symbol_count"),
                     )
                     .filter(
                         MarketSnapshot.analysis_type == "technical_snapshot",
                         MarketSnapshot.symbol.in_(sym_set),
-                        MarketSnapshot.analysis_timestamp >= start_dt,
+                        snap_dt >= start_dt,
                     )
-                    .group_by(func.date(MarketSnapshot.analysis_timestamp))
-                    .order_by(func.date(MarketSnapshot.analysis_timestamp).asc())
+                    .group_by(func.date(snap_dt))
+                    .order_by(func.date(snap_dt).asc())
                     .all()
                 )
                 out: List[Dict[str, Any]] = []

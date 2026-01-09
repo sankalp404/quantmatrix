@@ -109,6 +109,12 @@ class MarketDataService:
             return {}
 
         price = float(df["Close"].iloc[0])
+        # df is newest-first with datetime index (when sourced from DB/provider)
+        as_of_ts = None
+        try:
+            as_of_ts = df.index[0].to_pydatetime() if hasattr(df.index[0], "to_pydatetime") else df.index[0]
+        except Exception:
+            as_of_ts = None
         data_for_ta = df.iloc[::-1].copy()
         indicators = compute_core_indicators(data_for_ta)
         indicators["current_price"] = price
@@ -167,6 +173,7 @@ class MarketDataService:
 
         snapshot: Dict[str, Any] = {
             "current_price": price,
+            "as_of_timestamp": as_of_ts.isoformat() if hasattr(as_of_ts, "isoformat") else as_of_ts,
             "rsi": indicators.get("rsi"),
             # Canonical consolidated fields
             "sma_5": indicators.get("sma_5"),
@@ -727,6 +734,7 @@ class MarketDataService:
         # Fallback: minimal reconstruction from mapped columns
         out: Dict[str, Any] = {
             "current_price": getattr(row, "current_price", None),
+            "as_of_timestamp": getattr(row, "as_of_timestamp", None),
             "rsi": getattr(row, "rsi", None),
             # Canonical fields
             "sma_5": getattr(row, "sma_5", None),
@@ -1436,18 +1444,19 @@ class MarketDataService:
             if not universe or total_symbols == 0:
                 return []
             start_dt = now - timedelta(days=days)
+            snap_dt = func.coalesce(MarketSnapshot.as_of_timestamp, MarketSnapshot.analysis_timestamp)
             rows = (
                 db.query(
-                    func.date(MarketSnapshot.analysis_timestamp).label("d"),
+                    func.date(snap_dt).label("d"),
                     func.count(distinct(MarketSnapshot.symbol)).label("symbol_count"),
                 )
                 .filter(
                     MarketSnapshot.analysis_type == "technical_snapshot",
                     MarketSnapshot.symbol.in_(set(universe)),
-                    MarketSnapshot.analysis_timestamp >= start_dt,
+                    snap_dt >= start_dt,
                 )
-                .group_by(func.date(MarketSnapshot.analysis_timestamp))
-                .order_by(func.date(MarketSnapshot.analysis_timestamp).asc())
+                .group_by(func.date(snap_dt))
+                .order_by(func.date(snap_dt).asc())
                 .all()
             )
             out: List[Dict[str, Any]] = []

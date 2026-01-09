@@ -81,6 +81,9 @@ class MarketSnapshot(Base):
         String(50), nullable=False
     )  # 'technical_snapshot', 'atr_matrix', etc.
     analysis_timestamp = Column(DateTime(timezone=True), server_default=func.now())
+    # The market data "as-of" timestamp this snapshot was computed from (latest 1d bar).
+    # This is the correct dimension for snapshot coverage by date (not analysis_timestamp).
+    as_of_timestamp = Column(DateTime(timezone=True), nullable=True)
     expiry_timestamp = Column(DateTime(timezone=True), nullable=False)
 
     # Minimal technical snapshot
