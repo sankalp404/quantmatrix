@@ -7,10 +7,7 @@ import {
   HStack,
   VStack,
   Badge,
-  TooltipRoot,
-  TooltipTrigger,
-  TooltipPositioner,
-  TooltipContent,
+  Tooltip,
 } from '@chakra-ui/react';
 import toast from 'react-hot-toast';
 import api from '../services/api';
@@ -339,14 +336,14 @@ const AdminDashboard: React.FC = () => {
             <HStack gap={2} flexWrap="wrap">
               <Badge variant="subtle">Source: {String(coverage?.meta?.source || '—')}</Badge>
               <Badge variant="subtle">Refreshed: {formatDateTime(coverage?.meta?.updated_at, timezone)}</Badge>
-              <TooltipRoot>
-                <TooltipTrigger asChild>
+              <Tooltip.Root openDelay={200} positioning={{ placement: 'top' }}>
+                <Tooltip.Trigger asChild>
                   <Badge variant="subtle" cursor="help">
                     Runs: monitor/restore
                   </Badge>
-                </TooltipTrigger>
-                <TooltipPositioner>
-                  <TooltipContent>
+                </Tooltip.Trigger>
+                <Tooltip.Positioner>
+                  <Tooltip.Content>
                     <Box>
                       <Text fontSize="xs" color="fg.muted">
                         Monitor: {fmtLastRun('monitor_coverage_health')}
@@ -355,9 +352,9 @@ const AdminDashboard: React.FC = () => {
                         Restore: {fmtLastRun('bootstrap_daily_coverage_tracked')}
                       </Text>
                     </Box>
-                  </TooltipContent>
-                </TooltipPositioner>
-              </TooltipRoot>
+                  </Tooltip.Content>
+                </Tooltip.Positioner>
+              </Tooltip.Root>
             </HStack>
             <Button size="sm" variant="outline" loading={refreshingCoverage} onClick={() => void refreshCoverageNow('manual')}>
               Refresh coverage
@@ -405,7 +402,7 @@ const AdminDashboard: React.FC = () => {
                     Update Tracked
                   </Button>
                   <Button size="xs" variant="outline" onClick={() => void runNamedTask('recompute_indicators_universe', 'Recompute indicators')}>
-                    Recompute Indicators (Snapshots)
+                    Recompute Indicators (Market Snapshot)
                   </Button>
                   <Button size="xs" variant="outline" onClick={() => void runNamedTask('record_daily_history', 'Record history')}>
                     Record History
