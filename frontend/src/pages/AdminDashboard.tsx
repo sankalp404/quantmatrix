@@ -232,6 +232,7 @@ const AdminDashboard: React.FC = () => {
     };
 
     const barMaxH = 36;
+      const dotH = 8; // dot + spacing below bar
     const fillMap = new Map(rows.map((r) => [r.date, r]));
     const snapshotPctByDate = new Map((snapshotFillSeries || []).map((r) => [r.date, Number(r.pct_of_universe || 0)]));
 
@@ -263,7 +264,7 @@ const AdminDashboard: React.FC = () => {
           overflowX="auto"
           overflowY="hidden"
         >
-          <HStack align="end" gap={1} h={`${barMaxH}px`} w="full">
+            <HStack align="end" gap={1} h={`${barMaxH + dotH}px`} w="full">
             {bars.map((r) => {
               const pct = pctFor(r);
               const h = Math.max(2, Math.round((pct / 100) * barMaxH));
