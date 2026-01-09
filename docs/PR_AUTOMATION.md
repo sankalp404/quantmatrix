@@ -12,6 +12,7 @@ Dependabot
 - Auto-merge workflow: `.github/workflows/dependabot-automerge.yml`
   - Only runs for `dependabot[bot]`
   - Skips semver-major updates by default
+  - Merges semver minor/patch updates after required checks are green (does not rely on repo auto-merge being enabled)
 
 Agent / Human PR flow
 ---------------------
