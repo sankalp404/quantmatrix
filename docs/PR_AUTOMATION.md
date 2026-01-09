@@ -43,6 +43,8 @@ Automatic squash-merge after approval (agent branches only)
     - PR is approved by **sankalp404**
     - The successful CI run corresponds to the current PR head SHA
   - Action: squash merge + delete branch
+  - Note: this workflow merges only when GitHub reports the PR is mergeable (`mergeStateStatus=CLEAN`);
+    it does **not** rely on GitHub's repository-level "auto-merge" feature being enabled.
 
 Requirements for automation
 ---------------------------

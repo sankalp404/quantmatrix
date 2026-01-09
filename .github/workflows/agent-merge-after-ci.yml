@@ -97,10 +97,14 @@ jobs:
             exit 0
           fi
 
-          # Merge:
-          # - If CI already passed, this merges immediately.
-          # - If checks are still running/pending (common when approval happens after CI dispatch),
-          #   enable auto-merge so GitHub merges as soon as required checks go green.
-          gh pr merge "$PR_NUMBER" --repo "$REPO" --auto --squash --delete-branch
+          # Do not rely on GitHub "auto-merge" (enablePullRequestAutoMerge). This repo may have it disabled.
+          # Only merge when GitHub reports the PR is mergeable now.
+          if [[ "$MERGE_STATE" != "CLEAN" ]]; then
+            echo "Skip: PR #$PR_NUMBER not mergeable yet (mergeStateStatus=$MERGE_STATE)"
+            exit 0
+          fi
+
+          # Merge now (CI is green or already passed, and PR is mergeable).
+          gh pr merge "$PR_NUMBER" --repo "$REPO" --squash --delete-branch
 
 
