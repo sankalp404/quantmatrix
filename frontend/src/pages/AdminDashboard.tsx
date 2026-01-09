@@ -213,7 +213,7 @@ const AdminDashboard: React.FC = () => {
 
     // Trading-day series: use the last N observed dates in fill_by_date.
     // This naturally excludes weekends/holidays (no OHLCV rows expected) and avoids confusing gaps.
-    const windowDays = 35;
+    const windowDays = 50;
     const bars: Array<{ date: string; symbol_count: number; pct_of_universe: number }> = rows
       .slice() // newest-first
       .reverse() // oldest-first
@@ -233,16 +233,25 @@ const AdminDashboard: React.FC = () => {
           bg="bg.card"
           px={2}
           py={2}
-          overflow="hidden"
+          overflowX="auto"
+          overflowY="hidden"
         >
-          <HStack align="end" gap={1} h={`${barMaxH}px`}>
+          <HStack align="end" gap={1} h={`${barMaxH}px`} minW="max-content">
             {bars.map((r) => {
               const pct = pctFor(r);
               const h = Math.max(2, Math.round((pct / 100) * barMaxH));
               const snapPct = snapshotPctByDate.get(r.date);
               const snapOk = typeof snapPct === 'number' && snapPct >= 95;
               const snapNone = typeof snapPct !== 'number';
-              const dotBg = snapNone ? 'gray.400' : snapOk ? 'green.500' : snapPct === 0 ? 'red.500' : 'orange.500';
+              // Dot thresholds: green = basically complete, orange = partial, red = low coverage, gray = no snapshot run recorded.
+              const dotBg =
+                snapNone
+                  ? 'gray.400'
+                  : snapOk
+                    ? 'green.500'
+                    : (snapPct || 0) >= 50
+                      ? 'orange.500'
+                      : 'red.500';
               return (
                 <Box key={r.date} w="10px" title={`${r.date}: ${r.symbol_count}/${total} (${Math.round(pct * 10) / 10}%)`}>
                   <Box w="10px" h={`${h}px`} borderRadius="sm" bg={colorForPct(pct)} />
@@ -266,7 +275,7 @@ const AdminDashboard: React.FC = () => {
         </Box>
         <Text mt={1} fontSize="xs" color="fg.muted">
           Histogram bars (daily, last {windowDays} trading days): height + color represent % of symbols with a stored 1d OHLCV bar on that date.
-          Dot under each bar indicates technical snapshot coverage for that date (green ≈ complete).
+          Dot under each bar indicates technical snapshot coverage for that date (green ≥95%, orange ≥50%, red &lt;50%, gray = no snapshot run recorded).
         </Text>
       </Box>
     );
