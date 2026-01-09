@@ -96,7 +96,7 @@ describe('AdminDashboard coverage refresh', () => {
   it('allows manual refresh via button', async () => {
     const user = userEvent.setup();
     renderWithProviders(<AdminDashboard />, { route: '/settings/admin/dashboard' });
-    const btn = (await screen.findAllByRole('button', { name: /refresh coverage now/i }))[0];
+    const btn = (await screen.findAllByRole('button', { name: /refresh coverage/i }))[0];
     await user.click(btn);
     expect(apiPost).toHaveBeenCalledWith('/market-data/admin/coverage/refresh');
     expect(apiPost.mock.calls.filter((c) => c[0] === '/market-data/admin/coverage/refresh').length).toBeGreaterThanOrEqual(2);

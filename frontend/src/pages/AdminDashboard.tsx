@@ -1,5 +1,17 @@
 import React from 'react';
-import { Box, Heading, Button, Text, HStack, VStack, Badge } from '@chakra-ui/react';
+import {
+  Box,
+  Heading,
+  Button,
+  Text,
+  HStack,
+  VStack,
+  Badge,
+  TooltipRoot,
+  TooltipTrigger,
+  TooltipPositioner,
+  TooltipContent,
+} from '@chakra-ui/react';
 import toast from 'react-hot-toast';
 import api from '../services/api';
 import { triggerTaskByName } from '../utils/taskActions';
@@ -189,7 +201,7 @@ const AdminDashboard: React.FC = () => {
     if (!backfill5mEnabled && hero?.staleCounts?.daily === 0 && hero?.staleCounts?.m5 > 0) {
       return {
         ...hero,
-        summary: 'Daily coverage is green. 5m is disabled (ignored for status).',
+        summary: 'Daily coverage OK • 5m disabled (ignored).',
       };
     }
     return hero;
@@ -324,16 +336,31 @@ const AdminDashboard: React.FC = () => {
             </Box>
           ) : null}
           <Box mt={3} display="flex" alignItems="center" justifyContent="space-between" gap={3} flexWrap="wrap">
-            <Box>
-              <HStack gap={2} flexWrap="wrap">
-                <Badge variant="subtle">Source: {String(coverage?.meta?.source || '—')}</Badge>
-                <Badge variant="subtle">Last refresh: {formatDateTime(coverage?.meta?.updated_at, timezone)}</Badge>
-                <Badge variant="subtle">Monitor: {fmtLastRun('monitor_coverage_health')}</Badge>
-                <Badge variant="subtle">Restore: {fmtLastRun('bootstrap_daily_coverage_tracked')}</Badge>
-              </HStack>
-            </Box>
+            <HStack gap={2} flexWrap="wrap">
+              <Badge variant="subtle">Source: {String(coverage?.meta?.source || '—')}</Badge>
+              <Badge variant="subtle">Refreshed: {formatDateTime(coverage?.meta?.updated_at, timezone)}</Badge>
+              <TooltipRoot>
+                <TooltipTrigger asChild>
+                  <Badge variant="subtle" cursor="help">
+                    Runs: monitor/restore
+                  </Badge>
+                </TooltipTrigger>
+                <TooltipPositioner>
+                  <TooltipContent>
+                    <Box>
+                      <Text fontSize="xs" color="fg.muted">
+                        Monitor: {fmtLastRun('monitor_coverage_health')}
+                      </Text>
+                      <Text fontSize="xs" color="fg.muted">
+                        Restore: {fmtLastRun('bootstrap_daily_coverage_tracked')}
+                      </Text>
+                    </Box>
+                  </TooltipContent>
+                </TooltipPositioner>
+              </TooltipRoot>
+            </HStack>
             <Button size="sm" variant="outline" loading={refreshingCoverage} onClick={() => void refreshCoverageNow('manual')}>
-              Refresh coverage now
+              Refresh coverage
             </Button>
           </Box>
           <Box mt={3} display="flex" alignItems="center" gap={3}>
@@ -378,7 +405,7 @@ const AdminDashboard: React.FC = () => {
                     Update Tracked
                   </Button>
                   <Button size="xs" variant="outline" onClick={() => void runNamedTask('recompute_indicators_universe', 'Recompute indicators')}>
-                    Recompute Indicators
+                    Generate Snapshots
                   </Button>
                   <Button size="xs" variant="outline" onClick={() => void runNamedTask('record_daily_history', 'Record history')}>
                     Record History

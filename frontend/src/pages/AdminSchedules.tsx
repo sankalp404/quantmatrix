@@ -137,7 +137,14 @@ const AdminSchedules: React.FC = () => {
         </HStack>
       </HStack>
 
-      <Box w="full" borderWidth="1px" borderColor="border.subtle" borderRadius="xl" bg="bg.card">
+      <Box
+        w="full"
+        borderWidth="1px"
+        borderColor="border.subtle"
+        borderRadius="lg"
+        bg="bg.card"
+        overflow="hidden"
+      >
         <SortableTable
           data={data?.schedules || []}
           columns={
