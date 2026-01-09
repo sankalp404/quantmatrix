@@ -213,32 +213,32 @@ const AdminDashboard: React.FC = () => {
 
     return (
       <Box mt={2}>
-        <HStack
-          align="end"
-          gap={1}
-          h={`${barMaxH}px`}
+        <Box
           borderRadius="md"
           borderWidth="1px"
           borderColor="border.subtle"
           bg="bg.card"
           px={2}
           py={2}
+          overflow="hidden"
         >
-          {bars.map((r) => {
-            const pct = pctFor(r.count);
-            const h = Math.max(2, Math.round((pct / 100) * barMaxH));
-            return (
-              <Box
-                key={r.date}
-                w="10px"
-                h={`${h}px`}
-                borderRadius="sm"
-                bg={colorForPct(pct)}
-                title={`${r.date}: ${r.count}/${total} (${Math.round(pct * 10) / 10}%)`}
-              />
-            );
-          })}
-        </HStack>
+          <HStack align="end" gap={1} h={`${barMaxH}px`}>
+            {bars.map((r) => {
+              const pct = pctFor(r.count);
+              const h = Math.max(2, Math.round((pct / 100) * barMaxH));
+              return (
+                <Box
+                  key={r.date}
+                  w="10px"
+                  h={`${h}px`}
+                  borderRadius="sm"
+                  bg={colorForPct(pct)}
+                  title={`${r.date}: ${r.count}/${total} (${Math.round(pct * 10) / 10}%)`}
+                />
+              );
+            })}
+          </HStack>
+        </Box>
         <Text mt={1} fontSize="xs" color="fg.muted">
           Histogram bars (daily): height + color represent % of symbols whose latest daily bar is that date.
         </Text>
