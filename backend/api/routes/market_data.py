@@ -790,6 +790,92 @@ async def get_coverage(
         except Exception:
             history_entries = []
 
+        # Ensure newer coverage fields exist even when an older cached snapshot is served.
+        # (e.g., cache written before fill_by_date/snapshot_fill_by_date were introduced)
+        try:
+            daily_section = snapshot.get("daily", {}) or {}
+            if "fill_by_date" not in daily_section or not isinstance(daily_section.get("fill_by_date"), list):
+                last_map = daily_section.get("last") or {}
+                sym_set = {str(s).upper() for s in (last_map.keys() if isinstance(last_map, dict) else []) if s}
+                total_symbols = len(sym_set)
+                if sym_set and total_symbols > 0:
+                    from datetime import timedelta as _timedelta
+
+                    now_utc = datetime.utcnow()
+                    start_dt = now_utc - _timedelta(days=60)
+                    rows = (
+                        db.query(
+                            func.date(PriceData.date).label("d"),
+                            func.count(distinct(PriceData.symbol)).label("symbol_count"),
+                        )
+                        .filter(
+                            PriceData.interval == "1d",
+                            PriceData.symbol.in_(sym_set),
+                            PriceData.date >= start_dt,
+                        )
+                        .group_by(func.date(PriceData.date))
+                        .order_by(func.date(PriceData.date).asc())
+                        .all()
+                    )
+                    out: List[Dict[str, Any]] = []
+                    for d, symbol_count in rows:
+                        if not d:
+                            continue
+                        n = int(symbol_count or 0)
+                        out.append(
+                            {
+                                "date": str(d),
+                                "symbol_count": n,
+                                "pct_of_universe": round((n / total_symbols) * 100.0, 1),
+                            }
+                        )
+                    daily_section["fill_by_date"] = out
+                else:
+                    daily_section["fill_by_date"] = []
+
+            if "snapshot_fill_by_date" not in daily_section or not isinstance(daily_section.get("snapshot_fill_by_date"), list):
+                last_map = daily_section.get("last") or {}
+                sym_set = {str(s).upper() for s in (last_map.keys() if isinstance(last_map, dict) else []) if s}
+                total_symbols = len(sym_set)
+                if sym_set and total_symbols > 0:
+                    from datetime import timedelta as _timedelta
+
+                    now_utc = datetime.utcnow()
+                    start_dt = now_utc - _timedelta(days=60)
+                    rows = (
+                        db.query(
+                            func.date(MarketSnapshot.analysis_timestamp).label("d"),
+                            func.count(distinct(MarketSnapshot.symbol)).label("symbol_count"),
+                        )
+                        .filter(
+                            MarketSnapshot.analysis_type == "technical_snapshot",
+                            MarketSnapshot.symbol.in_(sym_set),
+                            MarketSnapshot.analysis_timestamp >= start_dt,
+                        )
+                        .group_by(func.date(MarketSnapshot.analysis_timestamp))
+                        .order_by(func.date(MarketSnapshot.analysis_timestamp).asc())
+                        .all()
+                    )
+                    out: List[Dict[str, Any]] = []
+                    for d, symbol_count in rows:
+                        if not d:
+                            continue
+                        n = int(symbol_count or 0)
+                        out.append(
+                            {
+                                "date": str(d),
+                                "symbol_count": n,
+                                "pct_of_universe": round((n / total_symbols) * 100.0, 1),
+                            }
+                        )
+                    daily_section["snapshot_fill_by_date"] = out
+                else:
+                    daily_section["snapshot_fill_by_date"] = []
+
+            snapshot["daily"] = daily_section
+        except Exception:
+            pass
+
         if not history_entries and updated_at:
             history_entries = [
                 {
