@@ -6,6 +6,7 @@ from backend.api.main import app
 from backend.api.routes.market_data import get_market_data_viewer
 from backend.database import get_db
 from backend.models.market_data import PriceData
+from backend.models.market_data import MarketSnapshot
 from backend.tasks import market_data_tasks
 from backend.tasks.market_data_tasks import monitor_coverage_health
 from backend.models.user import UserRole
@@ -25,6 +26,7 @@ def allow_market_data_viewer():
 
 def _seed_prices(db):
     db.query(PriceData).delete()
+    db.query(MarketSnapshot).delete()
     now = datetime.utcnow()
     rows = [
         # fresh <24h
@@ -72,6 +74,16 @@ def _seed_prices(db):
     ]
     for r in rows:
         db.add(r)
+    # Seed a technical snapshot for one symbol "today" (UTC date bucket)
+    db.add(
+        MarketSnapshot(
+            symbol="FRESH",
+            analysis_type="technical_snapshot",
+            analysis_timestamp=now - timedelta(hours=1),
+            expiry_timestamp=now + timedelta(days=1),
+            current_price=1.0,
+        )
+    )
     db.commit()
 
 
@@ -117,6 +129,11 @@ def test_coverage_endpoint_uses_recomputed_freshness(db_session, monkeypatch):
         assert daily["stale_48h"] == 1
         assert status["stale_daily"] == 1
         assert 65.0 <= status["daily_pct"] <= 70.0
+        # New: date-bucket fill series exists (daily OHLCV) + snapshot series exists.
+        assert "fill_by_date" in daily
+        assert isinstance(daily["fill_by_date"], list)
+        assert "snapshot_fill_by_date" in daily
+        assert isinstance(daily["snapshot_fill_by_date"], list)
     finally:
         app.dependency_overrides.pop(get_db, None)
 

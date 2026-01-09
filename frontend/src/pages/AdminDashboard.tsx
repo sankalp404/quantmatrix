@@ -163,23 +163,25 @@ const AdminDashboard: React.FC = () => {
     return formatDateTime(ts, timezone);
   };
 
-  const dailyLast = (coverage as any)?.daily?.last as Record<string, string | null | undefined> | undefined;
-  const dailyLastDist = React.useMemo(() => {
-    const counts = new Map<string, number>();
-    if (!dailyLast) return { newestDate: null as string | null, newestCount: 0, total: 0, rows: [] as Array<{ date: string; count: number }> };
-    let total = 0;
-    for (const iso of Object.values(dailyLast)) {
-      const date = iso ? String(iso).split('T')[0] : 'none';
-      counts.set(date, (counts.get(date) || 0) + 1);
-      total += 1;
-    }
-    const rows = Array.from(counts.entries())
-      .map(([date, count]) => ({ date, count }))
-      .sort((a, b) => (a.date === b.date ? b.count - a.count : a.date < b.date ? 1 : -1));
+  const dailyFillSeries = (coverage as any)?.daily?.fill_by_date as
+    | Array<{ date: string; symbol_count: number; pct_of_universe: number }>
+    | undefined;
+  const snapshotFillSeries = (coverage as any)?.daily?.snapshot_fill_by_date as
+    | Array<{ date: string; symbol_count: number; pct_of_universe: number }>
+    | undefined;
+
+  const totalSymbols = Number((coverage as any)?.symbols ?? (coverage as any)?.tracked_count ?? 0);
+
+  const dailyFillDist = React.useMemo(() => {
+    const rows = (dailyFillSeries || [])
+      .filter((r) => r && r.date)
+      .slice()
+      .sort((a, b) => (a.date < b.date ? 1 : a.date > b.date ? -1 : 0)); // newest-first
     const newestDate = rows.length ? rows[0].date : null;
-    const newestCount = newestDate ? (counts.get(newestDate) || 0) : 0;
-    return { newestDate, newestCount, total, rows };
-  }, [dailyLast]);
+    const newestCount = rows.length ? Number(rows[0].symbol_count || 0) : 0;
+    const newestPct = rows.length ? Number(rows[0].pct_of_universe || 0) : 0;
+    return { newestDate, newestCount, newestPct, total: totalSymbols || 0, rows };
+  }, [dailyFillSeries, totalSymbols]);
 
   const heroEffective = React.useMemo(() => {
     if (!hero) return hero;
@@ -194,10 +196,10 @@ const AdminDashboard: React.FC = () => {
   }, [hero, backfill5mEnabled]);
 
   const dailyHistogram = React.useMemo(() => {
-    const { rows, newestDate, total } = dailyLastDist;
+    const { rows, newestDate, total } = dailyFillDist;
     if (!rows.length || !newestDate || !total) return null;
 
-    const pctFor = (count: number) => (total > 0 ? (count / total) * 100 : 0);
+    const pctFor = (row: { pct_of_universe: number }) => Number(row?.pct_of_universe || 0);
     const colorForPct = (pct: number) => {
       // HSL: red(0) -> green(120), driven by % (height)
       const t = Math.max(0, Math.min(1, pct / 100));
@@ -206,17 +208,22 @@ const AdminDashboard: React.FC = () => {
     };
 
     const barMaxH = 36;
-    const countMap = new Map(rows.filter((r) => r.date !== 'none').map((r) => [r.date, r.count]));
+    const fillMap = new Map(rows.map((r) => [r.date, r]));
+    const snapshotPctByDate = new Map((snapshotFillSeries || []).map((r) => [r.date, Number(r.pct_of_universe || 0)]));
 
-    // Build a continuous daily series over a rolling window (last ~30+ days).
-    // This matches the common “last N days” operator mental model.
+    // Continuous series over a rolling window (last ~30+ days), filled with 0% where missing.
     const newest = new Date(`${newestDate}T00:00:00Z`);
     const windowDays = 35;
     const start = new Date(newest.getTime() - (windowDays - 1) * 86400000);
-    const bars: Array<{ date: string; count: number }> = [];
+    const bars: Array<{ date: string; symbol_count: number; pct_of_universe: number }> = [];
     for (let d = new Date(start); d.getTime() <= newest.getTime(); d = new Date(d.getTime() + 86400000)) {
       const dateStr = d.toISOString().slice(0, 10);
-      bars.push({ date: dateStr, count: countMap.get(dateStr) || 0 });
+      const row = fillMap.get(dateStr);
+      bars.push({
+        date: dateStr,
+        symbol_count: Number(row?.symbol_count || 0),
+        pct_of_universe: Number(row?.pct_of_universe || 0),
+      });
     }
 
     return (
@@ -232,27 +239,40 @@ const AdminDashboard: React.FC = () => {
         >
           <HStack align="end" gap={1} h={`${barMaxH}px`}>
             {bars.map((r) => {
-              const pct = pctFor(r.count);
+              const pct = pctFor(r);
               const h = Math.max(2, Math.round((pct / 100) * barMaxH));
+              const snapPct = snapshotPctByDate.get(r.date);
+              const snapOk = typeof snapPct === 'number' && snapPct >= 95;
+              const snapNone = typeof snapPct !== 'number';
+              const dotBg = snapNone ? 'gray.400' : snapOk ? 'green.500' : snapPct === 0 ? 'red.500' : 'orange.500';
               return (
-                <Box
-                  key={r.date}
-                  w="10px"
-                  h={`${h}px`}
-                  borderRadius="sm"
-                  bg={colorForPct(pct)}
-                  title={`${r.date}: ${r.count}/${total} (${Math.round(pct * 10) / 10}%)`}
-                />
+                <Box key={r.date} w="10px" title={`${r.date}: ${r.symbol_count}/${total} (${Math.round(pct * 10) / 10}%)`}>
+                  <Box w="10px" h={`${h}px`} borderRadius="sm" bg={colorForPct(pct)} />
+                  <Box
+                    mt="2px"
+                    mx="auto"
+                    w="6px"
+                    h="6px"
+                    borderRadius="full"
+                    bg={dotBg}
+                    title={
+                      snapNone
+                        ? `${r.date}: snapshots —`
+                        : `${r.date}: snapshots ${Math.round((snapPct || 0) * 10) / 10}%`
+                    }
+                  />
+                </Box>
               );
             })}
           </HStack>
         </Box>
         <Text mt={1} fontSize="xs" color="fg.muted">
-          Histogram bars (daily, last {windowDays} days): height + color represent % of symbols whose latest daily bar is that date.
+          Histogram bars (daily, last {windowDays} days): height + color represent % of symbols with a stored 1d OHLCV bar on that date.
+          Dot under each bar indicates technical snapshot coverage for that date (green ≈ complete).
         </Text>
       </Box>
     );
-  }, [dailyLastDist]);
+  }, [dailyFillDist, snapshotFillSeries]);
 
   return (
     <Box p={4}>
@@ -263,34 +283,34 @@ const AdminDashboard: React.FC = () => {
           <CoverageKpiGrid kpis={kpis} variant="stat" />
           <CoverageTrendGrid sparkline={sparkline} />
           <CoverageBucketsGrid groups={hero?.buckets || []} />
-          {dailyLastDist.total > 0 ? (
+          {dailyFillDist.total > 0 ? (
             <Box mt={3} borderWidth="1px" borderColor="border.subtle" borderRadius="lg" p={3} bg="bg.muted">
               <HStack justify="space-between" align="start" flexWrap="wrap" gap={3}>
                 <Box>
                   <Text fontSize="sm" fontWeight="semibold" color="fg.default">
-                    Daily last-bar distribution
+                    Daily fill by date (1d OHLCV)
                   </Text>
                   <Text fontSize="xs" color="fg.muted">
-                    {dailyLastDist.newestDate
-                      ? `Newest date: ${dailyLastDist.newestDate} • ${dailyLastDist.newestCount}/${dailyLastDist.total} symbols`
+                    {dailyFillDist.newestDate
+                      ? `Newest date: ${dailyFillDist.newestDate} • ${dailyFillDist.newestCount}/${dailyFillDist.total} symbols`
                       : 'No daily bars found'}
                   </Text>
                 </Box>
                 <Badge variant="subtle" colorScheme="green">
-                  {dailyLastDist.total > 0
-                    ? `${Math.round((dailyLastDist.newestCount / dailyLastDist.total) * 1000) / 10}% at newest`
+                  {dailyFillDist.total > 0
+                    ? `${Math.round((dailyFillDist.newestPct || 0) * 10) / 10}% filled on newest`
                     : '—'}
                 </Badge>
               </HStack>
               {dailyHistogram}
               <VStack align="stretch" gap={1.5} mt={3}>
-                {dailyLastDist.rows.slice(0, 8).map((row) => (
+                {dailyFillDist.rows.slice(0, 8).map((row) => (
                   <HStack key={row.date} justify="space-between">
                     <Text fontSize="xs" color="fg.muted">
                       {row.date}
                     </Text>
                     <Text fontSize="xs" color="fg.default">
-                      {row.count}
+                      {row.symbol_count} ({Math.round(Number(row.pct_of_universe || 0) * 10) / 10}%)
                     </Text>
                   </HStack>
                 ))}

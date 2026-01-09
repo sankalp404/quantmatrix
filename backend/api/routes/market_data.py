@@ -10,6 +10,7 @@ import json
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Body
 from sqlalchemy.orm import Session
+from sqlalchemy import func, distinct
 from typing import List, Dict, Any, Callable, Optional
 import logging
 from datetime import datetime
@@ -676,6 +677,83 @@ async def get_coverage(
 
             daily_section = _build_interval_section("1d")
             m5_section = _build_interval_section("5m")
+
+            # Daily fill-by-date: for each date, how many symbols have >=1 OHLCV bar on that date.
+            def _fill_by_date(interval: str, days: int = 60) -> List[Dict[str, Any]]:
+                if not sym_set:
+                    return []
+                now_utc = datetime.utcnow()
+                start_dt = now_utc - timedelta(days=days)
+                rows = (
+                    db.query(
+                        func.date(PriceData.date).label("d"),
+                        func.count(distinct(PriceData.symbol)).label("symbol_count"),
+                    )
+                    .filter(
+                        PriceData.interval == interval,
+                        PriceData.symbol.in_(sym_set),
+                        PriceData.date >= start_dt,
+                    )
+                    .group_by(func.date(PriceData.date))
+                    .order_by(func.date(PriceData.date).asc())
+                    .all()
+                )
+                out: List[Dict[str, Any]] = []
+                for d, symbol_count in rows:
+                    if not d:
+                        continue
+                    n = int(symbol_count or 0)
+                    out.append(
+                        {
+                            "date": str(d),
+                            "symbol_count": n,
+                            "pct_of_universe": round((n / total_symbols) * 100.0, 1) if total_symbols else 0.0,
+                        }
+                    )
+                return out
+
+            # Snapshot fill-by-date (technical snapshots): distinct symbols with snapshot on that date.
+            def _snapshot_fill_by_date(days: int = 60) -> List[Dict[str, Any]]:
+                if not sym_set:
+                    return []
+                now_utc = datetime.utcnow()
+                start_dt = now_utc - timedelta(days=days)
+                rows = (
+                    db.query(
+                        func.date(MarketSnapshot.analysis_timestamp).label("d"),
+                        func.count(distinct(MarketSnapshot.symbol)).label("symbol_count"),
+                    )
+                    .filter(
+                        MarketSnapshot.analysis_type == "technical_snapshot",
+                        MarketSnapshot.symbol.in_(sym_set),
+                        MarketSnapshot.analysis_timestamp >= start_dt,
+                    )
+                    .group_by(func.date(MarketSnapshot.analysis_timestamp))
+                    .order_by(func.date(MarketSnapshot.analysis_timestamp).asc())
+                    .all()
+                )
+                out: List[Dict[str, Any]] = []
+                for d, symbol_count in rows:
+                    if not d:
+                        continue
+                    n = int(symbol_count or 0)
+                    out.append(
+                        {
+                            "date": str(d),
+                            "symbol_count": n,
+                            "pct_of_universe": round((n / total_symbols) * 100.0, 1) if total_symbols else 0.0,
+                        }
+                    )
+                return out
+
+            try:
+                daily_section["fill_by_date"] = _fill_by_date("1d", days=60)
+            except Exception:
+                daily_section["fill_by_date"] = []
+            try:
+                daily_section["snapshot_fill_by_date"] = _snapshot_fill_by_date(days=60)
+            except Exception:
+                daily_section["snapshot_fill_by_date"] = []
 
             stale_daily_total = int(daily_section.get("stale_48h") or 0) + int(daily_section.get("missing") or 0)
             daily_pct = 0.0
