@@ -1,5 +1,5 @@
 import React from 'react';
-import { Box, Heading, Button, Text, HStack, Progress, VStack, Badge } from '@chakra-ui/react';
+import { Box, Heading, Button, Text, HStack, VStack, Badge } from '@chakra-ui/react';
 import toast from 'react-hot-toast';
 import api from '../services/api';
 import { triggerTaskByName } from '../utils/taskActions';
@@ -181,12 +181,62 @@ const AdminDashboard: React.FC = () => {
     return { newestDate, newestCount, total, rows };
   }, [dailyLast]);
 
+  const heroEffective = React.useMemo(() => {
+    if (!hero) return hero;
+    // When 5m is disabled, suppress noisy “missing 5m data” messaging in the hero.
+    if (!backfill5mEnabled && hero?.staleCounts?.daily === 0 && hero?.staleCounts?.m5 > 0) {
+      return {
+        ...hero,
+        summary: 'Daily coverage is green. 5m is disabled (ignored for status).',
+      };
+    }
+    return hero;
+  }, [hero, backfill5mEnabled]);
+
+  const dayStrip = React.useMemo(() => {
+    const { rows, newestDate, total } = dailyLastDist;
+    if (!rows.length || !newestDate || !total) return null;
+    const newest = new Date(`${newestDate}T00:00:00Z`).getTime();
+    const maxAgeDays = Math.max(
+      1,
+      ...rows
+        .filter((r) => r.date !== 'none')
+        .map((r) => Math.max(0, Math.round((newest - new Date(`${r.date}T00:00:00Z`).getTime()) / 86400000))),
+    );
+    const colorFor = (ageDays: number) => {
+      const t = Math.max(0, Math.min(1, ageDays / maxAgeDays));
+      // HSL: green(120) -> red(0)
+      const hue = 120 - 120 * t;
+      return `hsl(${hue}, 70%, 45%)`;
+    };
+    return (
+      <HStack mt={2} gap={0} borderRadius="md" overflow="hidden" borderWidth="1px" borderColor="border.subtle">
+        {rows
+          .filter((r) => r.date !== 'none')
+          .slice(0, 60) // hard cap for UI safety; covers ~3 months of trading days if needed later
+          .map((r) => {
+            const ageDays = Math.max(0, Math.round((newest - new Date(`${r.date}T00:00:00Z`).getTime()) / 86400000));
+            return (
+              <Box
+                key={r.date}
+                flex={`${r.count} 0 0`}
+                minW="2px"
+                h="10px"
+                title={`${r.date}: ${r.count} symbols (${Math.round((r.count / total) * 1000) / 10}%)`}
+                bg={colorFor(ageDays)}
+              />
+            );
+          })}
+      </HStack>
+    );
+  }, [dailyLastDist]);
+
   return (
     <Box p={4}>
       <Heading size="md" mb={4}>Admin Dashboard</Heading>
 
       {coverage && (
-        <CoverageSummaryCard hero={hero} status={coverage.status}>
+        <CoverageSummaryCard hero={heroEffective} status={coverage.status}>
           <CoverageKpiGrid kpis={kpis} variant="stat" />
           <CoverageTrendGrid sparkline={sparkline} />
           <CoverageBucketsGrid groups={hero?.buckets || []} />
@@ -209,16 +259,7 @@ const AdminDashboard: React.FC = () => {
                     : '—'}
                 </Badge>
               </HStack>
-              <Box mt={2}>
-                <Progress.Root
-                  value={dailyLastDist.total > 0 ? (dailyLastDist.newestCount / dailyLastDist.total) * 100 : 0}
-                  max={100}
-                >
-                  <Progress.Track borderRadius="full">
-                    <Progress.Range />
-                  </Progress.Track>
-                </Progress.Root>
-              </Box>
+              {dayStrip}
               <VStack align="stretch" gap={1.5} mt={3}>
                 {dailyLastDist.rows.slice(0, 8).map((row) => (
                   <HStack key={row.date} justify="space-between">
@@ -235,12 +276,12 @@ const AdminDashboard: React.FC = () => {
           ) : null}
           <Box mt={3} display="flex" alignItems="center" justifyContent="space-between" gap={3} flexWrap="wrap">
             <Box>
-              <Text fontSize="xs" color="fg.muted">
-                Source: <Text as="span" color="fg.default">{String(coverage?.meta?.source || '—')}</Text> •{' '}
-                Last refresh: <Text as="span" color="fg.default">{formatDateTime(coverage?.meta?.updated_at, timezone)}</Text>
-                {' '}• Coverage monitor: <Text as="span" color="fg.default">{fmtLastRun('monitor_coverage_health')}</Text>
-                {' '}• Restore daily: <Text as="span" color="fg.default">{fmtLastRun('bootstrap_daily_coverage_tracked')}</Text>
-              </Text>
+              <HStack gap={2} flexWrap="wrap">
+                <Badge variant="subtle">Source: {String(coverage?.meta?.source || '—')}</Badge>
+                <Badge variant="subtle">Last refresh: {formatDateTime(coverage?.meta?.updated_at, timezone)}</Badge>
+                <Badge variant="subtle">Monitor: {fmtLastRun('monitor_coverage_health')}</Badge>
+                <Badge variant="subtle">Restore: {fmtLastRun('bootstrap_daily_coverage_tracked')}</Badge>
+              </HStack>
             </Box>
             <Button size="sm" variant="outline" loading={refreshingCoverage} onClick={() => void refreshCoverageNow('manual')}>
               Refresh coverage now
