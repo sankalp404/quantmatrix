@@ -1,5 +1,5 @@
 import React from 'react';
-import { Box, Heading, Button, Text } from '@chakra-ui/react';
+import { Box, Heading, Button, Text, HStack, Progress, VStack, Badge } from '@chakra-ui/react';
 import toast from 'react-hot-toast';
 import api from '../services/api';
 import { triggerTaskByName } from '../utils/taskActions';
@@ -163,6 +163,24 @@ const AdminDashboard: React.FC = () => {
     return formatDateTime(ts, timezone);
   };
 
+  const dailyLast = (coverage as any)?.daily?.last as Record<string, string | null | undefined> | undefined;
+  const dailyLastDist = React.useMemo(() => {
+    const counts = new Map<string, number>();
+    if (!dailyLast) return { newestDate: null as string | null, newestCount: 0, total: 0, rows: [] as Array<{ date: string; count: number }> };
+    let total = 0;
+    for (const iso of Object.values(dailyLast)) {
+      const date = iso ? String(iso).split('T')[0] : 'none';
+      counts.set(date, (counts.get(date) || 0) + 1);
+      total += 1;
+    }
+    const rows = Array.from(counts.entries())
+      .map(([date, count]) => ({ date, count }))
+      .sort((a, b) => (a.date === b.date ? b.count - a.count : a.date < b.date ? 1 : -1));
+    const newestDate = rows.length ? rows[0].date : null;
+    const newestCount = newestDate ? (counts.get(newestDate) || 0) : 0;
+    return { newestDate, newestCount, total, rows };
+  }, [dailyLast]);
+
   return (
     <Box p={4}>
       <Heading size="md" mb={4}>Admin Dashboard</Heading>
@@ -172,6 +190,49 @@ const AdminDashboard: React.FC = () => {
           <CoverageKpiGrid kpis={kpis} variant="stat" />
           <CoverageTrendGrid sparkline={sparkline} />
           <CoverageBucketsGrid groups={hero?.buckets || []} />
+          {dailyLastDist.total > 0 ? (
+            <Box mt={3} borderWidth="1px" borderColor="border.subtle" borderRadius="lg" p={3} bg="bg.muted">
+              <HStack justify="space-between" align="start" flexWrap="wrap" gap={3}>
+                <Box>
+                  <Text fontSize="sm" fontWeight="semibold" color="fg.default">
+                    Daily last-bar distribution
+                  </Text>
+                  <Text fontSize="xs" color="fg.muted">
+                    {dailyLastDist.newestDate
+                      ? `Newest date: ${dailyLastDist.newestDate} • ${dailyLastDist.newestCount}/${dailyLastDist.total} symbols`
+                      : 'No daily bars found'}
+                  </Text>
+                </Box>
+                <Badge variant="subtle" colorScheme="green">
+                  {dailyLastDist.total > 0
+                    ? `${Math.round((dailyLastDist.newestCount / dailyLastDist.total) * 1000) / 10}% at newest`
+                    : '—'}
+                </Badge>
+              </HStack>
+              <Box mt={2}>
+                <Progress.Root
+                  value={dailyLastDist.total > 0 ? (dailyLastDist.newestCount / dailyLastDist.total) * 100 : 0}
+                  max={100}
+                >
+                  <Progress.Track borderRadius="full">
+                    <Progress.Range />
+                  </Progress.Track>
+                </Progress.Root>
+              </Box>
+              <VStack align="stretch" gap={1.5} mt={3}>
+                {dailyLastDist.rows.slice(0, 8).map((row) => (
+                  <HStack key={row.date} justify="space-between">
+                    <Text fontSize="xs" color="fg.muted">
+                      {row.date}
+                    </Text>
+                    <Text fontSize="xs" color="fg.default">
+                      {row.count}
+                    </Text>
+                  </HStack>
+                ))}
+              </VStack>
+            </Box>
+          ) : null}
           <Box mt={3} display="flex" alignItems="center" justifyContent="space-between" gap={3} flexWrap="wrap">
             <Box>
               <Text fontSize="xs" color="fg.muted">
