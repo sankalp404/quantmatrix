@@ -405,7 +405,7 @@ const AdminDashboard: React.FC = () => {
                     Update Tracked
                   </Button>
                   <Button size="xs" variant="outline" onClick={() => void runNamedTask('recompute_indicators_universe', 'Recompute indicators')}>
-                    Generate Snapshots
+                    Recompute Indicators (Snapshots)
                   </Button>
                   <Button size="xs" variant="outline" onClick={() => void runNamedTask('record_daily_history', 'Record history')}>
                     Record History
