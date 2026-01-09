@@ -37,10 +37,13 @@ import json
 
 
 def _setup_event_loop() -> asyncio.AbstractEventLoop:
-    """Create and register a fresh event loop (caller must close)."""
-    loop = asyncio.new_event_loop()
-    asyncio.set_event_loop(loop)
-    return loop
+    """Create a fresh event loop for sync task wrappers (caller must close).
+
+    IMPORTANT: Do not set this loop as the global default via asyncio.set_event_loop().
+    These tasks run loop.run_until_complete(...) explicitly, and setting a closed loop as
+    the process-global default can break unrelated code/tests that use asyncio.
+    """
+    return asyncio.new_event_loop()
 
 
 def _increment_provider_usage(usage: Dict[str, int], result: dict | None) -> None:
@@ -383,7 +386,8 @@ def backfill_last_200_bars() -> dict:
                             symbol=sym.upper(),
                             period="1y",
                             interval="1d",
-                            max_bars=None,
+                            # IMPORTANT: keep newest bars (do not fetch full history).
+                            max_bars=270,
                             return_provider=True,
                         )
                         return {"symbol": sym.upper(), "df": df, "provider": provider}
@@ -418,8 +422,7 @@ def backfill_last_200_bars() -> dict:
                         .limit(1)
                         .scalar()
                     )
-                    # Bound to ~last year for downstream compute
-                    df = df.tail(270)
+                    # df is already bounded to newest ~270 bars by get_historical_data(max_bars=270)
                     inserted = market_data_service.persist_price_bars(
                         session,
                         sym,
@@ -480,7 +483,8 @@ def backfill_symbols(symbols: List[str]) -> dict:
                             symbol=sym.upper(),
                             period="1y",
                             interval="1d",
-                            max_bars=None,
+                            # IMPORTANT: keep newest bars (do not fetch full history).
+                            max_bars=270,
                             return_provider=True,
                         )
                         return {"symbol": sym.upper(), "df": df, "provider": provider}
@@ -498,7 +502,8 @@ def backfill_symbols(symbols: List[str]) -> dict:
             loop.close()
 
         from backend.models import PriceData
-        backfilled = 0
+        processed = 0
+        inserted_total = 0
         errors = 0
         provider_usage: Dict[str, int] = {}
         for item in fetched:
@@ -519,8 +524,7 @@ def backfill_symbols(symbols: List[str]) -> dict:
                     .limit(1)
                     .scalar()
                 )
-                df = df.tail(270)
-                market_data_service.persist_price_bars(
+                inserted = market_data_service.persist_price_bars(
                     session,
                     sym,
                     df,
@@ -529,7 +533,8 @@ def backfill_symbols(symbols: List[str]) -> dict:
                     is_adjusted=True,
                     delta_after=last_date,
                 )
-                backfilled += 1
+                processed += 1
+                inserted_total += int(inserted or 0)
                 _increment_provider_usage(provider_usage, {"provider": provider})
             except Exception:
                 errors += 1
@@ -538,7 +543,8 @@ def backfill_symbols(symbols: List[str]) -> dict:
         return {
             "status": "ok",
             "symbols": len(symbols or []),
-            "backfilled": backfilled,
+            "processed": processed,
+            "rows_attempted": inserted_total,
             "errors": errors,
             "provider_usage": provider_usage,
         }
