@@ -23,10 +23,26 @@ Recommended workflow for an agent change-set:
   - `cd frontend && npm test` (if frontend changed)
 - Create a PR automatically:
   - `scripts/open_pr.sh fix "short description"`
+    - Creates an `agent/<type>/...` branch
+    - Commits and pushes
+    - Opens a **Draft** PR with the standard PR template
 
 Automatic PR opening (on push)
 ------------------------------
-- Workflow: `.github/workflows/agent-auto-pr.yml`\n+- Any push to a branch named `agent/**` will auto-open a PR to `main` (if one doesn’t already exist).\n+- This is useful for agent workflows: push a branch, and GitHub opens the PR automatically.
+- Workflow: `.github/workflows/agent-auto-pr.yml`
+  - Any push to a branch named `agent/**` will auto-open a **Draft** PR to `main` (if one doesn’t already exist).
+  - Useful as a safety net if a branch is pushed without using `scripts/open_pr.sh`.
+
+Automatic squash-merge after approval (agent branches only)
+----------------------------------------------------------
+- Workflow: `.github/workflows/agent-merge-after-ci.yml`
+  - Triggers after `CI` completes successfully
+  - Only considers `agent/**` branches
+  - Requires:
+    - PR is **not** Draft (must be marked Ready for review)
+    - PR is approved by **sankalp404**
+    - The successful CI run corresponds to the current PR head SHA
+  - Action: squash merge + delete branch
 
 Requirements for automation
 ---------------------------
