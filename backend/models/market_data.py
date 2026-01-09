@@ -99,7 +99,6 @@ class MarketSnapshot(Base):
     sma_5 = Column(Float)
     sma_14 = Column(Float)
     sma_21 = Column(Float)
-    sma_20 = Column(Float)
     sma_50 = Column(Float)
     sma_100 = Column(Float)
     sma_150 = Column(Float)

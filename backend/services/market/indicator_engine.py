@@ -16,7 +16,7 @@ def compute_core_indicators(data_oldest_first: pd.DataFrame) -> Dict[str, Any]:
     # SMAs
     # Keep canonical names aligned with our snapshot schema: sma_5, sma_14, sma_21, sma_50, sma_100, sma_150, sma_200.
     # We also keep sma_8 (non-canonical) for MA-bucket logic and backwards compatibility in raw_analysis.
-    for n in [5, 8, 14, 20, 21, 50, 100, 150, 200]:
+    for n in [5, 8, 14, 21, 50, 100, 150, 200]:
         if len(closes) >= n:
             sma = closes.rolling(n).mean()
             if not sma.empty and not pd.isna(sma.iloc[-1]):

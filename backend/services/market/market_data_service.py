@@ -192,7 +192,6 @@ class MarketDataService:
             # Backward-compat (to be dropped after we flip all callers)
             "atr_value": atr_14,
             "atr_percent": ((atr_14 / price) * 100.0) if (atr_14 and price) else None,
-            "sma_20": indicators.get("sma_20"),
             "ema_10": indicators.get("ema_10"),
             "ema_8": ema_8,
             "ema_21": ema_21,
@@ -756,7 +755,6 @@ class MarketDataService:
 
             # Backward-compat legacy keys (to be dropped after callers migrate)
             "atr_value": getattr(row, "atr_value", None),
-            "sma_20": getattr(row, "sma_20", None),
             "ema_10": getattr(row, "ema_10", None),
             "ema_8": getattr(row, "ema_8", None),
             "ema_21": getattr(row, "ema_21", None),
@@ -918,7 +916,7 @@ class MarketDataService:
         if self._needs_fundamentals(snapshot):
             try:
                 info = self.get_fundamentals_info(symbol)
-                for k in ("sector", "industry", "market_cap"):
+                for k in ("name", "sector", "industry", "sub_industry", "market_cap"):
                     if info.get(k) is not None:
                         snapshot[k] = info.get(k)
             except Exception:
