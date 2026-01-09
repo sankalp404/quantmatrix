@@ -41,6 +41,8 @@ from backend.tasks.market_data_tasks import monitor_coverage_health
 from backend.tasks.market_data_tasks import bootstrap_daily_coverage_tracked
 from backend.tasks.market_data_tasks import backfill_stale_daily_tracked
 from backend.config import settings
+from backend.services.notifications.discord_bot import discord_bot_client
+from backend.models import Position
 
 logger = logging.getLogger(__name__)
 
@@ -49,6 +51,36 @@ router = APIRouter()
 
 def _visibility_scope() -> str:
     return "all_authenticated" if settings.MARKET_DATA_SECTION_PUBLIC else "admin_only"
+
+
+def _tracked_universe_symbols(db: Session) -> List[str]:
+    """Return tracked universe symbols (tracked:all preferred, DB fallback)."""
+    try:
+        svc = MarketDataService()
+        raw = svc.redis_client.get("tracked:all")
+        tracked = sorted({str(s).upper() for s in (json.loads(raw) if raw else []) if s})
+    except Exception:
+        tracked = []
+    if tracked:
+        return tracked
+    syms = set()
+    try:
+        for (s,) in (
+            db.query(IndexConstituent.symbol)
+            .filter(IndexConstituent.is_active.is_(True))
+            .distinct()
+        ):
+            if s:
+                syms.add(str(s).upper())
+    except Exception:
+        pass
+    try:
+        for (s,) in db.query(Position.symbol).distinct():
+            if s:
+                syms.add(str(s).upper())
+    except Exception:
+        pass
+    return sorted(syms)
 
 
 def _is_backfill_5m_enabled(svc: MarketDataService) -> bool:
@@ -362,6 +394,102 @@ async def admin_task_status(
     except Exception as e:
         logger.error(f"task status error: {e}")
         raise HTTPException(status_code=500, detail=str(e))
+
+
+# =============================================================================
+# MarketSnapshot → Discord Digest (manual trigger; scheduled later)
+# =============================================================================
+
+
+@router.post("/admin/snapshots/discord-digest")
+async def admin_send_snapshot_digest_to_discord(
+    channel_id: str | None = Query(
+        None, description="Discord channel ID; defaults to DISCORD_BOT_DEFAULT_CHANNEL_ID"
+    ),
+    limit: int = Query(12, ge=1, le=25, description="Top-N RS rows to include"),
+    _admin: User = Depends(get_admin_user),
+    db: Session = Depends(get_db),
+) -> Dict[str, Any]:
+    """Send a compact snapshot digest to Discord (Bot token).
+
+    Manual trigger today; reuse the same builder for scheduled sends later.
+    """
+    if not discord_bot_client.is_configured():
+        raise HTTPException(status_code=400, detail="DISCORD_BOT_TOKEN not configured")
+    resolved_channel = channel_id or getattr(settings, "DISCORD_BOT_DEFAULT_CHANNEL_ID", None)
+    if not resolved_channel:
+        raise HTTPException(
+            status_code=400,
+            detail="No channel_id provided and DISCORD_BOT_DEFAULT_CHANNEL_ID not set",
+        )
+
+    tracked = _tracked_universe_symbols(db)
+    if not tracked:
+        raise HTTPException(status_code=400, detail="No tracked symbols available")
+
+    sym_set = set(tracked)
+    rows = (
+        db.query(MarketSnapshot)
+        .filter(
+            MarketSnapshot.analysis_type == "technical_snapshot",
+            MarketSnapshot.symbol.in_(sym_set),
+        )
+        .order_by(MarketSnapshot.symbol.asc(), MarketSnapshot.analysis_timestamp.desc())
+        .distinct(MarketSnapshot.symbol)
+        .all()
+    )
+
+    total = len(tracked)
+    have = len(rows)
+
+    # Stage distribution
+    stage_counts: Dict[str, int] = {}
+    for r in rows:
+        lbl = getattr(r, "stage_label", None) or "UNKNOWN"
+        stage_counts[str(lbl)] = stage_counts.get(str(lbl), 0) + 1
+    stage_counts_sorted = sorted(stage_counts.items(), key=lambda kv: (-kv[1], kv[0]))
+
+    # Top RS (Mansfield %)
+    def rs_val(r) -> float:
+        try:
+            v = getattr(r, "rs_mansfield_pct", None)
+            return float(v) if v is not None else float("-inf")
+        except Exception:
+            return float("-inf")
+
+    top_rs = sorted(rows, key=rs_val, reverse=True)[: int(limit)]
+    top_lines: List[str] = []
+    for r in top_rs:
+        sym = getattr(r, "symbol", "")
+        rs = getattr(r, "rs_mansfield_pct", None)
+        stage = getattr(r, "stage_label", None) or "?"
+        try:
+            rs_fmt = f"{float(rs):.1f}%" if rs is not None else "—"
+        except Exception:
+            rs_fmt = "—"
+        top_lines.append(f"- {sym}: RS {rs_fmt} • Stage {stage}")
+
+    now = datetime.utcnow().replace(microsecond=0).isoformat() + "Z"
+    lines = [
+        f"QuantMatrix — MarketSnapshot digest ({now})",
+        f"Universe: {have}/{total} symbols have snapshots",
+    ]
+    if stage_counts_sorted:
+        lines.append("Stage distribution:")
+        lines.extend([f"- {k}: {v}" for k, v in stage_counts_sorted])
+    if top_lines:
+        lines.append(f"Top RS (Mansfield vs SPY, top {len(top_lines)}):")
+        lines.extend(top_lines)
+
+    content = "\n".join(lines)
+    ok = await discord_bot_client.send_message(channel_id=resolved_channel, content=content)
+    return {
+        "status": "ok" if ok else "error",
+        "channel_id": resolved_channel,
+        "sent": bool(ok),
+        "symbols": total,
+        "snapshots": have,
+    }
 
 
 # =============================================================================

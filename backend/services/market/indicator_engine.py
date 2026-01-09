@@ -261,25 +261,33 @@ def compute_weinstein_stage_from_daily(
     daily_bm_newest_first: pd.DataFrame,
 ) -> Dict[str, Any]:
     """Compute Weinstein stage from daily OHLCV of symbol and benchmark (both newest->first)."""
+    unknown = {
+        "stage": "UNKNOWN",
+        "stage_label": "UNKNOWN",
+        "stage_slope_pct": None,
+        "stage_dist_pct": None,
+        "rs_mansfield_pct": None,
+    }
     if (
         daily_sym_newest_first is None
         or daily_sym_newest_first.empty
         or daily_bm_newest_first is None
         or daily_bm_newest_first.empty
     ):
-        return {"stage": "UNKNOWN"}
+        return dict(unknown)
 
     w_sym = weekly_from_daily(daily_sym_newest_first)
     w_bm = weekly_from_daily(daily_bm_newest_first)
     if w_sym.empty or w_bm.empty:
-        return {"stage": "UNKNOWN"}
+        return dict(unknown)
 
     # Align indexes
     idx = w_sym.index.intersection(w_bm.index)
     w_sym = w_sym.loc[idx]
     w_bm = w_bm.loc[idx]
-    if len(w_sym) < 60:
-        return {"stage": "UNKNOWN"}
+    # Need enough weekly bars for 30W SMA + stable slope. Mansfield RS needs 52W; stage can still compute without it.
+    if len(w_sym) < 35:
+        return dict(unknown)
 
     close = w_sym["Close"]
     sma30 = close.rolling(30).mean()

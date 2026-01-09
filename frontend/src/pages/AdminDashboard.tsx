@@ -30,6 +30,7 @@ const AdminDashboard: React.FC = () => {
   const [restoringDaily, setRestoringDaily] = React.useState<boolean>(false);
   const [backfillingStale, setBackfillingStale] = React.useState<boolean>(false);
   const [advancedOpen, setAdvancedOpen] = React.useState<boolean>(false);
+  const [sendingDiscord, setSendingDiscord] = React.useState<boolean>(false);
   const [taskStatus, setTaskStatus] = React.useState<Record<string, any> | null>(null);
   const { snapshot: coverage, refresh: refreshCoverage, sparkline, kpis, actions: coverageActions, hero } = useCoverageSnapshot();
   const autoRefreshAttemptedRef = React.useRef(false);
@@ -134,6 +135,20 @@ const AdminDashboard: React.FC = () => {
       void loadTaskStatus();
     } catch (err: any) {
       toast.error(err?.message || `Failed to run ${label || taskName}`);
+    }
+  };
+
+  const sendSnapshotDigestToDiscord = async () => {
+    if (sendingDiscord) return;
+    setSendingDiscord(true);
+    try {
+      const res = await api.post('/market-data/admin/snapshots/discord-digest');
+      const ok = Boolean(res?.data?.sent);
+      toast.success(ok ? 'Sent snapshot digest to Discord' : 'Discord send attempted (not sent)');
+    } catch (err: any) {
+      toast.error(err?.response?.data?.detail || err?.message || 'Failed to send digest to Discord');
+    } finally {
+      setSendingDiscord(false);
     }
   };
 
@@ -406,6 +421,9 @@ const AdminDashboard: React.FC = () => {
                   </Button>
                   <Button size="xs" variant="outline" onClick={() => void runNamedTask('record_daily_history', 'Record history')}>
                     Record History
+                  </Button>
+                  <Button size="xs" variant="outline" loading={sendingDiscord} onClick={() => void sendSnapshotDigestToDiscord()}>
+                    Send Snapshot Digest to Discord
                   </Button>
                 </Box>
               </Box>

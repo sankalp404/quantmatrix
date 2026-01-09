@@ -56,6 +56,10 @@ class Settings(BaseSettings):
     DISCORD_WEBHOOK_PLAYGROUND: Optional[str] = None  # Test notifications
     DISCORD_WEBHOOK_SYSTEM_STATUS: Optional[str] = None  # System status updates
 
+    # Discord Bot API (token + channel IDs). Prefer this for production-ready, scheduled messaging.
+    DISCORD_BOT_TOKEN: Optional[str] = None
+    DISCORD_BOT_DEFAULT_CHANNEL_ID: Optional[str] = None
+
     # Security Configuration
     SECRET_KEY: str = "your-secret-key-here-change-in-production"
     ACCESS_TOKEN_EXPIRE_MINUTES: int = 30
