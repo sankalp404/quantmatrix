@@ -6,6 +6,8 @@ name: CI
   push:
     branches:
       - main
+      - "agent/**"
+      - "dependabot/**"
 
 concurrency:
   group: ci-${{ github.ref }}
