@@ -211,20 +211,18 @@ const AdminDashboard: React.FC = () => {
     const fillMap = new Map(rows.map((r) => [r.date, r]));
     const snapshotPctByDate = new Map((snapshotFillSeries || []).map((r) => [r.date, Number(r.pct_of_universe || 0)]));
 
-    // Continuous series over a rolling window (last ~30+ days), filled with 0% where missing.
-    const newest = new Date(`${newestDate}T00:00:00Z`);
+    // Trading-day series: use the last N observed dates in fill_by_date.
+    // This naturally excludes weekends/holidays (no OHLCV rows expected) and avoids confusing gaps.
     const windowDays = 35;
-    const start = new Date(newest.getTime() - (windowDays - 1) * 86400000);
-    const bars: Array<{ date: string; symbol_count: number; pct_of_universe: number }> = [];
-    for (let d = new Date(start); d.getTime() <= newest.getTime(); d = new Date(d.getTime() + 86400000)) {
-      const dateStr = d.toISOString().slice(0, 10);
-      const row = fillMap.get(dateStr);
-      bars.push({
-        date: dateStr,
-        symbol_count: Number(row?.symbol_count || 0),
-        pct_of_universe: Number(row?.pct_of_universe || 0),
-      });
-    }
+    const bars: Array<{ date: string; symbol_count: number; pct_of_universe: number }> = rows
+      .slice() // newest-first
+      .reverse() // oldest-first
+      .slice(-windowDays) // keep last N trading days
+      .map((r) => ({
+        date: r.date,
+        symbol_count: Number(r.symbol_count || 0),
+        pct_of_universe: Number(r.pct_of_universe || 0),
+      }));
 
     return (
       <Box mt={2}>
@@ -267,7 +265,7 @@ const AdminDashboard: React.FC = () => {
           </HStack>
         </Box>
         <Text mt={1} fontSize="xs" color="fg.muted">
-          Histogram bars (daily, last {windowDays} days): height + color represent % of symbols with a stored 1d OHLCV bar on that date.
+          Histogram bars (daily, last {windowDays} trading days): height + color represent % of symbols with a stored 1d OHLCV bar on that date.
           Dot under each bar indicates technical snapshot coverage for that date (green ≈ complete).
         </Text>
       </Box>
