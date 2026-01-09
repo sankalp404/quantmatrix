@@ -23,12 +23,9 @@ from backend.services.market.market_data_service import (
 )
 from backend.models.market_data import MarketSnapshot
 from backend.tasks.market_data_tasks import (
-    backfill_index_universe,
     record_daily_history,
     update_tracked_symbol_cache,
-    backfill_new_tracked,
     backfill_symbols,
-    backfill_last_200_bars,
     recompute_indicators_universe,
     refresh_index_constituents,
     refresh_single_symbol,
@@ -39,9 +36,9 @@ from backend.models.market_data import PriceData
 from backend.models.market_data import JobRun
 from backend.api.routes.utils import serialize_job_runs
 from backend.tasks.market_data_tasks import backfill_5m_last_n_days, enforce_price_data_retention, backfill_5m_for_symbols
-from backend.tasks.market_data_tasks import bootstrap_universe
 from backend.tasks.market_data_tasks import monitor_coverage_health
 from backend.tasks.market_data_tasks import bootstrap_daily_coverage_tracked
+from backend.tasks.market_data_tasks import backfill_stale_daily_tracked
 from backend.config import settings
 
 logger = logging.getLogger(__name__)
@@ -79,14 +76,24 @@ def _coverage_actions(backfill_5m_enabled: bool = True) -> List[Dict[str, Any]]:
             "description": "Union index constituents with held symbols and publish tracked:all/new in Redis.",
         },
         {
-            "label": "Backfill Index Universe (Daily)",
-            "task_name": "backfill_index_universe",
-            "description": "Batched daily OHLCV backfill for the entire index universe (delta-only).",
+            "label": "Restore Daily Coverage (Tracked)",
+            "task_name": "restore_daily_coverage_tracked",
+            "description": "Guided operator flow: refresh → tracked → daily backfill → recompute → history → refresh coverage (no 5m).",
         },
         {
-            "label": "Backfill 5m Last Day",
+            "label": "Backfill Daily (Stale Only)",
+            "task_name": "backfill_stale_daily",
+            "description": "Backfill daily bars only for symbols currently stale (>48h/none) in coverage snapshot.",
+        },
+        {
+            "label": "Refresh Coverage Cache",
+            "task_name": "monitor_coverage_health",
+            "description": "Recompute coverage snapshot and refresh Redis cache + history.",
+        },
+        {
+            "label": "Backfill 5m Last N Days",
             "task_name": "backfill_5m_last_n_days",
-            "description": "Populate 5m bars for the tracked set (default 1 day) to hit the SLA banner.",
+            "description": "Populate 5m bars for the tracked set (default N days) to improve intraday freshness.",
         },
     ]
     if not backfill_5m_enabled:
@@ -104,7 +111,7 @@ def _coverage_education() -> Dict[str, Any]:
         "how_to_fix": [
             "Refresh Index Constituents to sync SP500 / NASDAQ100 / DOW30 membership.",
             "Update Tracked Symbol Cache to rebuild the Redis universe from the DB.",
-            "Backfill Index Universe (Daily) to seed price_data for each index member.",
+            "Restore Daily Coverage (Tracked) to backfill daily bars and recompute indicators (no 5m).",
             "Backfill 5m to capture latest intraday data for freshness dashboards.",
         ],
     }
@@ -117,16 +124,6 @@ def _tracked_actions() -> List[Dict[str, str]]:
             "task_name": "update_tracked_symbol_cache",
             "description": "Rebuild tracked:all / tracked:new from DB index_constituents ∪ portfolio symbols.",
         },
-        {
-            "label": "Backfill New Tracked",
-            "task_name": "backfill_new_tracked",
-            "description": "Run delta backfill for anything just added to tracked:new and clear the queue.",
-        },
-        {
-            "label": "Backfill Last 200 Bars",
-            "task_name": "backfill_last_200_bars",
-            "description": "Safety net to ensure every tracked symbol has the latest ~200 daily bars.",
-        },
     ]
 
 
@@ -135,7 +132,6 @@ def _tracked_education() -> Dict[str, Any]:
         "overview": "Tracked symbols represent everything the platform monitors (index members + any holdings pulled from brokers). Coverage metrics show how fresh the price_data rows are for these symbols.",
         "details": [
             "Update Tracked Symbol Cache unions DB constituents with holdings and publishes Redis keys tracked:all and tracked:new.",
-            "Backfill New Tracked picks up anything newly added to tracked:new and seeds its OHLCV bars.",
             "You can sort/filter the table by sector, industry, ATR, or stage to decide the next action.",
         ],
     }
@@ -333,30 +329,34 @@ async def get_snapshot(
 async def admin_task_status(
     user: User | None = Depends(get_optional_user),
 ) -> Dict[str, Any]:
-    """Return last-run status for key market-data tasks from Redis."""
+    """Return last-run status for key market-data tasks from Redis.
+
+    This endpoint intentionally returns a clean, task-name keyed payload (not raw Redis keys),
+    so UIs can render friendly labels without leaking storage details.
+    """
     try:
         from backend.services.market.market_data_service import market_data_service
 
         r = market_data_service.redis_client
-        keys = [
-            "taskstatus:update_tracked_symbol_cache:last",
-            "taskstatus:backfill_new_tracked:last",
-            "taskstatus:backfill_last_200_bars:last",
-            "taskstatus:backfill_index_universe:last",
-            "taskstatus:refresh_index_constituents:last",
-            "taskstatus:recompute_indicators_universe:last",
-            "taskstatus:record_daily_history:last",
-            "taskstatus:monitor_coverage_health:last",
+        tasks = [
+            "refresh_index_constituents",
+            "update_tracked_symbol_cache",
+            "bootstrap_daily_coverage_tracked",
+            "backfill_last_200_bars",
+            "recompute_indicators_universe",
+            "record_daily_history",
+            "monitor_coverage_health",
         ]
         out: Dict[str, Any] = {}
         import json as _json
 
-        for k in keys:
+        for task_name in tasks:
             try:
-                raw = r.get(k)
-                out[k] = _json.loads(raw) if raw else None
+                key = f"taskstatus:{task_name}:last"
+                raw = r.get(key)
+                out[task_name] = _json.loads(raw) if raw else None
             except Exception:
-                out[k] = None
+                out[task_name] = None
         return out
     except Exception as e:
         logger.error(f"task status error: {e}")
@@ -435,41 +435,11 @@ async def post_update_tracked(
 # =============================================================================
 
 
-@router.post("/backfill/index-universe")
-async def post_backfill_index_universe(
-    batch_size: int | None = Query(None, ge=5, le=500),
-    user: User | None = Depends(get_optional_user),
-) -> Dict[str, Any]:
-    """Bootstrap helper: enqueue batched backfill for SP500/NASDAQ100/DOW30 constituents."""
-    if batch_size is None:
-        policy = str(getattr(settings, "MARKET_PROVIDER_POLICY", "paid")).lower()
-        batch_size = 100 if policy == "paid" else 20
-    return _enqueue_task(backfill_index_universe, batch_size=batch_size)
-
-
-@router.post("/backfill/tracked-new")
-async def post_backfill_tracked_new(
-    user: User | None = Depends(get_optional_user),
-) -> Dict[str, Any]:
-    return _enqueue_task(backfill_new_tracked)
-
-
-@router.post("/backfill/last-200")
-async def post_backfill_last200(
-    user: User | None = Depends(get_optional_user),
-) -> Dict[str, Any]:
-    return _enqueue_task(backfill_last_200_bars)
-
-
-@router.post("/backfill/symbols")
-async def post_backfill_symbols(
-    symbols: List[str] = Query(..., description="Repeat the parameter to provide multiple symbols"),
-    user: User | None = Depends(get_optional_user),
-) -> Dict[str, Any]:
-    """Enqueue delta backfill for a provided list of symbols."""
-    if not symbols:
-        raise HTTPException(status_code=400, detail="symbols required")
-    return _enqueue_task(backfill_symbols, [s.upper() for s in symbols if s])
+## Hard consolidation: legacy daily backfill endpoints removed.
+## Use:
+## - POST /admin/coverage/restore-daily-tracked
+## - POST /admin/coverage/backfill-stale-daily
+## - POST /admin/coverage/refresh
 
 
 @router.post("/indicators/recompute-universe")
@@ -682,7 +652,7 @@ async def get_coverage(
                             }
                         )
                 stale_items.sort(key=lambda item: (item.get("bucket") or "", item.get("last") or "", item.get("symbol") or ""))
-                stale_limit = int(getattr(settings, "COVERAGE_STALE_SAMPLE", 50))
+                stale_limit = int(settings.COVERAGE_STALE_SAMPLE)
                 stale_sample = stale_items[: max(0, stale_limit)]
 
                 fresh_24 = int(freshness["<=24h"])
@@ -891,23 +861,36 @@ async def set_backfill_5m_toggle(
 @router.post("/admin/coverage/backfill-stale-daily")
 async def backfill_stale_daily(
     admin_user: User = Depends(get_admin_user),
+    db: Session = Depends(get_db),
 ) -> Dict[str, Any]:
     """
     Backfill daily bars for symbols currently marked stale (>48h) in coverage snapshot.
     """
     svc = MarketDataService()
-    session = get_db()()
     try:
-        snap = svc.coverage_snapshot(session)
-        stale = [s.get("symbol") for s in snap.get("daily", {}).get("stale", []) if s.get("symbol")]
-        if not stale:
-            return {"status": "ok", "backfilled": 0, "symbols": []}
-        res = backfill_symbols(stale)
-        return {"status": "ok", "backfilled": res.get("backfilled"), "errors": res.get("errors"), "symbols": stale}
+        # Provide an estimate for UI (full stale+missing set, not sample-capped).
+        tracked: List[str] = []
+        try:
+            raw = svc.redis_client.get("tracked:all")
+            tracked = json.loads(raw.decode() if isinstance(raw, (bytes, bytearray)) else raw) if raw else []  # type: ignore[arg-type]
+        except Exception:
+            tracked = []
+        tracked = sorted({str(s).upper() for s in (tracked or []) if s})
+        if not tracked:
+            tracked = sorted({str(s).upper() for (s,) in db.query(PriceData.symbol).distinct().all() if s})
+
+        _, stale_full = svc._compute_interval_coverage_for_symbols(
+            db,
+            symbols=tracked,
+            interval="1d",
+            now_utc=datetime.utcnow(),
+            return_full_stale=True,
+        )
+        stale_candidates = len(stale_full or [])
+        enq = _enqueue_task(backfill_stale_daily_tracked)
+        return {**enq, "stale_candidates": stale_candidates}
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
-    finally:
-        session.close()
 
 
 @router.post("/admin/coverage/refresh")
@@ -959,12 +942,7 @@ async def get_symbol_coverage(
         raise HTTPException(status_code=500, detail=str(e))
 
 
-@router.post("/admin/bootstrap")
-async def admin_bootstrap_universe(
-    admin_user: User = Depends(get_admin_user),
-) -> Dict[str, Any]:
-    """Run the full bootstrap: refresh constituents → tracked → backfills → indicators → history."""
-    return _enqueue_task(bootstrap_universe)
+## Hard consolidation: legacy bootstrap endpoint removed (replaced by restore_daily_tracked).
 
 
 # =============================================================================
@@ -1014,9 +992,6 @@ async def admin_list_tasks(
     """Discover available market-data tasks (subset)."""
     tasks = [
         "update_tracked_symbol_cache",
-        "backfill_new_tracked",
-        "backfill_last_200_bars",
-        "backfill_index_universe",
         "refresh_index_constituents",
         "recompute_indicators_universe",
         "record_daily_history",
@@ -1024,6 +999,8 @@ async def admin_list_tasks(
         "backfill_5m_last_n_days",
         "backfill_5m_for_symbols",
         "enforce_price_data_retention",
+        "monitor_coverage_health",
+        "bootstrap_daily_coverage_tracked",
     ]
     return {"tasks": tasks}
 

@@ -37,10 +37,13 @@ import json
 
 
 def _setup_event_loop() -> asyncio.AbstractEventLoop:
-    """Create and register a fresh event loop (caller must close)."""
-    loop = asyncio.new_event_loop()
-    asyncio.set_event_loop(loop)
-    return loop
+    """Create a fresh event loop for sync task wrappers (caller must close).
+
+    IMPORTANT: Do not set this loop as the global default via asyncio.set_event_loop().
+    These tasks run loop.run_until_complete(...) explicitly, and setting a closed loop as
+    the process-global default can break unrelated code/tests that use asyncio.
+    """
+    return asyncio.new_event_loop()
 
 
 def _increment_provider_usage(usage: Dict[str, int], result: dict | None) -> None:
@@ -259,11 +262,20 @@ def _set_task_status(task_name: str, status: str, payload: dict | None = None) -
 
 
 def _get_tracked_universe_from_db(session: SessionLocal) -> set[str]:
-    """Union of all seen index constituents (active or inactive) and portfolio symbols."""
+    """Union of active index constituents and portfolio symbols.
+
+    IMPORTANT:
+    - We intentionally exclude inactive index constituents, otherwise the tracked universe
+      accumulates delisted/removed tickers and coverage will look degraded forever.
+    """
     tracked: set[str] = set()
     # Index constituents table, if present
     try:
-        for (sym,) in session.query(IndexConstituent.symbol).distinct():
+        for (sym,) in (
+            session.query(IndexConstituent.symbol)
+            .filter(IndexConstituent.is_active.is_(True))
+            .distinct()
+        ):
             if sym:
                 tracked.add(sym.upper())
     except Exception:
@@ -341,38 +353,6 @@ def update_tracked_symbol_cache() -> dict:
         session.close()
 
 
-@shared_task(name="backend.tasks.market_data_tasks.backfill_new_tracked")
-@task_run("backfill_new_tracked")
-def backfill_new_tracked(batch_size: int = 50) -> dict:
-    """Backfill OHLCV for symbols listed in Redis tracked:new, then clear it."""
-    _set_task_status("backfill_new_tracked", "running")
-    redis = market_data_service.redis_client
-    raw = redis.get("tracked:new")
-    if not raw:
-        res = {"status": "ok", "new": 0}
-        _set_task_status("backfill_new_tracked", "ok", res)
-        return res
-    try:
-        symbols = json.loads(raw)
-    except Exception:
-        symbols = []
-    if not symbols:
-        res = {"status": "ok", "new": 0}
-        _set_task_status("backfill_new_tracked", "ok", res)
-        return res
-    # Run batched backfill using existing helper
-    done = 0
-    for i in range(0, len(symbols), batch_size):
-        chunk = symbols[i : i + batch_size]
-        res = backfill_symbols(chunk)
-        done += int(res.get("backfilled", 0))
-    # Clear the new list after backfill
-    redis.delete("tracked:new")
-    res = {"status": "ok", "requested": len(symbols), "backfilled_batches": done}
-    _set_task_status("backfill_new_tracked", "ok", res)
-    return res
-
-
 # ============================= Backfill =============================
 
 
@@ -415,7 +395,8 @@ def backfill_last_200_bars() -> dict:
                             symbol=sym.upper(),
                             period="1y",
                             interval="1d",
-                            max_bars=None,
+                            # IMPORTANT: keep newest bars (do not fetch full history).
+                            max_bars=270,
                             return_provider=True,
                         )
                         return {"symbol": sym.upper(), "df": df, "provider": provider}
@@ -450,8 +431,7 @@ def backfill_last_200_bars() -> dict:
                         .limit(1)
                         .scalar()
                     )
-                    # Bound to ~last year for downstream compute
-                    df = df.tail(270)
+                    # df is already bounded to newest ~270 bars by get_historical_data(max_bars=270)
                     inserted = market_data_service.persist_price_bars(
                         session,
                         sym,
@@ -512,7 +492,8 @@ def backfill_symbols(symbols: List[str]) -> dict:
                             symbol=sym.upper(),
                             period="1y",
                             interval="1d",
-                            max_bars=None,
+                            # IMPORTANT: keep newest bars (do not fetch full history).
+                            max_bars=270,
                             return_provider=True,
                         )
                         return {"symbol": sym.upper(), "df": df, "provider": provider}
@@ -530,7 +511,8 @@ def backfill_symbols(symbols: List[str]) -> dict:
             loop.close()
 
         from backend.models import PriceData
-        backfilled = 0
+        processed = 0
+        inserted_total = 0
         errors = 0
         provider_usage: Dict[str, int] = {}
         for item in fetched:
@@ -551,8 +533,7 @@ def backfill_symbols(symbols: List[str]) -> dict:
                     .limit(1)
                     .scalar()
                 )
-                df = df.tail(270)
-                market_data_service.persist_price_bars(
+                inserted = market_data_service.persist_price_bars(
                     session,
                     sym,
                     df,
@@ -561,7 +542,8 @@ def backfill_symbols(symbols: List[str]) -> dict:
                     is_adjusted=True,
                     delta_after=last_date,
                 )
-                backfilled += 1
+                processed += 1
+                inserted_total += int(inserted or 0)
                 _increment_provider_usage(provider_usage, {"provider": provider})
             except Exception:
                 errors += 1
@@ -570,65 +552,13 @@ def backfill_symbols(symbols: List[str]) -> dict:
         return {
             "status": "ok",
             "symbols": len(symbols or []),
-            "backfilled": backfilled,
+            "processed": processed,
+            "rows_attempted": inserted_total,
             "errors": errors,
             "provider_usage": provider_usage,
         }
     finally:
         session.close()
-
-
-@shared_task(name="backend.tasks.market_data_tasks.backfill_index_universe")
-@task_run("backfill_index_universe")
-def backfill_index_universe(batch_size: int = 100) -> dict:
-    """Bootstrap-only: backfill last-200 OHLCV for SP500/NASDAQ100/DOW30 (batched)."""
-    _set_task_status("backfill_index_universe", "running")
-    loop = _setup_event_loop()
-    symbols: Set[str] = set()
-    try:
-        for idx in ["SP500", "NASDAQ100", "DOW30"]:
-            try:
-                cons = loop.run_until_complete(market_data_service.get_index_constituents(idx))
-                symbols.update(cons)
-            except Exception:
-                continue
-    finally:
-        loop.close()
-    symbols = {s.upper() for s in symbols if s}
-    total = len(symbols)
-    done = 0
-    errors = 0
-    ordered = sorted(symbols)
-    provider_usage: Dict[str, int] = {}
-    throttle = getattr(settings, "MARKET_PROVIDER_POLICY", "paid").lower() != "paid"
-    sleep_fn = None
-    if throttle:
-        try:
-            import time as _time
-
-            sleep_fn = _time.sleep
-        except Exception:
-            sleep_fn = None
-    for i in range(0, total, batch_size):
-        chunk = ordered[i : i + batch_size]
-        res = backfill_symbols(chunk)
-        done += int(res.get("backfilled", 0))
-        errors += int(res.get("errors", 0))
-        for provider, count in (res.get("provider_usage") or {}).items():
-            provider_usage[provider] = provider_usage.get(provider, 0) + count
-        # Adaptive wait only in free-tier mode
-        if throttle and sleep_fn:
-            sleep_fn(2.5)
-    res = {
-        "status": "ok",
-        "total_symbols": total,
-        "completed_batches": (total + batch_size - 1) // batch_size,
-        "backfilled": done,
-        "errors": errors,
-        "provider_usage": provider_usage,
-    }
-    _set_task_status("backfill_index_universe", "ok", res)
-    return res
 
 
 # ============================= Index Constituents =============================
@@ -720,70 +650,6 @@ def refresh_index_constituents() -> dict:
         loop.close()
 
 
-@shared_task(name="backend.tasks.market_data_tasks.bootstrap_universe")
-@task_run("bootstrap_universe", lock_key=lambda: "bootstrap_universe")
-def bootstrap_universe() -> dict:
-    """Run the full universe bootstrap chain in-process and return a rollup."""
-    def _summarize(step: str, payload: dict | None) -> str:
-        data = payload or {}
-        if step == "refresh_index_constituents":
-            idx = data.get("indices") or {}
-            parts = [f"{name}: {stats.get('fetched', 0)} symbols via {stats.get('provider_used', 'n/a')}" for name, stats in idx.items()]
-            return "; ".join(parts) or "Refreshed index members"
-        if step == "update_tracked_symbol_cache":
-            return f"{data.get('tracked_all', 0)} tracked ({data.get('new', 0)} new)"
-        if step == "backfill_index_universe":
-            return f"Backfilled {data.get('backfilled', 0)} of {data.get('total_symbols', 0)} symbols"
-        if step == "backfill_last_200_bars":
-            return f"Inserted {data.get('bars_inserted_total', 0)} bars across {data.get('tracked_total', 0)} tracked"
-        if step == "backfill_5m_last_n_days":
-            return f"5m processed {data.get('processed', 0)} symbols (n={data.get('symbols', 0)})"
-        if step == "recompute_indicators_universe":
-            return f"Recomputed indicators for {data.get('processed', data.get('symbols', 0))} symbols"
-        if step == "record_daily_history":
-            return f"Wrote {data.get('written', 0)} snapshot rows"
-        return data.get("status", "ok")
-
-    rollup: dict = {"steps": []}
-
-    def _append(step_name: str, result: dict) -> None:
-        rollup["steps"].append(
-            {
-                "name": step_name,
-                "summary": _summarize(step_name, result),
-                "result": result,
-            }
-        )
-
-    res1 = refresh_index_constituents()
-    _append("refresh_index_constituents", res1)
-
-    res2 = update_tracked_symbol_cache()
-    _append("update_tracked_symbol_cache", res2)
-
-    res3 = backfill_index_universe()
-    _append("backfill_index_universe", res3)
-
-    res4 = backfill_last_200_bars()
-    _append("backfill_last_200_bars", res4)
-
-    if _is_5m_backfill_enabled():
-        res5 = backfill_5m_last_n_days(n_days=1, batch_size=50)
-    else:
-        res5 = {"status": "skipped", "reason": "5m backfill disabled by admin toggle"}
-    _append("backfill_5m_last_n_days", res5)
-
-    res6 = recompute_indicators_universe(batch_size=50)
-    _append("recompute_indicators_universe", res6)
-
-    res7 = record_daily_history()
-    _append("record_daily_history", res7)
-
-    rollup["status"] = "ok"
-    rollup["overall_summary"] = "; ".join(step["summary"] for step in rollup["steps"] if step.get("summary"))
-    return rollup
-
-
 # ============================= Coverage Restore (Daily, Tracked Universe) =============================
 @shared_task(name="backend.tasks.market_data_tasks.bootstrap_daily_coverage_tracked")
 @task_run("bootstrap_daily_coverage_tracked", lock_key=lambda: "bootstrap_daily_coverage_tracked")
@@ -854,6 +720,69 @@ def bootstrap_daily_coverage_tracked() -> dict:
         step["summary"] for step in rollup["steps"] if step.get("summary")
     )
     return rollup
+
+
+# ============================= Backfill stale daily (Tracked universe) =============================
+@shared_task(name="backend.tasks.market_data_tasks.backfill_stale_daily_tracked")
+@task_run("backfill_stale_daily_tracked", lock_key=lambda: "backfill_stale_daily_tracked")
+def backfill_stale_daily_tracked() -> dict:
+    """Backfill daily bars for ALL stale/missing symbols in the tracked universe.
+
+    This is the safe replacement for any UI/operator flow that previously used a sampled
+    stale list (e.g., COVERAGE_STALE_SAMPLE). Here we compute the full stale+missing set.
+    """
+    _set_task_status("backfill_stale_daily_tracked", "running")
+    session = SessionLocal()
+    try:
+        # Universe: prefer Redis tracked:all; fallback to DB-derived tracked universe.
+        tracked: List[str] = []
+        try:
+            raw = market_data_service.redis_client.get("tracked:all")
+            tracked = json.loads(raw) if raw else []
+        except Exception:
+            tracked = []
+        tracked = sorted({str(s).upper() for s in (tracked or []) if s})
+        if not tracked:
+            tracked = sorted({s.upper() for s in _get_tracked_universe_from_db(session)})
+
+        # Compute stale+missing using the same bucketing logic as coverage.
+        section, stale_full = market_data_service._compute_interval_coverage_for_symbols(
+            session,
+            symbols=tracked,
+            interval="1d",
+            now_utc=datetime.utcnow(),
+            return_full_stale=True,
+        )
+        stale_symbols = stale_full or []
+
+        if not stale_symbols:
+            res = {
+                "status": "ok",
+                "tracked_total": len(tracked),
+                "stale_candidates": 0,
+                "note": "No stale/missing daily symbols detected",
+                "daily": {
+                    "freshness": section.get("freshness"),
+                    "stale_48h": section.get("stale_48h"),
+                    "missing": section.get("missing"),
+                },
+            }
+            _set_task_status("backfill_stale_daily_tracked", "ok", res)
+            return res
+
+        backfill_res = backfill_symbols(stale_symbols)
+        monitor_res = monitor_coverage_health()
+        res = {
+            "status": "ok",
+            "tracked_total": len(tracked),
+            "stale_candidates": len(stale_symbols),
+            "backfill": backfill_res,
+            "monitor": monitor_res,
+        }
+        _set_task_status("backfill_stale_daily_tracked", "ok", res)
+        return res
+    finally:
+        session.close()
 
 
 # ============================= Recompute Indicators and Chart Metrics =============================
@@ -1131,61 +1060,14 @@ def monitor_coverage_health() -> dict:
     session = SessionLocal()
     try:
         snapshot = market_data_service.coverage_snapshot(session)
-
-        # Recompute freshness from DB to avoid stale cache artifacts
-        def recompute_from_db():
-            last_daily_rows = (
-                session.query(PriceData.symbol, PriceData.date)
-                .filter(PriceData.interval == "1d")
-                .order_by(PriceData.symbol.asc(), PriceData.date.desc())
-                .distinct(PriceData.symbol)
-                .all()
-            )
-            total = len(last_daily_rows)
-            fresh_24 = fresh_48 = 0
-            stale = 0
-            from datetime import timedelta
-
-            now = datetime.utcnow()
-            stale_symbols = []
-            for sym, dt in last_daily_rows:
-                if not dt:
-                    stale += 1
-                    stale_symbols.append(sym)
-                    continue
-                age = now - dt
-                if age <= timedelta(hours=24):
-                    fresh_24 += 1
-                elif age <= timedelta(hours=48):
-                    fresh_48 += 1
-                else:
-                    stale += 1
-                    stale_symbols.append(sym)
-
-            daily_count = fresh_24 + fresh_48
-            daily_pct = (daily_count / total * 100.0) if total > 0 else 0.0
-            daily_pct = max(0.0, min(100.0, daily_pct))
-
-            snapshot["symbols"] = total
-            snapshot["tracked_count"] = total
-            snapshot["daily"] = {
-                "count": daily_count,
-                "fresh_24h": fresh_24,
-                "fresh_48h": fresh_48,
-                "fresh_gt48h": 0,
-                "stale_48h": stale,
-                "stale": [{"symbol": s} for s in stale_symbols],
-            }
-            status = snapshot.get("status") or {}
-            status["daily_pct"] = daily_pct
-            status["stale_daily"] = stale
-            status["tracked_total"] = total
-            status["universe"] = total
-            status["symbols"] = total
-            snapshot["status"] = status
-            return status
-
-        status_info = recompute_from_db()
+        # Ensure status logic respects the 5m toggle (ignore-5m behavior).
+        try:
+            snapshot.setdefault("meta", {})["backfill_5m_enabled"] = _is_5m_backfill_enabled()
+        except Exception:
+            pass
+        from backend.services.market.market_data_service import compute_coverage_status
+        status_info = compute_coverage_status(snapshot)
+        snapshot["status"] = status_info
         payload = {
             "snapshot": snapshot,
             "updated_at": datetime.utcnow().isoformat(),

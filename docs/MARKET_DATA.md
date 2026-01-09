@@ -98,12 +98,8 @@ Notes on retention
    - `record_daily_history` writes one row per `(symbol, as_of_date)` into `MarketAnalysisHistory` with headline fields + full payload
 6) Scheduling
    - Celery Beat triggers:
-     - weekly index refresh → `refresh_index_constituents`
-     - nightly tracked set build → `update_tracked_symbol_cache`
-     - nightly backfill of new tracked symbols → `backfill_new_tracked`
-     - nightly delta backfill safety → `backfill_last_200_bars`
-     - nightly universe indicators recompute → `recompute_indicators_universe`
-     - nightly history write → `record_daily_history`
+     - nightly guided daily restore → `bootstrap_daily_coverage_tracked`
+     - hourly coverage cache refresh → `monitor_coverage_health`
      - nightly 5m backfill → `backfill_5m_last_n_days`
      - retention enforcement (5m) → `enforce_price_data_retention`
 
@@ -142,16 +138,8 @@ Notes on retention
 
 ## Universe Bootstrap Runbook
 
-1) Refresh Index Constituents
-2) Update Tracked
-3) Backfill Index Universe (daily)
-4) Backfill Last‑200
-5) Backfill 5m (D‑1)
-6) Recompute Indicators
-7) Record Daily History
-8) Schedule/Run Coverage Monitor (hourly) to ensure stale lists stay empty
-
-One-click: POST `/api/v1/market-data/admin/bootstrap` (Admin UI button “Bootstrap Universe”)
+This runbook has been replaced by the guided operator flow below (“Restore Daily Coverage (Tracked)”),
+which encapsulates the daily restore chain without exposing redundant backfill endpoints.
 
 Troubleshooting:
 - If Refresh fetched 0 members: check provider reachability; FMP quota; Wikipedia blocked; rerun.
@@ -217,7 +205,4 @@ Troubleshooting:
 
 ### Advanced: index-only vs tracked-universe
 
-- **Backfill Indices (Daily)** (`POST /api/v1/market-data/backfill/index-universe?batch_size=...`)\n
-  - Index constituents only; default batch size is **20** (can raise up to 100).\n
-- **Backfill Last-200 (Tracked)** (`POST /api/v1/market-data/backfill/last-200`)\n
-  - Full tracked universe; slower but comprehensive.\n
+Legacy per-universe daily backfill endpoints were removed to keep the operator surface area minimal.

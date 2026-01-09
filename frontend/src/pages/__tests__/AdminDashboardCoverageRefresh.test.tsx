@@ -46,6 +46,13 @@ vi.mock('../../hooks/useCoverageSnapshot', () => {
           backfill_5m_enabled: true,
         },
         status: { label: 'degraded', summary: 'test', daily_pct: 0, m5_pct: 0, stale_daily: 1, stale_m5: 0 },
+        daily: {
+          last: {
+            A: '2026-01-08T00:00:00Z',
+            B: '2026-01-08T00:00:00Z',
+            C: '2026-01-02T00:00:00Z',
+          },
+        },
       },
       refresh: vi.fn(),
       sparkline: { daily_pct: [], m5_pct: [], labels: [] },
@@ -93,6 +100,16 @@ describe('AdminDashboard coverage refresh', () => {
     expect(restore.length).toBeGreaterThanOrEqual(1);
     const stale = await screen.findAllByRole('button', { name: /Backfill Daily \(Stale Only\)/i });
     expect(stale.length).toBeGreaterThanOrEqual(1);
+  });
+
+  it('renders daily last-bar distribution', async () => {
+    renderWithProviders(<AdminDashboard />, { route: '/settings/admin/dashboard' });
+    const blocks = await screen.findAllByText(/Daily last-bar distribution/i);
+    expect(blocks.length).toBeGreaterThanOrEqual(1);
+    const newest = await screen.findAllByText(/Newest date: 2026-01-08/i);
+    expect(newest.length).toBeGreaterThanOrEqual(1);
+    // Distribution list includes the older date too (not just newest).
+    expect(document.body.textContent || '').toContain('2026-01-02');
   });
 });
 

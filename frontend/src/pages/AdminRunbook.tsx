@@ -21,7 +21,6 @@ import {
 } from '@chakra-ui/react';
 import hotToast from 'react-hot-toast';
 import { FiShield, FiTool } from 'react-icons/fi';
-import api from '../services/api';
 import { triggerTaskByName } from '../utils/taskActions';
 import AppDivider from '../components/ui/AppDivider';
 
@@ -83,11 +82,7 @@ const AdminRunbook: React.FC = () => {
     setRunning(title);
     try {
       for (const step of steps) {
-        if (step.task === 'backfill_stale_daily') {
-          await api.post('/market-data/admin/coverage/backfill-stale-daily');
-        } else {
-          await triggerTaskByName(step.task);
-        }
+        await triggerTaskByName(step.task);
       }
       toast({ title: `${title} triggered`, status: 'success', duration: 4000, isClosable: true });
     } catch (err: any) {
@@ -201,6 +196,11 @@ const AdminRunbook: React.FC = () => {
                     />
                     <Text fontSize="sm">Show steps</Text>
                   </label>
+                  {showSteps ? (
+                    <Text mt={2} fontSize="xs" color="fg.muted">
+                      These are the internal steps executed by the orchestrator. They’re shown for transparency, but not triggered individually from this screen.
+                    </Text>
+                  ) : null}
                 </Box>
               ) : null}
               <VStack align="stretch" gap={3} mt={4}>
