@@ -95,13 +95,38 @@ class MarketSnapshot(Base):
     atr_percent = Column(Float)
     atr_distance = Column(Float)
     rsi = Column(Float)
+    # Canonical consolidated MAs / ATRs
+    sma_5 = Column(Float)
+    sma_14 = Column(Float)
+    sma_21 = Column(Float)
     sma_20 = Column(Float)
     sma_50 = Column(Float)
     sma_100 = Column(Float)
+    sma_150 = Column(Float)
     sma_200 = Column(Float)
     ema_10 = Column(Float)
     macd = Column(Float)
     macd_signal = Column(Float)
+
+    # Canonical consolidated ATR windows
+    atr_14 = Column(Float)
+    atr_30 = Column(Float)
+    atrp_14 = Column(Float)  # ATR/Price (%) for atr_14
+    atrp_30 = Column(Float)  # ATR/Price (%) for atr_30
+
+    # Price position in trading ranges (0..100)
+    range_pos_20d = Column(Float)
+    range_pos_50d = Column(Float)
+    range_pos_52w = Column(Float)
+
+    # ATR-multiple distances to key MAs (positive = above MA)
+    atrx_sma_21 = Column(Float)
+    atrx_sma_50 = Column(Float)
+    atrx_sma_100 = Column(Float)
+    atrx_sma_150 = Column(Float)
+
+    # Relative strength vs benchmark (Mansfield RS %, vs SPY)
+    rs_mansfield_pct = Column(Float)
 
     # Performance windows
     perf_1d = Column(Float)
@@ -150,6 +175,7 @@ class MarketSnapshot(Base):
 
     # Stage analysis (Weinstein)
     stage_label = Column(String(10))  # e.g., '1', '2A', '2B', '2C', '3', '4'
+    stage_label_5d_ago = Column(String(10))
     stage_slope_pct = Column(Float)
     stage_dist_pct = Column(Float)
 

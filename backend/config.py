@@ -107,6 +107,11 @@ class Settings(BaseSettings):
     # How many *trading days* to render in the UI histogram (frontend reads this from /market-data/coverage meta).
     COVERAGE_FILL_TRADING_DAYS_WINDOW: int = 50
 
+    # Snapshot computation window (daily bars). Needs to be large enough for:
+    # - 200D SMA
+    # - ~52-week RS computations on weekly resample
+    SNAPSHOT_DAILY_BARS_LIMIT: int = 400
+
     # Source of truth should be runtime environment variables injected by Docker Compose
     # (`infra/env.dev` via Makefile). We keep optional env-file support only when explicitly
     # provided for non-Docker workflows (do not implicitly load a repo root `.env`).
