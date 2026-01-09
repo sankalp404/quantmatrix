@@ -86,3 +86,42 @@ def test_compute_snapshot_from_db_uses_existing_fundamentals(db_session):
     assert snap.get("industry") == "Software"
     assert snap.get("market_cap") == 123456789.0
 
+
+def test_compute_snapshot_from_db_populates_v2_indicators(db_session):
+    sym = "TESTV2"
+    bm = "SPY"
+    now = datetime.utcnow().replace(microsecond=0)
+    start = now - timedelta(days=160)
+    dates = [start + timedelta(days=i) for i in range(160)]
+
+    # Create non-flat OHLC so ATR is non-zero.
+    data = []
+    for i, d in enumerate(dates):
+        c = 100.0 + i * 0.1
+        data.append({"Open": c, "High": c + 1.0, "Low": c - 1.0, "Close": c, "Volume": 1000 + i})
+    df = pd.DataFrame(data)
+    df.index = pd.DatetimeIndex(dates)
+    df_newest_first = df.iloc[::-1].copy()
+
+    market_data_service.persist_price_bars(
+        db_session, sym, df_newest_first, interval="1d", data_source="unit_test", is_adjusted=True
+    )
+    market_data_service.persist_price_bars(
+        db_session, bm, df_newest_first, interval="1d", data_source="unit_test", is_adjusted=True
+    )
+
+    snap = market_data_service.compute_snapshot_from_db(db_session, sym)
+    assert snap
+    # Canonical MAs
+    assert isinstance(snap.get("sma_14"), float)
+    assert isinstance(snap.get("sma_21"), float)
+    assert isinstance(snap.get("sma_50"), float)
+    # ATR windows
+    assert isinstance(snap.get("atr_14"), float)
+    assert snap.get("atr_14") > 0
+    # Derived fields
+    assert isinstance(snap.get("atrp_14"), float)
+    assert 0.0 <= float(snap.get("range_pos_20d")) <= 100.0
+    # Stage label should always be present (UNKNOWN at minimum)
+    assert isinstance(snap.get("stage_label"), str)
+

@@ -109,6 +109,12 @@ class MarketDataService:
             return {}
 
         price = float(df["Close"].iloc[0])
+        # df is newest-first with datetime index (when sourced from DB/provider)
+        as_of_ts = None
+        try:
+            as_of_ts = df.index[0].to_pydatetime() if hasattr(df.index[0], "to_pydatetime") else df.index[0]
+        except Exception:
+            as_of_ts = None
         data_for_ta = df.iloc[::-1].copy()
         indicators = compute_core_indicators(data_for_ta)
         indicators["current_price"] = price
@@ -120,13 +126,14 @@ class MarketDataService:
         ema_8 = indicators.get("ema_8")
         ema_21 = indicators.get("ema_21")
         ema_200 = indicators.get("ema_200")
-        atr = indicators.get("atr")
+        atr_14 = indicators.get("atr_14") or indicators.get("atr")
+        atr_30 = indicators.get("atr_30")
 
         def pct_dist(val: Optional[float]) -> Optional[float]:
             return (price / val - 1.0) * 100.0 if (val and price) else None
 
         def atr_dist(val: Optional[float]) -> Optional[float]:
-            return ((price - val) / atr) if (val and price and atr and atr != 0) else None
+            return ((price - val) / atr_14) if (val and price and atr_14 and atr_14 != 0) else None
 
         ma_for_bucket = {
             "price": price,
@@ -139,16 +146,59 @@ class MarketDataService:
         }
         bucket = classify_ma_bucket_from_ma(ma_for_bucket).get("bucket")
 
+        def range_pos(window: int) -> Optional[float]:
+            try:
+                if window <= 0:
+                    return None
+                if len(data_for_ta) < window:
+                    return None
+                recent = data_for_ta.tail(window)
+                if recent.empty:
+                    return None
+                hi = float(recent["High"].max())
+                lo = float(recent["Low"].min())
+                if hi <= lo:
+                    return None
+                return float((price - lo) / (hi - lo) * 100.0)
+            except Exception:
+                return None
+
+        def atrx(ma_val: Optional[float]) -> Optional[float]:
+            try:
+                if ma_val is None or atr_14 is None or atr_14 == 0:
+                    return None
+                return float((price - float(ma_val)) / float(atr_14))
+            except Exception:
+                return None
+
         snapshot: Dict[str, Any] = {
             "current_price": price,
+            "as_of_timestamp": as_of_ts.isoformat() if hasattr(as_of_ts, "isoformat") else as_of_ts,
             "rsi": indicators.get("rsi"),
-            "atr_value": atr,
-            "atr_percent": ((atr / price) * 100.0) if (atr and price) else None,
-            "atr_distance": ((price - sma_50) / atr) if (price and sma_50 and atr) else None,
-            "sma_20": indicators.get("sma_20"),
+            # Canonical consolidated fields
+            "sma_5": indicators.get("sma_5"),
+            "sma_14": indicators.get("sma_14"),
+            "sma_21": indicators.get("sma_21"),
             "sma_50": sma_50,
             "sma_100": indicators.get("sma_100"),
+            "sma_150": indicators.get("sma_150"),
             "sma_200": sma_200,
+            "atr_14": atr_14,
+            "atr_30": atr_30,
+            "atrp_14": ((atr_14 / price) * 100.0) if (atr_14 and price) else None,
+            "atrp_30": ((atr_30 / price) * 100.0) if (atr_30 and price) else None,
+            "atr_distance": ((price - sma_50) / atr_14) if (price and sma_50 and atr_14) else None,
+            "range_pos_20d": range_pos(20),
+            "range_pos_50d": range_pos(50),
+            "range_pos_52w": range_pos(252),
+            "atrx_sma_21": atrx(indicators.get("sma_21")),
+            "atrx_sma_50": atrx(sma_50),
+            "atrx_sma_100": atrx(indicators.get("sma_100")),
+            "atrx_sma_150": atrx(indicators.get("sma_150")),
+
+            # Backward-compat (to be dropped after we flip all callers)
+            "atr_value": atr_14,
+            "atr_percent": ((atr_14 / price) * 100.0) if (atr_14 and price) else None,
             "ema_10": indicators.get("ema_10"),
             "ema_8": ema_8,
             "ema_21": ema_21,
@@ -684,12 +734,35 @@ class MarketDataService:
         # Fallback: minimal reconstruction from mapped columns
         out: Dict[str, Any] = {
             "current_price": getattr(row, "current_price", None),
+            "as_of_timestamp": getattr(row, "as_of_timestamp", None),
             "rsi": getattr(row, "rsi", None),
-            "atr_value": getattr(row, "atr_value", None),
-            "sma_20": getattr(row, "sma_20", None),
+            # Canonical fields
+            "sma_5": getattr(row, "sma_5", None),
+            "sma_14": getattr(row, "sma_14", None),
+            "sma_21": getattr(row, "sma_21", None),
             "sma_50": getattr(row, "sma_50", None),
             "sma_100": getattr(row, "sma_100", None),
+            "sma_150": getattr(row, "sma_150", None),
             "sma_200": getattr(row, "sma_200", None),
+            "atr_14": getattr(row, "atr_14", None),
+            "atr_30": getattr(row, "atr_30", None),
+            "atrp_14": getattr(row, "atrp_14", None),
+            "atrp_30": getattr(row, "atrp_30", None),
+            "range_pos_20d": getattr(row, "range_pos_20d", None),
+            "range_pos_50d": getattr(row, "range_pos_50d", None),
+            "range_pos_52w": getattr(row, "range_pos_52w", None),
+            "atrx_sma_21": getattr(row, "atrx_sma_21", None),
+            "atrx_sma_50": getattr(row, "atrx_sma_50", None),
+            "atrx_sma_100": getattr(row, "atrx_sma_100", None),
+            "atrx_sma_150": getattr(row, "atrx_sma_150", None),
+            "rs_mansfield_pct": getattr(row, "rs_mansfield_pct", None),
+            "stage_label": getattr(row, "stage_label", None),
+            "stage_label_5d_ago": getattr(row, "stage_label_5d_ago", None),
+            "stage_slope_pct": getattr(row, "stage_slope_pct", None),
+            "stage_dist_pct": getattr(row, "stage_dist_pct", None),
+
+            # Backward-compat legacy keys (to be dropped after callers migrate)
+            "atr_value": getattr(row, "atr_value", None),
             "ema_10": getattr(row, "ema_10", None),
             "ema_8": getattr(row, "ema_8", None),
             "ema_21": getattr(row, "ema_21", None),
@@ -719,9 +792,6 @@ class MarketDataService:
             "gaps_unfilled_down": getattr(row, "gaps_unfilled_down", None),
             "trend_up_count": getattr(row, "trend_up_count", None),
             "trend_down_count": getattr(row, "trend_down_count", None),
-            "stage_label": getattr(row, "stage_label", None),
-            "stage_slope_pct": getattr(row, "stage_slope_pct", None),
-            "stage_dist_pct": getattr(row, "stage_dist_pct", None),
             "sector": getattr(row, "sector", None),
             "industry": getattr(row, "industry", None),
             "market_cap": getattr(row, "market_cap", None),
@@ -737,8 +807,10 @@ class MarketDataService:
         """
         from backend.models import PriceData
 
+        limit_bars = int(getattr(settings, "SNAPSHOT_DAILY_BARS_LIMIT", 400))
         rows = (
             db.query(
+                PriceData.date,
                 PriceData.open_price,
                 PriceData.high_price,
                 PriceData.low_price,
@@ -747,23 +819,86 @@ class MarketDataService:
             )
             .filter(PriceData.symbol == symbol, PriceData.interval == "1d")
             .order_by(PriceData.date.desc())
-            .limit(270)
+            .limit(limit_bars)
             .all()
         )
         if not rows:
             return {}
         df = pd.DataFrame(
-            {
-                "Open": [float(r[0]) for r in rows],
-                "High": [float(r[1]) for r in rows],
-                "Low": [float(r[2]) for r in rows],
-                "Close": [float(r[3]) for r in rows],
-                "Volume": [int(r[4] or 0) for r in rows],
-            }
+            [
+                {
+                    "date": r[0],
+                    "Open": float(r[1]) if r[1] is not None else float(r[4]),
+                    "High": float(r[2]) if r[2] is not None else float(r[4]),
+                    "Low": float(r[3]) if r[3] is not None else float(r[4]),
+                    "Close": float(r[4]),
+                    "Volume": int(r[5] or 0),
+                }
+                for r in rows
+            ]
         )
+        df.set_index("date", inplace=True)
         snapshot = self._snapshot_from_dataframe(df)
         if not snapshot:
             return {}
+
+        # Level 3/4: Relative strength vs SPY + Weinstein stage (DB-only if benchmark available).
+        try:
+            bm = "SPY"
+            bm_rows = (
+                db.query(
+                    PriceData.date,
+                    PriceData.open_price,
+                    PriceData.high_price,
+                    PriceData.low_price,
+                    PriceData.close_price,
+                    PriceData.volume,
+                )
+                .filter(PriceData.symbol == bm, PriceData.interval == "1d")
+                .order_by(PriceData.date.desc())
+                .limit(limit_bars)
+                .all()
+            )
+            if bm_rows:
+                bm_df = pd.DataFrame(
+                    [
+                        {
+                            "date": r[0],
+                            "Open": float(r[1]) if r[1] is not None else float(r[4]),
+                            "High": float(r[2]) if r[2] is not None else float(r[4]),
+                            "Low": float(r[3]) if r[3] is not None else float(r[4]),
+                            "Close": float(r[4]),
+                            "Volume": int(r[5] or 0),
+                        }
+                        for r in bm_rows
+                    ]
+                )
+                bm_df.set_index("date", inplace=True)
+                # compute_weinstein_stage_from_daily expects newest-first
+                sym_newest = df.copy()
+                bm_newest = bm_df.copy()
+                stage = compute_weinstein_stage_from_daily(sym_newest, bm_newest)
+                if isinstance(stage, dict):
+                    if stage.get("stage_label") is not None:
+                        snapshot["stage_label"] = stage.get("stage_label")
+                    if stage.get("stage_slope_pct") is not None:
+                        snapshot["stage_slope_pct"] = stage.get("stage_slope_pct")
+                    if stage.get("stage_dist_pct") is not None:
+                        snapshot["stage_dist_pct"] = stage.get("stage_dist_pct")
+                    if stage.get("rs_mansfield_pct") is not None:
+                        snapshot["rs_mansfield_pct"] = stage.get("rs_mansfield_pct")
+                    # Stage 5 trading days ago: drop newest 5 bars and recompute
+                    try:
+                        stage_prev = compute_weinstein_stage_from_daily(
+                            sym_newest.iloc[5:].copy(),
+                            bm_newest.iloc[5:].copy(),
+                        )
+                        if isinstance(stage_prev, dict) and stage_prev.get("stage_label") is not None:
+                            snapshot["stage_label_5d_ago"] = stage_prev.get("stage_label")
+                    except Exception:
+                        pass
+        except Exception:
+            pass
         # Fundamentals enrichment (reuse from latest snapshot if present; otherwise fetch once)
         # Prefer fundamentals from the latest stored snapshot
         try:
@@ -789,7 +924,7 @@ class MarketDataService:
         if self._needs_fundamentals(snapshot):
             try:
                 info = self.get_fundamentals_info(symbol)
-                for k in ("sector", "industry", "market_cap"):
+                for k in ("name", "sector", "industry", "sub_industry", "market_cap"):
                     if info.get(k) is not None:
                         snapshot[k] = info.get(k)
             except Exception:
@@ -812,6 +947,32 @@ class MarketDataService:
         snapshot = self._snapshot_from_dataframe(data)
         if not snapshot:
             return {}
+
+        # Level 3/4: Relative strength vs SPY + Weinstein stage (provider slow-path; best-effort).
+        try:
+            bm_df = await self.get_historical_data("SPY", period="1y", interval="1d")
+            if bm_df is not None and not bm_df.empty:
+                stage = compute_weinstein_stage_from_daily(data, bm_df)
+                if isinstance(stage, dict):
+                    if stage.get("stage_label") is not None:
+                        snapshot["stage_label"] = stage.get("stage_label")
+                    if stage.get("stage_slope_pct") is not None:
+                        snapshot["stage_slope_pct"] = stage.get("stage_slope_pct")
+                    if stage.get("stage_dist_pct") is not None:
+                        snapshot["stage_dist_pct"] = stage.get("stage_dist_pct")
+                    if stage.get("rs_mansfield_pct") is not None:
+                        snapshot["rs_mansfield_pct"] = stage.get("rs_mansfield_pct")
+                    try:
+                        stage_prev = compute_weinstein_stage_from_daily(
+                            data.iloc[5:].copy(),
+                            bm_df.iloc[5:].copy(),
+                        )
+                        if isinstance(stage_prev, dict) and stage_prev.get("stage_label") is not None:
+                            snapshot["stage_label_5d_ago"] = stage_prev.get("stage_label")
+                    except Exception:
+                        pass
+        except Exception:
+            pass
 
         try:
             funda = self.get_fundamentals_info(symbol)
@@ -1283,18 +1444,19 @@ class MarketDataService:
             if not universe or total_symbols == 0:
                 return []
             start_dt = now - timedelta(days=days)
+            snap_dt = func.coalesce(MarketSnapshot.as_of_timestamp, MarketSnapshot.analysis_timestamp)
             rows = (
                 db.query(
-                    func.date(MarketSnapshot.analysis_timestamp).label("d"),
+                    func.date(snap_dt).label("d"),
                     func.count(distinct(MarketSnapshot.symbol)).label("symbol_count"),
                 )
                 .filter(
                     MarketSnapshot.analysis_type == "technical_snapshot",
                     MarketSnapshot.symbol.in_(set(universe)),
-                    MarketSnapshot.analysis_timestamp >= start_dt,
+                    snap_dt >= start_dt,
                 )
-                .group_by(func.date(MarketSnapshot.analysis_timestamp))
-                .order_by(func.date(MarketSnapshot.analysis_timestamp).asc())
+                .group_by(func.date(snap_dt))
+                .order_by(func.date(snap_dt).asc())
                 .all()
             )
             out: List[Dict[str, Any]] = []
