@@ -245,7 +245,7 @@ class ATRSignalGenerator:
         """Check for ATR Matrix ENTRY signal conditions."""
         try:
             current_price = market_data.get("close", 0)
-            sma_20 = market_data.get("sma_20", 0)
+            sma_21 = market_data.get("sma_21", market_data.get("sma_20", 0))
             sma_50 = market_data.get("sma_50", 0)
             atr_distance = market_data.get("atr_distance", 0)
             ma_aligned = market_data.get("ma_aligned", False)
@@ -262,9 +262,9 @@ class ATRSignalGenerator:
             else:
                 return None  # Hard requirement
 
-            # 2. Core condition: Price above SMA20
-            if current_price > sma_20:
-                conditions_met.append("Price above SMA20")
+            # 2. Core condition: Price above SMA21 (canonical)
+            if current_price > sma_21:
+                conditions_met.append("Price above SMA21")
                 strength += 0.25
             else:
                 return None  # Hard requirement

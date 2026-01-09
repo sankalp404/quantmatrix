@@ -62,6 +62,14 @@ def task_run(task_name: str, *, lock_key: Optional[Callable[..., Optional[str]]]
                 counters = None
                 if isinstance(result, dict):
                     counters = {k: v for k, v in result.items() if k not in ("status", "error")}
+                    # Allow tasks to report non-fatal, bounded error summaries without failing the job.
+                    # We store these in JobRun.error for visibility in the Admin Jobs UI.
+                    try:
+                        nonfatal_error = result.get("error")
+                        if nonfatal_error:
+                            job.error = str(nonfatal_error)[:10000]
+                    except Exception:
+                        pass
                 job.status = "ok"
                 job.finished_at = datetime.utcnow()
                 if counters:
