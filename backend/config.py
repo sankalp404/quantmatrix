@@ -102,6 +102,10 @@ class Settings(BaseSettings):
     # Coverage UI sampling only (must NOT affect correctness/backfills).
     # Number of stale symbols to include in API/UI sample lists (full counts are computed separately).
     COVERAGE_STALE_SAMPLE: int = 200
+    # Coverage fill-by-date lookback (calendar days). Used for daily.fill_by_date and snapshot_fill_by_date series.
+    COVERAGE_FILL_LOOKBACK_DAYS: int = 90
+    # How many *trading days* to render in the UI histogram (frontend reads this from /market-data/coverage meta).
+    COVERAGE_FILL_TRADING_DAYS_WINDOW: int = 50
 
     # Source of truth should be runtime environment variables injected by Docker Compose
     # (`infra/env.dev` via Makefile). We keep optional env-file support only when explicitly

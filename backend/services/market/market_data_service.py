@@ -17,6 +17,7 @@ import redis
 import yfinance as yf
 from sqlalchemy.orm import Session
 from sqlalchemy import or_
+from sqlalchemy import func, distinct
 
 from backend.config import settings
 from backend.database import SessionLocal
@@ -1239,6 +1240,77 @@ class MarketDataService:
             universe = sorted({str(s).upper() for (s,) in db.query(PriceData.symbol).distinct().all() if s})
         total_symbols = len(universe)
 
+        def _fill_by_date(interval: str, days: int = 60) -> List[Dict[str, Any]]:
+            """Return date buckets for 'has OHLCV row on that date' coverage.
+
+            Each row represents a date (UTC, derived from stored timestamps) with:
+            - symbol_count: distinct symbols with at least 1 bar on that date
+            - pct_of_universe: symbol_count / total_symbols * 100
+            """
+            if not universe or total_symbols == 0:
+                return []
+            start_dt = now - timedelta(days=days)
+            rows = (
+                db.query(
+                    func.date(PriceData.date).label("d"),
+                    func.count(distinct(PriceData.symbol)).label("symbol_count"),
+                )
+                .filter(
+                    PriceData.interval == interval,
+                    PriceData.symbol.in_(set(universe)),
+                    PriceData.date >= start_dt,
+                )
+                .group_by(func.date(PriceData.date))
+                .order_by(func.date(PriceData.date).asc())
+                .all()
+            )
+            out: List[Dict[str, Any]] = []
+            for d, symbol_count in rows:
+                if not d:
+                    continue
+                n = int(symbol_count or 0)
+                out.append(
+                    {
+                        "date": str(d),
+                        "symbol_count": n,
+                        "pct_of_universe": round((n / total_symbols) * 100.0, 1) if total_symbols else 0.0,
+                    }
+                )
+            return out
+
+        def _snapshot_fill_by_date(days: int = 60) -> List[Dict[str, Any]]:
+            """Per-date snapshot coverage for technical snapshots (MarketSnapshot)."""
+            if not universe or total_symbols == 0:
+                return []
+            start_dt = now - timedelta(days=days)
+            rows = (
+                db.query(
+                    func.date(MarketSnapshot.analysis_timestamp).label("d"),
+                    func.count(distinct(MarketSnapshot.symbol)).label("symbol_count"),
+                )
+                .filter(
+                    MarketSnapshot.analysis_type == "technical_snapshot",
+                    MarketSnapshot.symbol.in_(set(universe)),
+                    MarketSnapshot.analysis_timestamp >= start_dt,
+                )
+                .group_by(func.date(MarketSnapshot.analysis_timestamp))
+                .order_by(func.date(MarketSnapshot.analysis_timestamp).asc())
+                .all()
+            )
+            out: List[Dict[str, Any]] = []
+            for d, symbol_count in rows:
+                if not d:
+                    continue
+                n = int(symbol_count or 0)
+                out.append(
+                    {
+                        "date": str(d),
+                        "symbol_count": n,
+                        "pct_of_universe": round((n / total_symbols) * 100.0, 1) if total_symbols else 0.0,
+                    }
+                )
+            return out
+
         daily_section, _ = self._compute_interval_coverage_for_symbols(
             db,
             symbols=universe,
@@ -1263,6 +1335,16 @@ class MarketDataService:
             "daily": daily_section,
             "m5": m5_section,
         }
+        # Daily fill series (date -> % of symbols with OHLCV on that date)
+        try:
+            snapshot["daily"]["fill_by_date"] = _fill_by_date("1d", days=60)
+        except Exception:
+            snapshot["daily"]["fill_by_date"] = []
+        # Snapshot fill series (technical snapshots) for same period
+        try:
+            snapshot["daily"]["snapshot_fill_by_date"] = _snapshot_fill_by_date(days=60)
+        except Exception:
+            snapshot["daily"]["snapshot_fill_by_date"] = []
         snapshot["status"] = compute_coverage_status(snapshot)
         return snapshot
 

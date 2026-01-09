@@ -1,5 +1,5 @@
 import React from 'react';
-import { Box, Heading, Stack, Text } from '@chakra-ui/react';
+import { Badge, Box, Heading, HStack, Stack, Text } from '@chakra-ui/react';
 import type {
   CoverageAction,
   CoverageBucketGroup,
@@ -11,6 +11,7 @@ import type {
 export interface CoverageSummaryCardProps {
   hero: CoverageHeroMeta;
   status?: any;
+  showUpdated?: boolean;
   children?: React.ReactNode;
 }
 
@@ -18,21 +19,47 @@ export interface CoverageSummaryCardProps {
  * Read-only coverage summary container.
  * Keep this dependency-light so CI doesn't depend on chart libs/DOM quirks.
  */
-export const CoverageSummaryCard: React.FC<CoverageSummaryCardProps> = ({ hero, children }) => {
+export const CoverageSummaryCard: React.FC<CoverageSummaryCardProps> = ({
+  hero,
+  showUpdated = true,
+  children,
+}) => {
+  const label = String(hero.statusLabel || '').toUpperCase() || '—';
+  const palette =
+    hero.statusColor === 'green'
+      ? 'green'
+      : hero.statusColor === 'yellow'
+        ? 'orange'
+        : hero.statusColor === 'red'
+          ? 'red'
+          : 'gray';
   return (
-    <Box borderWidth="1px" borderRadius="md" p={4}>
+    <Box borderWidth="1px" borderColor="border.subtle" borderRadius="lg" p={4} bg="bg.card">
       <Stack gap={3}>
         <Box>
-          <Heading size="sm">Coverage Status</Heading>
-          <Text fontSize="sm" color="gray.400">
-            {hero.statusLabel} · Updated {hero.updatedRelative} ({hero.updatedDisplay})
-          </Text>
-          <Text mt={1}>{hero.summary}</Text>
+          <HStack justify="space-between" align="start" gap={3} flexWrap="wrap">
+            <Box>
+              <Heading size="sm">Coverage</Heading>
+              {showUpdated && hero && hero.updatedRelative && hero.updatedDisplay ? (
+                <Text fontSize="xs" color="fg.muted">
+                  Updated {hero.updatedRelative} ({hero.updatedDisplay})
+                </Text>
+              ) : null}
+            </Box>
+            <Badge variant="subtle" colorPalette={palette}>
+              {label}
+            </Badge>
+          </HStack>
+          {hero.summary ? (
+            <Text mt={1} fontSize="sm" color="fg.muted">
+              {hero.summary}
+            </Text>
+          ) : null}
           {hero.warningBanner ? (
-            <Box mt={2} borderWidth="1px" borderRadius="md" p={3}>
+            <Box mt={2} borderWidth="1px" borderColor="border.subtle" borderRadius="md" p={3} bg="bg.muted">
               <Text fontWeight="semibold">{hero.warningBanner.title}</Text>
               {hero.warningBanner.description ? (
-                <Text fontSize="sm" color="gray.400">
+                <Text fontSize="sm" color="fg.muted">
                   {hero.warningBanner.description}
                 </Text>
               ) : null}

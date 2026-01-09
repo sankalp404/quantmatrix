@@ -4,7 +4,15 @@ export type MoneyFormatOptions = {
 };
 
 function safeDate(value: string | number | Date): Date | null {
-  const d = value instanceof Date ? value : new Date(value);
+  // Backend timestamps should be UTC. If we get an ISO-like string without a timezone,
+  // normalize it to UTC by appending "Z" so the browser doesn't interpret it as local time.
+  const normalized =
+    typeof value === "string" &&
+    /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(\.\d+)?$/.test(value) &&
+    !/[zZ]$/.test(value)
+      ? `${value}Z`
+      : value;
+  const d = normalized instanceof Date ? normalized : new Date(normalized);
   return Number.isNaN(d.getTime()) ? null : d;
 }
 

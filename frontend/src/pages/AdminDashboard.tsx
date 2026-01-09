@@ -1,5 +1,14 @@
 import React from 'react';
-import { Box, Heading, Button, Text, HStack, Progress, VStack, Badge } from '@chakra-ui/react';
+import {
+  Box,
+  Heading,
+  Button,
+  Text,
+  HStack,
+  VStack,
+  Badge,
+  Tooltip,
+} from '@chakra-ui/react';
 import toast from 'react-hot-toast';
 import api from '../services/api';
 import { triggerTaskByName } from '../utils/taskActions';
@@ -163,87 +172,192 @@ const AdminDashboard: React.FC = () => {
     return formatDateTime(ts, timezone);
   };
 
-  const dailyLast = (coverage as any)?.daily?.last as Record<string, string | null | undefined> | undefined;
-  const dailyLastDist = React.useMemo(() => {
-    const counts = new Map<string, number>();
-    if (!dailyLast) return { newestDate: null as string | null, newestCount: 0, total: 0, rows: [] as Array<{ date: string; count: number }> };
-    let total = 0;
-    for (const iso of Object.values(dailyLast)) {
-      const date = iso ? String(iso).split('T')[0] : 'none';
-      counts.set(date, (counts.get(date) || 0) + 1);
-      total += 1;
-    }
-    const rows = Array.from(counts.entries())
-      .map(([date, count]) => ({ date, count }))
-      .sort((a, b) => (a.date === b.date ? b.count - a.count : a.date < b.date ? 1 : -1));
+  const dailyFillSeries = (coverage as any)?.daily?.fill_by_date as
+    | Array<{ date: string; symbol_count: number; pct_of_universe: number }>
+    | undefined;
+  const snapshotFillSeries = (coverage as any)?.daily?.snapshot_fill_by_date as
+    | Array<{ date: string; symbol_count: number; pct_of_universe: number }>
+    | undefined;
+
+  const totalSymbols = Number((coverage as any)?.symbols ?? (coverage as any)?.tracked_count ?? 0);
+
+  const dailyFillDist = React.useMemo(() => {
+    const rows = (dailyFillSeries || [])
+      .filter((r) => r && r.date)
+      .slice()
+      .sort((a, b) => (a.date < b.date ? 1 : a.date > b.date ? -1 : 0)); // newest-first
     const newestDate = rows.length ? rows[0].date : null;
-    const newestCount = newestDate ? (counts.get(newestDate) || 0) : 0;
-    return { newestDate, newestCount, total, rows };
-  }, [dailyLast]);
+    const newestCount = rows.length ? Number(rows[0].symbol_count || 0) : 0;
+    const newestPct = rows.length ? Number(rows[0].pct_of_universe || 0) : 0;
+    return { newestDate, newestCount, newestPct, total: totalSymbols || 0, rows };
+  }, [dailyFillSeries, totalSymbols]);
+
+  const heroEffective = React.useMemo(() => {
+    if (!hero) return hero;
+    // When 5m is disabled, suppress noisy “missing 5m data” messaging in the hero.
+    if (!backfill5mEnabled && hero?.staleCounts?.daily === 0 && hero?.staleCounts?.m5 > 0) {
+      return {
+        ...hero,
+        summary: '5m is disabled (ignored for status).',
+      };
+    }
+    return hero;
+  }, [hero, backfill5mEnabled]);
+
+  const dailyHistogram = React.useMemo(() => {
+    const { rows, newestDate, total } = dailyFillDist;
+    if (!rows.length || !newestDate || !total) return null;
+
+    const pctFor = (row: { pct_of_universe: number }) => Number(row?.pct_of_universe || 0);
+    const colorForPct = (pct: number) => {
+      // HSL: red(0) -> green(120), driven by % (height)
+      const t = Math.max(0, Math.min(1, pct / 100));
+      const hue = 0 + 120 * t;
+      return `hsl(${hue}, 70%, 45%)`;
+    };
+
+    const barMaxH = 36;
+    const fillMap = new Map(rows.map((r) => [r.date, r]));
+    const snapshotPctByDate = new Map((snapshotFillSeries || []).map((r) => [r.date, Number(r.pct_of_universe || 0)]));
+
+    // Trading-day series: use the last N observed dates in fill_by_date.
+    // This naturally excludes weekends/holidays (no OHLCV rows expected) and avoids confusing gaps.
+    const windowDays = Math.max(
+      1,
+      Number((coverage as any)?.meta?.fill_trading_days_window ?? 50),
+    );
+    const bars: Array<{ date: string; symbol_count: number; pct_of_universe: number }> = rows
+      .slice() // newest-first
+      .reverse() // oldest-first
+      .slice(-windowDays) // keep last N trading days
+      .map((r) => ({
+        date: r.date,
+        symbol_count: Number(r.symbol_count || 0),
+        pct_of_universe: Number(r.pct_of_universe || 0),
+      }));
+
+    return (
+      <Box mt={2}>
+        <Box
+          borderRadius="md"
+          borderWidth="1px"
+          borderColor="border.subtle"
+          bg="bg.card"
+          px={2}
+          py={2}
+          overflowX="auto"
+          overflowY="hidden"
+        >
+          <HStack align="end" gap={1} h={`${barMaxH}px`} w="full">
+            {bars.map((r) => {
+              const pct = pctFor(r);
+              const h = Math.max(2, Math.round((pct / 100) * barMaxH));
+              const snapPct = snapshotPctByDate.get(r.date);
+              const snapOk = typeof snapPct === 'number' && snapPct >= 95;
+              const snapNone = typeof snapPct !== 'number';
+              // Dot thresholds: green = basically complete, orange = partial, red = low coverage, gray = no snapshot run recorded.
+              const dotBg =
+                snapNone
+                  ? 'gray.400'
+                  : snapOk
+                    ? 'green.500'
+                    : (snapPct || 0) >= 50
+                      ? 'orange.500'
+                      : 'red.500';
+              return (
+                <Box
+                  key={r.date}
+                  flex="1 0 0"
+                  minW="6px"
+                  title={`${r.date}: ${r.symbol_count}/${total} (${Math.round(pct * 10) / 10}%)`}
+                >
+                  <Box w="full" h={`${h}px`} borderRadius="sm" bg={colorForPct(pct)} />
+                  <Box
+                    mt="2px"
+                    mx="auto"
+                    w="6px"
+                    h="6px"
+                    borderRadius="full"
+                    bg={dotBg}
+                    title={
+                      snapNone
+                        ? `${r.date}: snapshots —`
+                        : `${r.date}: snapshots ${Math.round((snapPct || 0) * 10) / 10}%`
+                    }
+                  />
+                </Box>
+              );
+            })}
+          </HStack>
+        </Box>
+        <Text mt={1} fontSize="xs" color="fg.muted">
+          Histogram bars (daily, last {windowDays} trading days): height + color represent % of symbols with a stored 1d OHLCV bar on that date.
+          Dot under each bar indicates technical snapshot coverage for that date (green ≥95%, orange ≥50%, red &lt;50%, gray = no snapshot run recorded).
+        </Text>
+      </Box>
+    );
+  }, [dailyFillDist, snapshotFillSeries]);
 
   return (
     <Box p={4}>
       <Heading size="md" mb={4}>Admin Dashboard</Heading>
 
       {coverage && (
-        <CoverageSummaryCard hero={hero} status={coverage.status}>
+        <CoverageSummaryCard hero={heroEffective} status={coverage.status} showUpdated={false}>
           <CoverageKpiGrid kpis={kpis} variant="stat" />
           <CoverageTrendGrid sparkline={sparkline} />
           <CoverageBucketsGrid groups={hero?.buckets || []} />
-          {dailyLastDist.total > 0 ? (
+          {dailyFillDist.total > 0 ? (
             <Box mt={3} borderWidth="1px" borderColor="border.subtle" borderRadius="lg" p={3} bg="bg.muted">
               <HStack justify="space-between" align="start" flexWrap="wrap" gap={3}>
                 <Box>
                   <Text fontSize="sm" fontWeight="semibold" color="fg.default">
-                    Daily last-bar distribution
+                    Daily fill by date (1d OHLCV)
                   </Text>
                   <Text fontSize="xs" color="fg.muted">
-                    {dailyLastDist.newestDate
-                      ? `Newest date: ${dailyLastDist.newestDate} • ${dailyLastDist.newestCount}/${dailyLastDist.total} symbols`
+                    {dailyFillDist.newestDate
+                      ? `Newest date: ${dailyFillDist.newestDate} • ${dailyFillDist.newestCount}/${dailyFillDist.total} symbols`
                       : 'No daily bars found'}
                   </Text>
                 </Box>
                 <Badge variant="subtle" colorScheme="green">
-                  {dailyLastDist.total > 0
-                    ? `${Math.round((dailyLastDist.newestCount / dailyLastDist.total) * 1000) / 10}% at newest`
+                  {dailyFillDist.total > 0
+                    ? `${Math.round((dailyFillDist.newestPct || 0) * 10) / 10}% filled on newest`
                     : '—'}
                 </Badge>
               </HStack>
-              <Box mt={2}>
-                <Progress.Root
-                  value={dailyLastDist.total > 0 ? (dailyLastDist.newestCount / dailyLastDist.total) * 100 : 0}
-                  max={100}
-                >
-                  <Progress.Track borderRadius="full">
-                    <Progress.Range />
-                  </Progress.Track>
-                </Progress.Root>
-              </Box>
-              <VStack align="stretch" gap={1.5} mt={3}>
-                {dailyLastDist.rows.slice(0, 8).map((row) => (
-                  <HStack key={row.date} justify="space-between">
-                    <Text fontSize="xs" color="fg.muted">
-                      {row.date}
-                    </Text>
-                    <Text fontSize="xs" color="fg.default">
-                      {row.count}
-                    </Text>
-                  </HStack>
-                ))}
-              </VStack>
+              {dailyHistogram}
+              <Text mt={2} fontSize="xs" color="fg.muted">
+                Hover a bar to see date, filled symbols, fill %, and snapshot %.
+              </Text>
             </Box>
           ) : null}
           <Box mt={3} display="flex" alignItems="center" justifyContent="space-between" gap={3} flexWrap="wrap">
-            <Box>
-              <Text fontSize="xs" color="fg.muted">
-                Source: <Text as="span" color="fg.default">{String(coverage?.meta?.source || '—')}</Text> •{' '}
-                Last refresh: <Text as="span" color="fg.default">{formatDateTime(coverage?.meta?.updated_at, timezone)}</Text>
-                {' '}• Coverage monitor: <Text as="span" color="fg.default">{fmtLastRun('monitor_coverage_health')}</Text>
-                {' '}• Restore daily: <Text as="span" color="fg.default">{fmtLastRun('bootstrap_daily_coverage_tracked')}</Text>
-              </Text>
-            </Box>
+            <HStack gap={2} flexWrap="wrap">
+              <Badge variant="subtle">Source: {String(coverage?.meta?.source || '—')}</Badge>
+              <Badge variant="subtle">Refreshed: {formatDateTime(coverage?.meta?.updated_at, timezone)}</Badge>
+              <Tooltip.Root openDelay={200} positioning={{ placement: 'top' }}>
+                <Tooltip.Trigger asChild>
+                  <Badge variant="subtle" cursor="help">
+                    Runs: monitor/restore
+                  </Badge>
+                </Tooltip.Trigger>
+                <Tooltip.Positioner>
+                  <Tooltip.Content>
+                    <Box>
+                      <Text fontSize="xs" color="fg.muted">
+                        Monitor: {fmtLastRun('monitor_coverage_health')}
+                      </Text>
+                      <Text fontSize="xs" color="fg.muted">
+                        Restore: {fmtLastRun('bootstrap_daily_coverage_tracked')}
+                      </Text>
+                    </Box>
+                  </Tooltip.Content>
+                </Tooltip.Positioner>
+              </Tooltip.Root>
+            </HStack>
             <Button size="sm" variant="outline" loading={refreshingCoverage} onClick={() => void refreshCoverageNow('manual')}>
-              Refresh coverage now
+              Refresh coverage
             </Button>
           </Box>
           <Box mt={3} display="flex" alignItems="center" gap={3}>
@@ -288,7 +402,7 @@ const AdminDashboard: React.FC = () => {
                     Update Tracked
                   </Button>
                   <Button size="xs" variant="outline" onClick={() => void runNamedTask('recompute_indicators_universe', 'Recompute indicators')}>
-                    Recompute Indicators
+                    Recompute Indicators (Market Snapshot)
                   </Button>
                   <Button size="xs" variant="outline" onClick={() => void runNamedTask('record_daily_history', 'Record history')}>
                     Record History

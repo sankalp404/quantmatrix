@@ -46,12 +46,20 @@ vi.mock('../../hooks/useCoverageSnapshot', () => {
           backfill_5m_enabled: true,
         },
         status: { label: 'degraded', summary: 'test', daily_pct: 0, m5_pct: 0, stale_daily: 1, stale_m5: 0 },
+        symbols: 3,
         daily: {
           last: {
             A: '2026-01-08T00:00:00Z',
             B: '2026-01-08T00:00:00Z',
             C: '2026-01-02T00:00:00Z',
           },
+          fill_by_date: [
+            { date: '2026-01-08', symbol_count: 2, pct_of_universe: 66.7 },
+            { date: '2026-01-02', symbol_count: 1, pct_of_universe: 33.3 },
+          ],
+          snapshot_fill_by_date: [
+            { date: '2026-01-08', symbol_count: 2, pct_of_universe: 66.7 },
+          ],
         },
       },
       refresh: vi.fn(),
@@ -88,7 +96,7 @@ describe('AdminDashboard coverage refresh', () => {
   it('allows manual refresh via button', async () => {
     const user = userEvent.setup();
     renderWithProviders(<AdminDashboard />, { route: '/settings/admin/dashboard' });
-    const btn = (await screen.findAllByRole('button', { name: /refresh coverage now/i }))[0];
+    const btn = (await screen.findAllByRole('button', { name: /refresh coverage/i }))[0];
     await user.click(btn);
     expect(apiPost).toHaveBeenCalledWith('/market-data/admin/coverage/refresh');
     expect(apiPost.mock.calls.filter((c) => c[0] === '/market-data/admin/coverage/refresh').length).toBeGreaterThanOrEqual(2);
@@ -102,14 +110,14 @@ describe('AdminDashboard coverage refresh', () => {
     expect(stale.length).toBeGreaterThanOrEqual(1);
   });
 
-  it('renders daily last-bar distribution', async () => {
+  it('renders daily fill-by-date distribution', async () => {
     renderWithProviders(<AdminDashboard />, { route: '/settings/admin/dashboard' });
-    const blocks = await screen.findAllByText(/Daily last-bar distribution/i);
+    const blocks = await screen.findAllByText(/Daily fill by date/i);
     expect(blocks.length).toBeGreaterThanOrEqual(1);
     const newest = await screen.findAllByText(/Newest date: 2026-01-08/i);
     expect(newest.length).toBeGreaterThanOrEqual(1);
-    // Distribution list includes the older date too (not just newest).
-    expect(document.body.textContent || '').toContain('2026-01-02');
+    // Tooltip-only details: ensure hint is present.
+    expect(document.body.textContent || '').toContain('Hover a bar to see date');
   });
 });
 
