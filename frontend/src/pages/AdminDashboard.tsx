@@ -310,18 +310,9 @@ const AdminDashboard: React.FC = () => {
                 </Badge>
               </HStack>
               {dailyHistogram}
-              <VStack align="stretch" gap={1.5} mt={3}>
-                {dailyFillDist.rows.slice(0, 8).map((row) => (
-                  <HStack key={row.date} justify="space-between">
-                    <Text fontSize="xs" color="fg.muted">
-                      {row.date}
-                    </Text>
-                    <Text fontSize="xs" color="fg.default">
-                      {row.symbol_count} ({Math.round(Number(row.pct_of_universe || 0) * 10) / 10}%)
-                    </Text>
-                  </HStack>
-                ))}
-              </VStack>
+              <Text mt={2} fontSize="xs" color="fg.muted">
+                Hover a bar to see date, filled symbols, fill %, and snapshot %.
+              </Text>
             </Box>
           ) : null}
           <Box mt={3} display="flex" alignItems="center" justifyContent="space-between" gap={3} flexWrap="wrap">

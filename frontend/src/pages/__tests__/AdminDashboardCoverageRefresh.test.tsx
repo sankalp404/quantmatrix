@@ -116,8 +116,8 @@ describe('AdminDashboard coverage refresh', () => {
     expect(blocks.length).toBeGreaterThanOrEqual(1);
     const newest = await screen.findAllByText(/Newest date: 2026-01-08/i);
     expect(newest.length).toBeGreaterThanOrEqual(1);
-    // Distribution list includes the older date too (not just newest).
-    expect(document.body.textContent || '').toContain('2026-01-02');
+    // Tooltip-only details: ensure hint is present.
+    expect(document.body.textContent || '').toContain('Hover a bar to see date');
   });
 });
 
