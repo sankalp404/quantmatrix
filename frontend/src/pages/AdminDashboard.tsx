@@ -198,7 +198,7 @@ const AdminDashboard: React.FC = () => {
     if (!backfill5mEnabled && hero?.staleCounts?.daily === 0 && hero?.staleCounts?.m5 > 0) {
       return {
         ...hero,
-        summary: 'Daily coverage OK • 5m disabled (ignored).',
+        summary: '5m is disabled (ignored for status).',
       };
     }
     return hero;
@@ -303,7 +303,7 @@ const AdminDashboard: React.FC = () => {
       <Heading size="md" mb={4}>Admin Dashboard</Heading>
 
       {coverage && (
-        <CoverageSummaryCard hero={heroEffective} status={coverage.status}>
+        <CoverageSummaryCard hero={heroEffective} status={coverage.status} showUpdated={false}>
           <CoverageKpiGrid kpis={kpis} variant="stat" />
           <CoverageTrendGrid sparkline={sparkline} />
           <CoverageBucketsGrid groups={hero?.buckets || []} />

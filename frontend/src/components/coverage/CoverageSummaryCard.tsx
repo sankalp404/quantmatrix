@@ -11,6 +11,7 @@ import type {
 export interface CoverageSummaryCardProps {
   hero: CoverageHeroMeta;
   status?: any;
+  showUpdated?: boolean;
   children?: React.ReactNode;
 }
 
@@ -18,7 +19,11 @@ export interface CoverageSummaryCardProps {
  * Read-only coverage summary container.
  * Keep this dependency-light so CI doesn't depend on chart libs/DOM quirks.
  */
-export const CoverageSummaryCard: React.FC<CoverageSummaryCardProps> = ({ hero, children }) => {
+export const CoverageSummaryCard: React.FC<CoverageSummaryCardProps> = ({
+  hero,
+  showUpdated = true,
+  children,
+}) => {
   const label = String(hero.statusLabel || '').toUpperCase() || '—';
   const palette =
     hero.statusColor === 'green'
@@ -35,9 +40,11 @@ export const CoverageSummaryCard: React.FC<CoverageSummaryCardProps> = ({ hero, 
           <HStack justify="space-between" align="start" gap={3} flexWrap="wrap">
             <Box>
               <Heading size="sm">Coverage</Heading>
-              <Text fontSize="xs" color="fg.muted">
-                Updated {hero.updatedRelative} ({hero.updatedDisplay})
-              </Text>
+              {showUpdated && hero && hero.updatedRelative && hero.updatedDisplay ? (
+                <Text fontSize="xs" color="fg.muted">
+                  Updated {hero.updatedRelative} ({hero.updatedDisplay})
+                </Text>
+              ) : null}
             </Box>
             <Badge variant="subtle" colorPalette={palette}>
               {label}
