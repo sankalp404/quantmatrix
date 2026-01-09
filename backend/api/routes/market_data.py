@@ -679,11 +679,12 @@ async def get_coverage(
             m5_section = _build_interval_section("5m")
 
             # Daily fill-by-date: for each date, how many symbols have >=1 OHLCV bar on that date.
-            def _fill_by_date(interval: str, days: int = 60) -> List[Dict[str, Any]]:
+            def _fill_by_date(interval: str, days: int | None = None) -> List[Dict[str, Any]]:
                 if not sym_set:
                     return []
                 now_utc = datetime.utcnow()
-                start_dt = now_utc - timedelta(days=days)
+                lookback = int(days if days is not None else getattr(settings, "COVERAGE_FILL_LOOKBACK_DAYS", 90))
+                start_dt = now_utc - timedelta(days=lookback)
                 rows = (
                     db.query(
                         func.date(PriceData.date).label("d"),
@@ -713,11 +714,12 @@ async def get_coverage(
                 return out
 
             # Snapshot fill-by-date (technical snapshots): distinct symbols with snapshot on that date.
-            def _snapshot_fill_by_date(days: int = 60) -> List[Dict[str, Any]]:
+            def _snapshot_fill_by_date(days: int | None = None) -> List[Dict[str, Any]]:
                 if not sym_set:
                     return []
                 now_utc = datetime.utcnow()
-                start_dt = now_utc - timedelta(days=days)
+                lookback = int(days if days is not None else getattr(settings, "COVERAGE_FILL_LOOKBACK_DAYS", 90))
+                start_dt = now_utc - timedelta(days=lookback)
                 rows = (
                     db.query(
                         func.date(MarketSnapshot.analysis_timestamp).label("d"),
@@ -747,11 +749,11 @@ async def get_coverage(
                 return out
 
             try:
-                daily_section["fill_by_date"] = _fill_by_date("1d", days=60)
+                daily_section["fill_by_date"] = _fill_by_date("1d", days=None)
             except Exception:
                 daily_section["fill_by_date"] = []
             try:
-                daily_section["snapshot_fill_by_date"] = _snapshot_fill_by_date(days=60)
+                daily_section["snapshot_fill_by_date"] = _snapshot_fill_by_date(days=None)
             except Exception:
                 daily_section["snapshot_fill_by_date"] = []
 
@@ -802,7 +804,8 @@ async def get_coverage(
                     from datetime import timedelta as _timedelta
 
                     now_utc = datetime.utcnow()
-                    start_dt = now_utc - _timedelta(days=60)
+                    lookback = int(getattr(settings, "COVERAGE_FILL_LOOKBACK_DAYS", 90))
+                    start_dt = now_utc - _timedelta(days=lookback)
                     rows = (
                         db.query(
                             func.date(PriceData.date).label("d"),
@@ -841,7 +844,8 @@ async def get_coverage(
                     from datetime import timedelta as _timedelta
 
                     now_utc = datetime.utcnow()
-                    start_dt = now_utc - _timedelta(days=60)
+                    lookback = int(getattr(settings, "COVERAGE_FILL_LOOKBACK_DAYS", 90))
+                    start_dt = now_utc - _timedelta(days=lookback)
                     rows = (
                         db.query(
                             func.date(MarketSnapshot.analysis_timestamp).label("d"),
@@ -993,6 +997,9 @@ async def get_coverage(
             "sla": sla_meta,
             "kpis": _kpi_cards(),
             "backfill_5m_enabled": backfill_5m_enabled,
+            # Fill series windows (backend-owned defaults; frontend should not hardcode).
+            "fill_lookback_days": int(getattr(settings, "COVERAGE_FILL_LOOKBACK_DAYS", 90)),
+            "fill_trading_days_window": int(getattr(settings, "COVERAGE_FILL_TRADING_DAYS_WINDOW", 50)),
         }
         return snapshot
     except Exception as e:

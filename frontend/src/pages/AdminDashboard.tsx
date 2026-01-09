@@ -213,7 +213,10 @@ const AdminDashboard: React.FC = () => {
 
     // Trading-day series: use the last N observed dates in fill_by_date.
     // This naturally excludes weekends/holidays (no OHLCV rows expected) and avoids confusing gaps.
-    const windowDays = 50;
+    const windowDays = Math.max(
+      1,
+      Number((coverage as any)?.meta?.fill_trading_days_window ?? 50),
+    );
     const bars: Array<{ date: string; symbol_count: number; pct_of_universe: number }> = rows
       .slice() // newest-first
       .reverse() // oldest-first
@@ -236,7 +239,7 @@ const AdminDashboard: React.FC = () => {
           overflowX="auto"
           overflowY="hidden"
         >
-          <HStack align="end" gap={1} h={`${barMaxH}px`} minW="max-content">
+          <HStack align="end" gap={1} h={`${barMaxH}px`} w="full">
             {bars.map((r) => {
               const pct = pctFor(r);
               const h = Math.max(2, Math.round((pct / 100) * barMaxH));
@@ -253,8 +256,13 @@ const AdminDashboard: React.FC = () => {
                       ? 'orange.500'
                       : 'red.500';
               return (
-                <Box key={r.date} w="10px" title={`${r.date}: ${r.symbol_count}/${total} (${Math.round(pct * 10) / 10}%)`}>
-                  <Box w="10px" h={`${h}px`} borderRadius="sm" bg={colorForPct(pct)} />
+                <Box
+                  key={r.date}
+                  flex="1 0 0"
+                  minW="6px"
+                  title={`${r.date}: ${r.symbol_count}/${total} (${Math.round(pct * 10) / 10}%)`}
+                >
+                  <Box w="full" h={`${h}px`} borderRadius="sm" bg={colorForPct(pct)} />
                   <Box
                     mt="2px"
                     mx="auto"
