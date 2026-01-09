@@ -193,41 +193,56 @@ const AdminDashboard: React.FC = () => {
     return hero;
   }, [hero, backfill5mEnabled]);
 
-  const dayStrip = React.useMemo(() => {
+  const dailyHistogram = React.useMemo(() => {
     const { rows, newestDate, total } = dailyLastDist;
     if (!rows.length || !newestDate || !total) return null;
-    const newest = new Date(`${newestDate}T00:00:00Z`).getTime();
-    const maxAgeDays = Math.max(
-      1,
-      ...rows
-        .filter((r) => r.date !== 'none')
-        .map((r) => Math.max(0, Math.round((newest - new Date(`${r.date}T00:00:00Z`).getTime()) / 86400000))),
-    );
-    const colorFor = (ageDays: number) => {
-      const t = Math.max(0, Math.min(1, ageDays / maxAgeDays));
-      // HSL: green(120) -> red(0)
-      const hue = 120 - 120 * t;
+
+    const pctFor = (count: number) => (total > 0 ? (count / total) * 100 : 0);
+    const colorForPct = (pct: number) => {
+      // HSL: red(0) -> green(120), driven by % (height)
+      const t = Math.max(0, Math.min(1, pct / 100));
+      const hue = 0 + 120 * t;
       return `hsl(${hue}, 70%, 45%)`;
     };
+
+    const maxBars = 28; // show last ~4 weeks of daily buckets by default
+    const barMaxH = 36;
+    const bars = rows
+      .filter((r) => r.date !== 'none')
+      .slice(0, maxBars);
+
     return (
-      <HStack mt={2} gap={0} borderRadius="md" overflow="hidden" borderWidth="1px" borderColor="border.subtle">
-        {rows
-          .filter((r) => r.date !== 'none')
-          .slice(0, 60) // hard cap for UI safety; covers ~3 months of trading days if needed later
-          .map((r) => {
-            const ageDays = Math.max(0, Math.round((newest - new Date(`${r.date}T00:00:00Z`).getTime()) / 86400000));
+      <Box mt={2}>
+        <HStack
+          align="end"
+          gap={1}
+          h={`${barMaxH}px`}
+          borderRadius="md"
+          borderWidth="1px"
+          borderColor="border.subtle"
+          bg="bg.card"
+          px={2}
+          py={2}
+        >
+          {bars.map((r) => {
+            const pct = pctFor(r.count);
+            const h = Math.max(2, Math.round((pct / 100) * barMaxH));
             return (
               <Box
                 key={r.date}
-                flex={`${r.count} 0 0`}
-                minW="2px"
-                h="10px"
-                title={`${r.date}: ${r.count} symbols (${Math.round((r.count / total) * 1000) / 10}%)`}
-                bg={colorFor(ageDays)}
+                w="10px"
+                h={`${h}px`}
+                borderRadius="sm"
+                bg={colorForPct(pct)}
+                title={`${r.date}: ${r.count}/${total} (${Math.round(pct * 10) / 10}%)`}
               />
             );
           })}
-      </HStack>
+        </HStack>
+        <Text mt={1} fontSize="xs" color="fg.muted">
+          Histogram bars (daily): height + color represent % of symbols whose latest daily bar is that date.
+        </Text>
+      </Box>
     );
   }, [dailyLastDist]);
 
@@ -259,7 +274,7 @@ const AdminDashboard: React.FC = () => {
                     : '—'}
                 </Badge>
               </HStack>
-              {dayStrip}
+              {dailyHistogram}
               <VStack align="stretch" gap={1.5} mt={3}>
                 {dailyLastDist.rows.slice(0, 8).map((row) => (
                   <HStack key={row.date} justify="space-between">
