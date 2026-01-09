@@ -208,10 +208,11 @@ const AdminDashboard: React.FC = () => {
     const barMaxH = 36;
     const countMap = new Map(rows.filter((r) => r.date !== 'none').map((r) => [r.date, r.count]));
 
-    // Build a continuous daily series from the 1st of the month (of the newest date) through newestDate.
-    // This makes month-to-date progress easy to read.
+    // Build a continuous daily series over a rolling window (last ~30+ days).
+    // This matches the common “last N days” operator mental model.
     const newest = new Date(`${newestDate}T00:00:00Z`);
-    const start = new Date(Date.UTC(newest.getUTCFullYear(), newest.getUTCMonth(), 1));
+    const windowDays = 35;
+    const start = new Date(newest.getTime() - (windowDays - 1) * 86400000);
     const bars: Array<{ date: string; count: number }> = [];
     for (let d = new Date(start); d.getTime() <= newest.getTime(); d = new Date(d.getTime() + 86400000)) {
       const dateStr = d.toISOString().slice(0, 10);
@@ -247,7 +248,7 @@ const AdminDashboard: React.FC = () => {
           </HStack>
         </Box>
         <Text mt={1} fontSize="xs" color="fg.muted">
-          Histogram bars (daily, month-to-date): height + color represent % of symbols whose latest daily bar is that date.
+          Histogram bars (daily, last {windowDays} days): height + color represent % of symbols whose latest daily bar is that date.
         </Text>
       </Box>
     );
