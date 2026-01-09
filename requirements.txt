@@ -41,7 +41,7 @@ celery-redbeat==2.3.3
 
 # Linters & Dev
 black==24.10.0
-ruff==0.14.10
+ruff==0.14.11
 
 # APM/Monitoring
 newrelic==9.3.0
