@@ -13,8 +13,10 @@ def compute_core_indicators(data_oldest_first: pd.DataFrame) -> Dict[str, Any]:
     out: Dict[str, Any] = {}
     closes = data_oldest_first["Close"]
 
-    # SMAs (include 5/8/21 for MA bucket + 20/50/100/200 for snapshots)
-    for n in [5, 8, 21, 20, 50, 100, 200]:
+    # SMAs
+    # Keep canonical names aligned with our snapshot schema: sma_5, sma_14, sma_21, sma_50, sma_100, sma_150, sma_200.
+    # We also keep sma_8 (non-canonical) for MA-bucket logic and backwards compatibility in raw_analysis.
+    for n in [5, 8, 14, 21, 50, 100, 150, 200]:
         if len(closes) >= n:
             sma = closes.rolling(n).mean()
             if not sma.empty and not pd.isna(sma.iloc[-1]):
@@ -34,14 +36,20 @@ def compute_core_indicators(data_oldest_first: pd.DataFrame) -> Dict[str, Any]:
         if rsi is not None and not pd.isna(rsi.iloc[-1]):
             out["rsi"] = float(rsi.iloc[-1])
 
-    # ATR(14)
+    # ATR(14, 30)
     if (
         set(["High", "Low", "Close"]).issubset(data_oldest_first.columns)
         and len(data_oldest_first) >= 14
     ):
-        atr = calculate_atr_series(data_oldest_first, 14)
-        if atr is not None and not pd.isna(atr.iloc[-1]):
-            out["atr"] = float(atr.iloc[-1])
+        atr14 = calculate_atr_series(data_oldest_first, 14)
+        if atr14 is not None and not pd.isna(atr14.iloc[-1]):
+            out["atr_14"] = float(atr14.iloc[-1])
+            # Backwards-compat key (will be removed when old schema fields are dropped)
+            out["atr"] = float(atr14.iloc[-1])
+        if len(data_oldest_first) >= 30:
+            atr30 = calculate_atr_series(data_oldest_first, 30)
+            if atr30 is not None and not pd.isna(atr30.iloc[-1]):
+                out["atr_30"] = float(atr30.iloc[-1])
 
     # MACD (12,26,9)
     if len(closes) >= 26:
@@ -200,18 +208,19 @@ def compute_atr_matrix_metrics(
             current_price = float(data_oldest_first["Close"].iloc[-1])
 
         sma_50 = indicators.get("sma_50")
-        atr = indicators.get("atr")
+        atr = indicators.get("atr_14") or indicators.get("atr")
 
         if current_price and sma_50 and atr and atr > 0:
             metrics["atr_distance"] = (current_price - sma_50) / atr
             metrics["atr_percent"] = (atr / current_price) * 100
 
-        # MA alignment (EMA10 > SMA20 > SMA50 > SMA100 > SMA200)
-        ema_10 = indicators.get("ema_10")
-        sma_20 = indicators.get("sma_20")
+        # MA alignment (EMA21 > SMA21 > SMA50 > SMA100 > SMA200) — canonical windows
+        # Note: we retain backward-compat raw keys elsewhere, but alignment should use canonical windows.
+        ema_21 = indicators.get("ema_21")
+        sma_21 = indicators.get("sma_21")
         sma_100 = indicators.get("sma_100")
         sma_200 = indicators.get("sma_200")
-        mas = [ema_10, sma_20, sma_50, sma_100, sma_200]
+        mas = [ema_21, sma_21, sma_50, sma_100, sma_200]
         if all(m is not None for m in mas):
             metrics["ma_aligned"] = all(
                 mas[i] >= mas[i + 1] for i in range(len(mas) - 1)
@@ -252,33 +261,40 @@ def compute_weinstein_stage_from_daily(
     daily_bm_newest_first: pd.DataFrame,
 ) -> Dict[str, Any]:
     """Compute Weinstein stage from daily OHLCV of symbol and benchmark (both newest->first)."""
+    unknown = {
+        "stage": "UNKNOWN",
+        "stage_label": "UNKNOWN",
+        "stage_slope_pct": None,
+        "stage_dist_pct": None,
+        "rs_mansfield_pct": None,
+    }
     if (
         daily_sym_newest_first is None
         or daily_sym_newest_first.empty
         or daily_bm_newest_first is None
         or daily_bm_newest_first.empty
     ):
-        return {"stage": "UNKNOWN"}
+        return dict(unknown)
 
     w_sym = weekly_from_daily(daily_sym_newest_first)
     w_bm = weekly_from_daily(daily_bm_newest_first)
     if w_sym.empty or w_bm.empty:
-        return {"stage": "UNKNOWN"}
+        return dict(unknown)
 
     # Align indexes
     idx = w_sym.index.intersection(w_bm.index)
     w_sym = w_sym.loc[idx]
     w_bm = w_bm.loc[idx]
-    if len(w_sym) < 60:
-        return {"stage": "UNKNOWN"}
+    # Need enough weekly bars for 30W SMA + stable slope. Mansfield RS needs 52W; stage can still compute without it.
+    if len(w_sym) < 35:
+        return dict(unknown)
 
     close = w_sym["Close"]
     sma30 = close.rolling(30).mean()
     vol50 = w_sym["Volume"].rolling(50).mean()
 
-    # Relative strength vs benchmark
-    rs = close / w_bm["Close"].replace(0, pd.NA)
-    rs = rs.dropna()
+    # Relative strength vs benchmark (weekly)
+    rs = (close / w_bm["Close"].replace(0, pd.NA)).dropna()
 
     def slope(series: pd.Series, window: int = 10) -> float:
         last = series.tail(window)
@@ -295,24 +311,55 @@ def compute_weinstein_stage_from_daily(
         vol_ratio = float(w_sym["Volume"].iloc[-1] / vol50.iloc[-1])
 
     stage = "UNKNOWN"
+    stage_label = "UNKNOWN"
+    stage_dist_pct = None
+    stage_slope_pct = None
     if sma30_now:
         up = price > sma30_now and sma30_slope > 0 and rs_slope > 0
         down = price < sma30_now and sma30_slope < 0 and rs_slope < 0
         if up:
             stage = "STAGE_2_UPTREND"
+            stage_label = "2"
         elif down:
             stage = "STAGE_4_DOWNTREND"
+            stage_label = "4"
         else:
             flat = abs(sma30_slope) <= max(1e-6, sma30_now * 0.0001)
             near = abs(price - sma30_now) <= sma30_now * 0.03
             stage = "STAGE_1_BASE" if flat and near else "STAGE_3_DISTRIBUTION"
+            stage_label = "1" if stage == "STAGE_1_BASE" else "3"
+        try:
+            stage_dist_pct = float((price / sma30_now - 1.0) * 100.0) if sma30_now else None
+        except Exception:
+            stage_dist_pct = None
+        try:
+            prev = sma30.iloc[-6] if len(sma30) >= 6 and not pd.isna(sma30.iloc[-6]) else None
+            stage_slope_pct = float((sma30_now / prev - 1.0) * 100.0) if (prev and sma30_now) else None
+        except Exception:
+            stage_slope_pct = None
+
+    # Mansfield Relative Strength (weekly RS vs 52-week SMA of RS), expressed as %
+    rs_mansfield_pct = None
+    try:
+        if len(rs) >= 52:
+            rs_ma = rs.rolling(52).mean()
+            rs_now = rs.iloc[-1]
+            rs_ma_now = rs_ma.iloc[-1]
+            if rs_ma_now and not pd.isna(rs_ma_now):
+                rs_mansfield_pct = float((rs_now / rs_ma_now - 1.0) * 100.0)
+    except Exception:
+        rs_mansfield_pct = None
 
     return {
         "stage": stage,
+        "stage_label": stage_label,
         "price": price,
         "sma30w": sma30_now,
         "sma30w_slope": sma30_slope,
+        "stage_slope_pct": stage_slope_pct,
+        "stage_dist_pct": stage_dist_pct,
         "rs_slope": rs_slope,
+        "rs_mansfield_pct": rs_mansfield_pct,
         "vol_ratio_50w": vol_ratio,
         "as_of": idx[-1].isoformat() if len(idx) else None,
     }

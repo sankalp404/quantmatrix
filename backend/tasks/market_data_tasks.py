@@ -791,47 +791,65 @@ def backfill_stale_daily_tracked() -> dict:
 @shared_task(name="backend.tasks.market_data_tasks.recompute_indicators_universe")
 @task_run("recompute_indicators_universe")
 def recompute_indicators_universe(batch_size: int = 50) -> dict:
-    """Recompute indicators for the tracked universe from local DB (orchestrator only)."""
+    """Recompute indicators for the tracked universe from local DB (orchestrator only).
+
+    Observability:
+    - Returns counters used by task_run() to persist JobRun.counters
+    - Includes a bounded non-fatal error summary in the returned `error` field, which is
+      captured into JobRun.error (without failing the whole run).
+    """
     _set_task_status("recompute_indicators_universe", "running")
-    loop = _setup_event_loop()
     session = SessionLocal()
     try:
-        # Build symbol set (index_constituents ∪ portfolio)
-        syms: Set[str] = set()
+        # Universe: prefer Redis tracked:all (source of truth for UI), fallback to DB-derived.
+        tracked: List[str] = []
         try:
-            for (s,) in session.query(IndexConstituent.symbol).distinct():
-                if s:
-                    syms.add(s)
+            raw = market_data_service.redis_client.get("tracked:all")
+            tracked = json.loads(raw) if raw else []
         except Exception:
-            for idx in ["SP500", "NASDAQ100", "DOW30"]:
-                try:
-                    cons = loop.run_until_complete(market_data_service.get_index_constituents(idx))
-                    syms.update(cons)
-                except Exception:
-                    continue
-        for (s,) in session.query(Position.symbol).distinct():
-            if s:
-                syms.add(s)
-        ordered = sorted({s.upper() for s in syms if s})
+            tracked = []
+        ordered = sorted({str(s).upper() for s in (tracked or []) if s})
+        if not ordered:
+            ordered = sorted({s.upper() for s in _get_tracked_universe_from_db(session)})
 
-        processed = 0
+        processed_ok = 0
+        skipped_no_data = 0
+        errors = 0
+        error_samples: list[dict] = []
+
         # Chunking by batch_size
         for i in range(0, len(ordered), max(1, batch_size)):
             chunk = ordered[i : i + batch_size]
             for sym in chunk:
                 try:
                     snap = market_data_service.compute_snapshot_from_db(session, sym)
-                    if snap:
-                        market_data_service.persist_snapshot(session, sym, snap)
-                        processed += 1
-                except Exception:
+                    if not snap:
+                        skipped_no_data += 1
+                        continue
+                    market_data_service.persist_snapshot(session, sym, snap)
+                    processed_ok += 1
+                except Exception as exc:
                     session.rollback()
-        res = {"status": "ok", "symbols": len(ordered), "processed": processed}
+                    errors += 1
+                    if len(error_samples) < 25:
+                        error_samples.append({"symbol": sym, "error": str(exc)})
+        res = {
+            "status": "ok",
+            "symbols": len(ordered),
+            "processed_ok": processed_ok,
+            "skipped_no_data": skipped_no_data,
+            "errors": errors,
+            "error_samples": error_samples,
+        }
+        if error_samples:
+            # Non-fatal, bounded summary captured into JobRun.error by task_run()
+            res["error"] = "Sample errors:\n" + "\n".join(
+                f"- {e.get('symbol')}: {e.get('error')}" for e in error_samples
+            )
         _set_task_status("recompute_indicators_universe", "ok", res)
         return res
     finally:
         session.close()
-        loop.close()
 
 
 # ============================= Daily Analysis History =============================
