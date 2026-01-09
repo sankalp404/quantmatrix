@@ -40,7 +40,8 @@ jobs:
             --base "$BASE" \
             --head "$BRANCH" \
             --title "$TITLE" \
-            --body "Auto-created PR for branch \`$BRANCH\`."
+            --draft \
+            $(test -f .github/pull_request_template.md && echo "--body-file .github/pull_request_template.md" || echo "--body Auto-created PR for branch \\`$BRANCH\\`.")
 
           # If the PR was created by GitHub Actions, it may not trigger pull_request workflows.
           # Dispatch CI explicitly to ensure required checks run.

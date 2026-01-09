@@ -41,10 +41,38 @@ fi
 
 git push -u origin "${BRANCH}"
 
+BODY_TEMPLATE=".github/pull_request_template.md"
+TMP_BODY="$(mktemp)"
+{
+  echo "Auto-created PR for branch \`${BRANCH}\`."
+  echo
+  if [[ -f "${BODY_TEMPLATE}" ]]; then
+    cat "${BODY_TEMPLATE}"
+  else
+    echo "Summary"
+    echo
+    echo "What does this change do?"
+    echo
+    echo "Checklist"
+    echo "- [ ] Tests pass locally"
+    echo "- [ ] No test can touch the dev DB (uses postgres_test only)"
+    echo "- [ ] Any migrations included (if schema changes)"
+    echo "- [ ] Docs updated (README / docs/)"
+    echo "- [ ] No hardcoded secrets or account identifiers"
+    echo
+    echo "Risk / Rollback"
+    echo "What could break? How do we roll back?"
+    echo
+  fi
+} > "${TMP_BODY}"
+
 gh pr create \
   --title "${TYPE}: ${TITLE}" \
-  --body "Automated PR created by scripts/open_pr.sh" \
+  --draft \
+  --body-file "${TMP_BODY}" \
   --head "${BRANCH}" \
   --base "main"
+
+rm -f "${TMP_BODY}"
 
 
