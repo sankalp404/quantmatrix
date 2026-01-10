@@ -81,7 +81,7 @@ jobs:
             exit 0
           fi
 
-          # If branch is behind main (ruleset requires up-to-date), update it from main and rerun CI.
+          # If branch is behind main, update it from main.
           if [[ "$MERGE_STATE" == "BEHIND" ]]; then
             echo "PR #$PR_NUMBER is BEHIND main; updating branch then rerunning CI."
 
@@ -92,8 +92,7 @@ jobs:
                 }
               }' -f prId="$PR_ID" -f expected="$HEAD_OID" >/dev/null
 
-            # CI may not fire automatically for bot-created PR events; dispatch explicitly.
-            gh workflow run "CI" --repo "$REPO" --ref "$BRANCH"
+            # CI will run on push for agent/** branches after the branch is updated.
             exit 0
           fi
 
@@ -177,17 +176,29 @@ jobs:
               continue
             fi
 
-            # Required checks are green; try merging. If GitHub still says not mergeable,
-            # retry for a bit (mergeability can lag check completion).
+            # Required checks are green; enable auto-merge so GitHub merges when all policies are satisfied.
+            # If repo auto-merge is disabled, fall back to direct merge retries.
             echo "Required checks are green; attempting merge (mergeStateStatus=$MERGE_STATE) attempt $i/$max_attempts"
             set +e
-            gh pr merge "$PR_NUMBER" --repo "$REPO" --squash --delete-branch
+            out="$(gh pr merge "$PR_NUMBER" --repo "$REPO" --auto --squash --delete-branch 2>&1)"
             rc=$?
             set -e
             if [[ "$rc" -eq 0 ]]; then
               exit 0
             fi
-            echo "Merge attempt failed (exit=$rc); waiting and retrying..."
+            if echo "$out" | grep -q "enablePullRequestAutoMerge"; then
+              echo "Repo auto-merge disabled; trying direct merge."
+              set +e
+              gh pr merge "$PR_NUMBER" --repo "$REPO" --squash --delete-branch
+              rc2=$?
+              set -e
+              if [[ "$rc2" -eq 0 ]]; then
+                exit 0
+              fi
+              echo "Direct merge attempt failed (exit=$rc2); waiting and retrying..."
+            else
+              echo "Merge attempt failed (exit=$rc): $out"
+            fi
             sleep "$sleep_seconds"
           done
 
