@@ -1,23 +1,5 @@
 version: 2
 updates:
-  - package-ecosystem: "pip"
-    directory: "/"
-    schedule:
-      interval: "weekly"
-    open-pull-requests-limit: 10
-    labels:
-      - "dependencies"
-
-  - package-ecosystem: "npm"
-    directory: "/frontend"
-    schedule:
-      interval: "weekly"
-    open-pull-requests-limit: 10
-    labels:
-      - "dependencies"
-
-version: 2
-updates:
   # Frontend (npm)
   - package-ecosystem: "npm"
     directory: "/frontend"
@@ -26,6 +8,9 @@ updates:
       day: "sunday"
       time: "06:00"
     open-pull-requests-limit: 5
+    labels:
+      - "deps"
+      - "frontend"
     groups:
       frontend-minor-and-patch:
         applies-to: version-updates
@@ -47,6 +32,9 @@ updates:
       day: "sunday"
       time: "06:00"
     open-pull-requests-limit: 5
+    labels:
+      - "deps"
+      - "backend"
     groups:
       backend-minor-and-patch:
         applies-to: version-updates
@@ -54,30 +42,14 @@ updates:
           - "minor"
           - "patch"
 
-version: 2
-updates:
-  - package-ecosystem: "pip"
-    directory: "/"
-    schedule:
-      interval: "daily"
-    open-pull-requests-limit: 10
-    labels:
-      - "deps"
-      - "backend"
-
-  - package-ecosystem: "npm"
-    directory: "/frontend"
-    schedule:
-      interval: "daily"
-    open-pull-requests-limit: 10
-    labels:
-      - "deps"
-      - "frontend"
-
+  # GitHub Actions
   - package-ecosystem: "github-actions"
     directory: "/"
     schedule:
       interval: "weekly"
+      day: "sunday"
+      time: "06:00"
+    open-pull-requests-limit: 5
     labels:
       - "deps"
       - "ci"
