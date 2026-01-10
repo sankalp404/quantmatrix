@@ -362,7 +362,7 @@ def backfill_last_200_bars() -> dict:
     """Delta backfill last ~200 trading days for all tracked symbols (indices ∪ portfolio).
 
     Returns detailed counters:
-    - tracked_total, updated_total, up_to_date_total, skipped_empty, bars_inserted_total, errors
+    - tracked_total, updated_total, up_to_date_total, skipped_empty, bars_inserted_total, errors, error_samples
     """
     _set_task_status("backfill_last_200_bars", "running")
     session = SessionLocal()
@@ -377,6 +377,7 @@ def backfill_last_200_bars() -> dict:
             skipped_empty = 0
             bars_inserted_total = 0
             errors = 0
+            error_samples: list[dict] = []
             provider_usage: Dict[str, int] = {}
 
             policy = str(getattr(settings, "MARKET_PROVIDER_POLICY", "paid")).lower()
@@ -385,8 +386,8 @@ def backfill_last_200_bars() -> dict:
             conc_default = int(getattr(settings, "MARKET_BACKFILL_CONCURRENCY_PAID" if paid else "MARKET_BACKFILL_CONCURRENCY_FREE", 25 if paid else 5))
             concurrency = max(1, min(max_conc, conc_default))
 
-            async def _fetch_all() -> list[dict]:
-                sem = asyncio.Semaphore(concurrency)
+            async def _fetch_all(symbols_to_fetch: list[str], conc: int) -> list[dict]:
+                sem = asyncio.Semaphore(conc)
                 out: list[dict] = []
 
                 async def _one(sym: str) -> dict:
@@ -401,7 +402,7 @@ def backfill_last_200_bars() -> dict:
                         )
                         return {"symbol": sym.upper(), "df": df, "provider": provider}
 
-                tasks = [_one(s) for s in sorted(symbols)]
+                tasks = [_one(s) for s in sorted(symbols_to_fetch)]
                 for coro in asyncio.as_completed(tasks):
                     try:
                         out.append(await coro)
@@ -409,7 +410,25 @@ def backfill_last_200_bars() -> dict:
                         out.append({"symbol": "?", "df": None, "provider": None, "error": str(e)})
                 return out
 
-            fetched = loop.run_until_complete(_fetch_all())
+            fetched = loop.run_until_complete(_fetch_all(sorted(symbols), concurrency))
+            # Second pass: retry any empty results with lower concurrency to reduce transient provider flakiness.
+            empties = sorted(
+                {
+                    str(i.get("symbol", "")).upper()
+                    for i in fetched
+                    if i.get("symbol")
+                    and i.get("symbol") != "?"
+                    and (i.get("df") is None or getattr(i.get("df"), "empty", True))
+                }
+            )
+            if empties:
+                retry_conc = max(1, min(10, max(1, concurrency // 5)))
+                retried = loop.run_until_complete(_fetch_all(empties, retry_conc))
+                retry_map = {r.get("symbol"): r for r in retried if r.get("symbol")}
+                for i, item in enumerate(fetched):
+                    sym = item.get("symbol")
+                    if sym in retry_map and (item.get("df") is None or getattr(item.get("df"), "empty", True)):
+                        fetched[i] = retry_map[sym]
 
             from backend.models import PriceData
             for item in fetched:
@@ -420,7 +439,17 @@ def backfill_last_200_bars() -> dict:
                 df = item.get("df")
                 provider = item.get("provider")
                 if df is None or getattr(df, "empty", True):
+                    # Do not silently treat this as "no data": most often it's a transient provider failure.
                     skipped_empty += 1
+                    errors += 1
+                    if len(error_samples) < 25:
+                        error_samples.append(
+                            {
+                                "symbol": sym,
+                                "provider": provider or "unknown",
+                                "error": "empty_response",
+                            }
+                        )
                     _increment_provider_usage(provider_usage, {"provider": provider})
                     continue
                 try:
@@ -460,6 +489,7 @@ def backfill_last_200_bars() -> dict:
             "skipped_empty": skipped_empty,
             "bars_inserted_total": bars_inserted_total,
             "errors": errors,
+            "error_samples": error_samples,
             "provider_usage": provider_usage,
         }
         _set_task_status("backfill_last_200_bars", "ok", res)
@@ -514,6 +544,7 @@ def backfill_symbols(symbols: List[str]) -> dict:
         processed = 0
         inserted_total = 0
         errors = 0
+        error_samples: list[dict] = []
         provider_usage: Dict[str, int] = {}
         for item in fetched:
             sym = item.get("symbol")
@@ -524,6 +555,15 @@ def backfill_symbols(symbols: List[str]) -> dict:
             provider = item.get("provider")
             try:
                 if df is None or getattr(df, "empty", True):
+                    errors += 1
+                    if len(error_samples) < 25:
+                        error_samples.append(
+                            {
+                                "symbol": sym,
+                                "provider": provider or "unknown",
+                                "error": "empty_response",
+                            }
+                        )
                     _increment_provider_usage(provider_usage, {"provider": provider})
                     continue
                 last_date = (
@@ -555,6 +595,7 @@ def backfill_symbols(symbols: List[str]) -> dict:
             "processed": processed,
             "rows_attempted": inserted_total,
             "errors": errors,
+            "error_samples": error_samples,
             "provider_usage": provider_usage,
         }
     finally:
@@ -867,9 +908,19 @@ def record_daily_history(symbols: List[str] | None = None) -> dict:
     session = SessionLocal()
     try:
         if not symbols:
-            # Default to portfolio-held symbols
-            symbols = [s for s, in session.query(Position.symbol).distinct() if s]
+            # Default to tracked universe (Redis tracked:all, fallback to DB-derived tracked symbols)
+            symbols = []
+            try:
+                raw = market_data_service.redis_client.get("tracked:all")
+                symbols = json.loads(raw) if raw else []
+            except Exception:
+                symbols = []
+            if not symbols:
+                symbols = _get_tracked_universe_from_db(session)
         written = 0
+        skipped_no_snapshot = 0
+        errors = 0
+        error_samples: list[dict] = []
         for sym in sorted(set(s.upper() for s in symbols)):
             try:
                 # Prefer the latest stored snapshot from cache
@@ -888,20 +939,25 @@ def record_daily_history(symbols: List[str] | None = None) -> dict:
                     # Fallback: compute from local DB only (fast, no provider)
                     snapshot = market_data_service.compute_snapshot_from_db(session, sym)
                     if not snapshot:
+                        skipped_no_snapshot += 1
                         continue
-                # Determine as-of date from latest price_data if available
-                as_of = (
-                    session.query(PriceData.date)
-                    .filter(PriceData.symbol == sym, PriceData.interval == "1d")
-                    .order_by(PriceData.date.desc())
-                    .limit(1)
-                    .scalar()
-                )
+                # Determine as-of date, preferring snapshot as-of timestamp if present.
+                as_of_dt = None
+                try:
+                    as_of_dt = getattr(row, "as_of_timestamp", None) if row is not None else None
+                except Exception:
+                    as_of_dt = None
+                if as_of_dt is None:
+                    as_of_dt = (
+                        session.query(PriceData.date)
+                        .filter(PriceData.symbol == sym, PriceData.interval == "1d")
+                        .order_by(PriceData.date.desc())
+                        .limit(1)
+                        .scalar()
+                    )
                 from datetime import datetime as _dt
 
-                as_of_date = as_of or _dt.utcnow().replace(
-                    hour=0, minute=0, second=0, microsecond=0
-                )
+                as_of_date = as_of_dt or _dt.utcnow().replace(hour=0, minute=0, second=0, microsecond=0)
                 # Upsert-like: unique on (symbol, type, as_of_date)
                 existing = (
                     session.query(MarketSnapshotHistory)
@@ -938,7 +994,17 @@ def record_daily_history(symbols: List[str] | None = None) -> dict:
                 written += 1
             except Exception:
                 session.rollback()
-        res = {"status": "ok", "symbols": len(symbols), "written": written}
+                errors += 1
+                if len(error_samples) < 25:
+                    error_samples.append({"symbol": sym, "error": "write_failed"})
+        res = {
+            "status": "ok",
+            "symbols": len(symbols),
+            "written": written,
+            "skipped_no_snapshot": skipped_no_snapshot,
+            "errors": errors,
+            "error_samples": error_samples,
+        }
         _set_task_status("record_daily_history", "ok", res)
         return res
     finally:
