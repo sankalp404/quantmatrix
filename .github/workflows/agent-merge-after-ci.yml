@@ -97,13 +97,21 @@ jobs:
             exit 0
           fi
 
-          # GitHub can report mergeStateStatus=UNSTABLE for a short window even when checks are about to go green.
-          # Poll for a bounded amount of time to avoid missing the merge window.
-          max_attempts=60     # ~10 minutes at 10s
+          # GitHub's mergeStateStatus can lag (often UNSTABLE) even when required checks are actually green.
+          # So we poll the PR's check rollup for the required checks, then attempt merge with retries.
+          #
+          # NOTE: We intentionally ignore this workflow's own check ("Merge (squash) if approved")
+          # to avoid self-deadlock.
+
+          required_checks=(
+            "Backend (pytest in docker)"
+            "Frontend (lint/typecheck/test)"
+          )
+          max_attempts=90     # ~15 minutes at 10s
           sleep_seconds=10
 
           for i in $(seq 1 "$max_attempts"); do
-            PR_JSON="$(gh pr view "$PR_NUMBER" --repo "$REPO" --json mergeStateStatus,isDraft,reviews)"
+            PR_JSON="$(gh pr view "$PR_NUMBER" --repo "$REPO" --json mergeStateStatus,isDraft,reviews,statusCheckRollup)"
             MERGE_STATE="$(echo "$PR_JSON" | jq -r '.mergeStateStatus')"
             IS_DRAFT="$(echo "$PR_JSON" | jq -r '.isDraft')"
 
@@ -118,17 +126,10 @@ jobs:
               exit 0
             fi
 
-            if [[ "$MERGE_STATE" == "CLEAN" ]]; then
-              echo "Merging PR #$PR_NUMBER (mergeStateStatus=CLEAN)"
-              gh pr merge "$PR_NUMBER" --repo "$REPO" --squash --delete-branch
-              exit 0
-            fi
-
             if [[ "$MERGE_STATE" == "BEHIND" ]]; then
               echo "PR #$PR_NUMBER is BEHIND main; updating branch then rerunning CI."
               PR_ID="$(echo "$PR_JSON" | jq -r '.id' 2>/dev/null || true)"
               HEAD_OID="$(gh pr view "$PR_NUMBER" --repo "$REPO" --json headRefOid --jq '.headRefOid')"
-              # PR_ID may not be present in the reduced json above; fetch it if needed.
               if [[ -z "${PR_ID:-}" || "${PR_ID}" == "null" ]]; then
                 PR_ID="$(gh pr view "$PR_NUMBER" --repo "$REPO" --json id --jq '.id')"
               fi
@@ -142,11 +143,55 @@ jobs:
               exit 0
             fi
 
-            echo "Waiting for mergeability... (mergeStateStatus=$MERGE_STATE) attempt $i/$max_attempts"
+            # Evaluate required checks.
+            missing=0
+            pending=0
+            failing=0
+
+            for name in "${required_checks[@]}"; do
+              item="$(echo "$PR_JSON" | jq -c --arg n "$name" '.statusCheckRollup[]? | select(.name == $n) | {status, conclusion} ' | tail -n 1)"
+              if [[ -z "${item:-}" ]]; then
+                missing=$((missing+1))
+                continue
+              fi
+
+              status="$(echo "$item" | jq -r '.status')"
+              conclusion="$(echo "$item" | jq -r '.conclusion // ""')"
+              if [[ "$status" != "COMPLETED" ]]; then
+                pending=$((pending+1))
+                continue
+              fi
+              if [[ "$conclusion" != "SUCCESS" ]]; then
+                failing=$((failing+1))
+              fi
+            done
+
+            if [[ "$failing" -gt 0 ]]; then
+              echo "Skip: required checks failing (attempt $i/$max_attempts)."
+              exit 0
+            fi
+
+            if [[ "$missing" -gt 0 || "$pending" -gt 0 ]]; then
+              echo "Waiting for required checks... (missing=$missing pending=$pending mergeStateStatus=$MERGE_STATE) attempt $i/$max_attempts"
+              sleep "$sleep_seconds"
+              continue
+            fi
+
+            # Required checks are green; try merging. If GitHub still says not mergeable,
+            # retry for a bit (mergeability can lag check completion).
+            echo "Required checks are green; attempting merge (mergeStateStatus=$MERGE_STATE) attempt $i/$max_attempts"
+            set +e
+            gh pr merge "$PR_NUMBER" --repo "$REPO" --squash --delete-branch
+            rc=$?
+            set -e
+            if [[ "$rc" -eq 0 ]]; then
+              exit 0
+            fi
+            echo "Merge attempt failed (exit=$rc); waiting and retrying..."
             sleep "$sleep_seconds"
           done
 
-          echo "Timed out waiting for mergeStateStatus=CLEAN; leaving PR open."
+          echo "Timed out waiting for checks/mergeability; leaving PR open."
           exit 0
 
 
