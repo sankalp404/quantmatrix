@@ -33,6 +33,7 @@ Automatic PR opening (on push)
 - Workflow: `.github/workflows/agent-auto-pr.yml`
   - Any push to a branch named `agent/**` will auto-open a **Draft** PR to `main` (if one doesn’t already exist).
   - Useful as a safety net if a branch is pushed without using `scripts/open_pr.sh`.
+  - CI should appear reliably because `CI` runs on push for `agent/**` branches; we avoid auto-dispatching `workflow_dispatch` runs that can cancel push runs due to concurrency.
 
 Automatic squash-merge after approval (agent branches only)
 ----------------------------------------------------------
@@ -46,6 +47,12 @@ Automatic squash-merge after approval (agent branches only)
   - Action: squash merge + delete branch
   - Note: this workflow merges only when GitHub reports the PR is mergeable (`mergeStateStatus=CLEAN`);
     it does **not** rely on GitHub's repository-level "auto-merge" feature being enabled.
+
+Dependabot
+----------
+- Workflow: `.github/workflows/dependabot-automerge.yml`
+  - Prefer repo auto-merge (merge-queue friendly) when enabled.
+  - If repo auto-merge is disabled, fallback to polling required checks + direct merge.
 
 Requirements for automation
 ---------------------------

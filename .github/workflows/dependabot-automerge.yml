@@ -29,9 +29,20 @@ jobs:
         run: |
           set -euo pipefail
 
-          # Note: do NOT use `gh pr merge --auto` here. Repo-level Auto-merge may be disabled.
-          # Instead, wait for required checks to finish and then merge directly.
-          # If checks aren't ready yet, we poll for a bounded amount of time.
+          # Prefer repo auto-merge (merge queue / branch policy compliant) now that it is enabled.
+          # If auto-merge is disabled, we fall back to polling + direct merge.
+          set +e
+          out="$(gh pr merge --auto --squash --delete-branch \"$PR_URL\" --repo \"$REPO\" 2>&1)"
+          rc=$?
+          set -e
+          if [[ \"$rc\" -eq 0 ]]; then
+            exit 0
+          fi
+          if ! echo \"$out\" | grep -q \"enablePullRequestAutoMerge\"; then
+            echo \"Auto-merge failed: $out\"
+            exit 1
+          fi
+          echo \"Repo auto-merge disabled; falling back to wait+direct merge.\"
 
           max_attempts=90      # ~30 minutes at 20s intervals
           sleep_seconds=20
