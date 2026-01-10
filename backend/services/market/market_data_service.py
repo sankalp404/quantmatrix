@@ -453,6 +453,7 @@ class MarketDataService:
         for provider in self._provider_priority("historical_data"):
             if not self._is_provider_available(provider):
                 continue
+            provider_used = provider.value
             try:
                 if provider == APIProvider.FMP:
                     # Support daily and intraday (5m) for FMP
@@ -469,7 +470,6 @@ class MarketDataService:
                 else:
                     df = None
                 if df is not None and not df.empty:
-                    provider_used = provider.value
                     if max_bars and interval == "1d":
                         df = df.head(max_bars)
                     ttl = 300 if interval in ("1m", "5m") else 3600
@@ -484,111 +484,112 @@ class MarketDataService:
     def _get_historical_yfinance_sync(
         self, symbol: str, period: str, interval: str
     ) -> Optional[pd.DataFrame]:
-        try:
-            data = yf.Ticker(symbol).history(period=period, interval=interval)
-            if data is None or data.empty:
-                return None
-            required = ["Open", "High", "Low", "Close"]
-            if not any(c in data.columns for c in required):
-                return None
-            if "Volume" not in data.columns:
-                data["Volume"] = 0
-            return data[[c for c in ["Open", "High", "Low", "Close", "Volume"] if c in data.columns]].sort_index(ascending=False)
-        except Exception:
+        data = yf.Ticker(symbol).history(period=period, interval=interval)
+        if data is None or data.empty:
             return None
+        required = ["Open", "High", "Low", "Close"]
+        if not any(c in data.columns for c in required):
+            return None
+        if "Volume" not in data.columns:
+            data["Volume"] = 0
+        return data[[c for c in ["Open", "High", "Low", "Close", "Volume"] if c in data.columns]].sort_index(ascending=False)
 
     def _get_historical_fmp_5m_sync(self, symbol: str, period: str) -> Optional[pd.DataFrame]:
         """Fetch intraday 5m bars from FMP historical_chart.
 
         FMP returns newest-first timestamps. `period` is best-effort: we trim using days.
         """
-        try:
-            # FMP supports intervals like '5min'
-            data = fmpsdk.historical_chart(
-                apikey=settings.FMP_API_KEY, symbol=symbol, interval="5min"
-            )
-            if not data or not isinstance(data, list):
-                return None
-            df = pd.DataFrame(data)
-            # Normalize columns and index
-            if df.empty or "date" not in df.columns:
-                return None
-            df["date"] = pd.to_datetime(df["date"])
-            df.set_index("date", inplace=True)
-            cols = ["open", "high", "low", "close", "volume"]
-            df = df[[c for c in cols if c in df.columns]]
-            df.columns = ["Open", "High", "Low", "Close", "Volume"][: len(df.columns)]
-            # Best-effort period trim (e.g., '5d', '30d', '60d')
-            try:
-                if isinstance(period, str) and period.endswith("d"):
-                    days = int(period[:-1])
-                    cutoff = pd.Timestamp.utcnow() - pd.Timedelta(days=days)
-                    df = df[df.index >= cutoff]
-            except Exception:
-                pass
-            return df.sort_index(ascending=False)
-        except Exception:
+        # FMP supports intervals like '5min'
+        data = fmpsdk.historical_chart(
+            apikey=settings.FMP_API_KEY, symbol=symbol, interval="5min"
+        )
+        if isinstance(data, dict):
+            # FMP sometimes returns error dicts; raise so retry/backoff kicks in.
+            msg = data.get("Error Message") or data.get("error") or data.get("message") or str(data)
+            raise RuntimeError(f"FMP historical_chart error: {msg}")
+        if not data or not isinstance(data, list):
             return None
+        df = pd.DataFrame(data)
+        # Normalize columns and index
+        if df.empty or "date" not in df.columns:
+            return None
+        df["date"] = pd.to_datetime(df["date"])
+        df.set_index("date", inplace=True)
+        cols = ["open", "high", "low", "close", "volume"]
+        df = df[[c for c in cols if c in df.columns]]
+        df.columns = ["Open", "High", "Low", "Close", "Volume"][: len(df.columns)]
+        # Best-effort period trim (e.g., '5d', '30d', '60d')
+        try:
+            if isinstance(period, str) and period.endswith("d"):
+                days = int(period[:-1])
+                cutoff = pd.Timestamp.utcnow() - pd.Timedelta(days=days)
+                df = df[df.index >= cutoff]
+        except Exception:
+            pass
+        return df.sort_index(ascending=False)
 
     def _get_historical_twelve_data_sync(
         self, symbol: str, period: str, interval: str
     ) -> Optional[pd.DataFrame]:
         if not self.twelve_data_client:
             return None
-        try:
-            td_map = {
-                "1m": "1min",
-                "5m": "5min",
-                "15m": "15min",
-                "30m": "30min",
-                "1h": "1h",
-                "1d": "1day",
-                "1wk": "1week",
-                "1mo": "1month",
-            }
-            ts = self.twelve_data_client.time_series(
-                symbol=symbol, interval=td_map.get(interval, "1day"), outputsize="5000"
-            )
-            df = ts.as_pandas()
-            if df is None or df.empty:
-                return None
-            out = pd.DataFrame(index=df.index)
-            for src, dst in [("open", "Open"), ("high", "High"), ("low", "Low"), ("close", "Close"), ("volume", "Volume")]:
-                if src in df.columns:
-                    out[dst] = df[src]
-                elif src.capitalize() in df.columns:
-                    out[dst] = df[src.capitalize()]
-            if "Close" not in out.columns:
-                return None
-            if "Volume" not in out.columns:
-                out["Volume"] = 0
-            return out.sort_index(ascending=False)
-        except Exception:
+        td_map = {
+            "1m": "1min",
+            "5m": "5min",
+            "15m": "15min",
+            "30m": "30min",
+            "1h": "1h",
+            "1d": "1day",
+            "1wk": "1week",
+            "1mo": "1month",
+        }
+        ts = self.twelve_data_client.time_series(
+            symbol=symbol, interval=td_map.get(interval, "1day"), outputsize="5000"
+        )
+        df = ts.as_pandas()
+        if df is None or df.empty:
             return None
+        out = pd.DataFrame(index=df.index)
+        for src, dst in [
+            ("open", "Open"),
+            ("high", "High"),
+            ("low", "Low"),
+            ("close", "Close"),
+            ("volume", "Volume"),
+        ]:
+            if src in df.columns:
+                out[dst] = df[src]
+            elif src.capitalize() in df.columns:
+                out[dst] = df[src.capitalize()]
+        if "Close" not in out.columns:
+            return None
+        if "Volume" not in out.columns:
+            out["Volume"] = 0
+        return out.sort_index(ascending=False)
 
     def _get_historical_fmp_sync(
         self, symbol: str, period: str, interval: str
     ) -> Optional[pd.DataFrame]:
-        try:
-            if interval != "1d":
-                return None
-            data = fmpsdk.historical_price_full(apikey=settings.FMP_API_KEY, symbol=symbol)
-            # FMP can return either {"symbol": ..., "historical": [...]} or a plain list
-            if isinstance(data, dict):
-                data = data.get("historical")
-            if not data or not isinstance(data, list):
-                return None
-            df = pd.DataFrame(data)
-            if df.empty or "date" not in df.columns:
-                return None
-            df["date"] = pd.to_datetime(df["date"])
-            df.set_index("date", inplace=True)
-            cols = ["open", "high", "low", "close", "volume"]
-            df = df[[c for c in cols if c in df.columns]]
-            df.columns = ["Open", "High", "Low", "Close", "Volume"][: len(df.columns)]
-            return df.sort_index(ascending=False)
-        except Exception:
+        if interval != "1d":
             return None
+        raw = fmpsdk.historical_price_full(apikey=settings.FMP_API_KEY, symbol=symbol)
+        # FMP can return either {"symbol": ..., "historical": [...]} or an error dict.
+        if isinstance(raw, dict):
+            if raw.get("Error Message") or raw.get("error") or raw.get("message"):
+                msg = raw.get("Error Message") or raw.get("error") or raw.get("message")
+                raise RuntimeError(f"FMP historical_price_full error: {msg}")
+            raw = raw.get("historical")
+        if not raw or not isinstance(raw, list):
+            return None
+        df = pd.DataFrame(raw)
+        if df.empty or "date" not in df.columns:
+            return None
+        df["date"] = pd.to_datetime(df["date"])
+        df.set_index("date", inplace=True)
+        cols = ["open", "high", "low", "close", "volume"]
+        df = df[[c for c in cols if c in df.columns]]
+        df.columns = ["Open", "High", "Low", "Close", "Volume"][: len(df.columns)]
+        return df.sort_index(ascending=False)
 
     # ---------------------- Index Constituents ----------------------
 
