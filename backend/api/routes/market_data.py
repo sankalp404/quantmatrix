@@ -22,7 +22,7 @@ from backend.services.market.market_data_service import (
     MarketDataService,
     compute_coverage_status,
 )
-from backend.models.market_data import MarketSnapshot
+from backend.models.market_data import MarketSnapshot, MarketSnapshotHistory
 from backend.tasks.market_data_tasks import (
     record_daily_history,
     update_tracked_symbol_cache,
@@ -30,6 +30,7 @@ from backend.tasks.market_data_tasks import (
     recompute_indicators_universe,
     refresh_index_constituents,
     refresh_single_symbol,
+    backfill_snapshot_history_last_n_days,
 )
 from backend.api.dependencies import get_optional_user, get_admin_user, get_market_data_viewer
 from backend.models.index_constituent import IndexConstituent
@@ -392,6 +393,45 @@ async def get_snapshot(
     ordered_keys.extend([k for k in col_names if k not in set(ordered_keys)])
     payload = {k: getattr(row, k) for k in ordered_keys}
     return {"symbol": symbol.upper(), "snapshot": payload}
+
+
+@router.get("/technical/snapshot-history/{symbol}")
+async def get_snapshot_history(
+    symbol: str,
+    days: int = Query(200, ge=1, le=3000),
+    user: User | None = Depends(get_optional_user),
+    db: Session = Depends(get_db),
+) -> Dict[str, Any]:
+    """Return historical technical snapshots (MarketSnapshotHistory ledger) for a symbol."""
+    rows = (
+        db.query(MarketSnapshotHistory)
+        .filter(
+            MarketSnapshotHistory.symbol == symbol.upper(),
+            MarketSnapshotHistory.analysis_type == "technical_snapshot",
+        )
+        .order_by(MarketSnapshotHistory.as_of_date.desc())
+        .limit(days)
+        .all()
+    )
+    out = []
+    for r in reversed(rows):  # oldest->newest
+        payload = r.analysis_payload if isinstance(r.analysis_payload, dict) else {}
+        out.append(
+            {
+                "as_of_date": r.as_of_date.isoformat() if hasattr(r.as_of_date, "isoformat") else str(r.as_of_date),
+                "snapshot": payload,
+            }
+        )
+    return {"symbol": symbol.upper(), "days": int(days), "rows": out}
+
+
+@router.post("/admin/snapshots/history/backfill-last-n-days")
+async def admin_backfill_snapshot_history_last_n_days(
+    days: int = Query(200, ge=1, le=3000),
+    user: User = Depends(get_admin_user),
+) -> Dict[str, Any]:
+    """Backfill MarketSnapshotHistory for the last N trading days (DB-only)."""
+    return _enqueue_task(backfill_snapshot_history_last_n_days, days)
 
 
 # Removed duplicate refresh; use POST /symbol/{symbol}/refresh instead

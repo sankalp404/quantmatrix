@@ -893,6 +893,429 @@ def recompute_indicators_universe(batch_size: int = 50) -> dict:
         session.close()
 
 
+# ============================= Snapshot History Backfill =============================
+
+
+@shared_task(name="backend.tasks.market_data_tasks.backfill_snapshot_history_for_date")
+@task_run("backfill_snapshot_history_for_date")
+def backfill_snapshot_history_for_date(as_of_date: str, batch_size: int = 50) -> dict:
+    """Backfill `market_snapshot_history` for a specific as-of date from local `price_data`.
+
+    This is useful when history was not recorded for a day but OHLCV exists, and we want
+    snapshot coverage dots to reflect that day.
+
+    Notes:
+    - DB-first only (no provider calls)
+    - Does NOT update `market_snapshot` (latest cache)
+    """
+    session = SessionLocal()
+    try:
+        # Parse date (YYYY-MM-DD) into a naive timestamp to match price_data.date semantics.
+        as_of_dt = datetime.fromisoformat(as_of_date).replace(hour=0, minute=0, second=0, microsecond=0)
+
+        # Universe: prefer Redis tracked:all (source of truth for UI), fallback to DB-derived.
+        tracked: List[str] = []
+        try:
+            raw = market_data_service.redis_client.get("tracked:all")
+            tracked = json.loads(raw) if raw else []
+        except Exception:
+            tracked = []
+        ordered = sorted({str(s).upper() for s in (tracked or []) if s})
+        if not ordered:
+            ordered = sorted({s.upper() for s in _get_tracked_universe_from_db(session)})
+
+        processed_ok = 0
+        skipped_no_data = 0
+        upserted = 0
+        errors = 0
+        error_samples: list[dict] = []
+
+        for i in range(0, len(ordered), max(1, batch_size)):
+            chunk = ordered[i : i + batch_size]
+            for sym in chunk:
+                try:
+                    snap = market_data_service.compute_snapshot_from_db(session, sym, as_of_dt=as_of_dt)
+                    if not snap:
+                        skipped_no_data += 1
+                        continue
+                    processed_ok += 1
+
+                    # Upsert into history keyed by (symbol, type, as_of_date)
+                    existing = (
+                        session.query(MarketSnapshotHistory)
+                        .filter(
+                            MarketSnapshotHistory.symbol == sym,
+                            MarketSnapshotHistory.analysis_type == "technical_snapshot",
+                            MarketSnapshotHistory.as_of_date == as_of_dt,
+                        )
+                        .first()
+                    )
+                    if existing:
+                        existing.current_price = snap.get("current_price")
+                        existing.rsi = snap.get("rsi")
+                        existing.atr_value = snap.get("atr_value")
+                        existing.sma_50 = snap.get("sma_50")
+                        existing.macd = snap.get("macd")
+                        existing.macd_signal = snap.get("macd_signal")
+                        existing.analysis_payload = snap
+                    else:
+                        session.add(
+                            MarketSnapshotHistory(
+                                symbol=sym,
+                                analysis_type="technical_snapshot",
+                                as_of_date=as_of_dt,
+                                current_price=snap.get("current_price"),
+                                rsi=snap.get("rsi"),
+                                atr_value=snap.get("atr_value"),
+                                sma_50=snap.get("sma_50"),
+                                macd=snap.get("macd"),
+                                macd_signal=snap.get("macd_signal"),
+                                analysis_payload=snap,
+                            )
+                        )
+                    session.commit()
+                    upserted += 1
+                except Exception as exc:
+                    session.rollback()
+                    errors += 1
+                    if len(error_samples) < 25:
+                        error_samples.append({"symbol": sym, "error": str(exc)})
+
+        res = {
+            "status": "ok",
+            "as_of_date": as_of_date,
+            "symbols": len(ordered),
+            "processed_ok": processed_ok,
+            "skipped_no_data": skipped_no_data,
+            "upserted": upserted,
+            "errors": errors,
+            "error_samples": error_samples,
+        }
+        if error_samples:
+            res["error"] = "Sample errors:\n" + "\n".join(
+                f"- {e.get('symbol')}: {e.get('error')}" for e in error_samples
+            )
+        return res
+    finally:
+        session.close()
+
+
+@shared_task(name="backend.tasks.market_data_tasks.backfill_snapshot_history_last_n_days")
+@task_run("backfill_snapshot_history_last_n_days")
+def backfill_snapshot_history_last_n_days(days: int = 200, batch_size: int = 25) -> dict:
+    """Backfill `market_snapshot_history` for the last N trading days (SPY calendar) from local DB prices.
+
+    This computes and stores indicators per day (ledger) so you can later view/backtest
+    historical snapshots. `market_snapshot` remains the fast latest-view.
+    """
+    session = SessionLocal()
+    try:
+        # Universe: prefer Redis tracked:all (source of truth for UI), fallback to DB-derived.
+        tracked: List[str] = []
+        try:
+            raw = market_data_service.redis_client.get("tracked:all")
+            tracked = json.loads(raw) if raw else []
+        except Exception:
+            tracked = []
+        ordered = sorted({str(s).upper() for s in (tracked or []) if s})
+        if not ordered:
+            ordered = sorted({s.upper() for s in _get_tracked_universe_from_db(session)})
+
+        # Trading-day calendar: use SPY dates as canonical.
+        spy_dates = (
+            session.query(PriceData.date)
+            .filter(PriceData.symbol == "SPY", PriceData.interval == "1d")
+            .order_by(PriceData.date.desc())
+            .limit(max(1, int(days)))
+            .all()
+        )
+        as_of_dates = [r[0] for r in spy_dates if r and r[0] is not None]
+        if not as_of_dates:
+            return {"status": "error", "error": "No SPY daily bars found to establish a trading-day calendar"}
+
+        # Oldest->newest list
+        as_of_dates = sorted(as_of_dates)
+
+        processed_symbols = 0
+        written_rows = 0
+        skipped_no_data = 0
+        errors = 0
+        error_samples: list[dict] = []
+
+        # Preload SPY bars covering the window (+ buffer for weekly stage)
+        start_dt = as_of_dates[0]
+        spy_rows = (
+            session.query(
+                PriceData.date,
+                PriceData.open_price,
+                PriceData.high_price,
+                PriceData.low_price,
+                PriceData.close_price,
+                PriceData.volume,
+            )
+            .filter(PriceData.symbol == "SPY", PriceData.interval == "1d", PriceData.date >= start_dt)
+            .order_by(PriceData.date.asc())
+            .all()
+        )
+        import pandas as pd
+        import numpy as np
+        from datetime import time as _time
+        from sqlalchemy.dialects.postgresql import insert as pg_insert
+        from backend.models.market_data import MarketSnapshotHistory
+        from backend.services.market.indicator_engine import (
+            compute_core_indicators_series,
+            compute_weinstein_stage_series_from_daily,
+            classify_ma_bucket_from_ma,
+        )
+
+        if spy_rows:
+            spy_df = pd.DataFrame(
+                [
+                    {
+                        "date": r[0],
+                        "Open": float(r[1]) if r[1] is not None else float(r[4]),
+                        "High": float(r[2]) if r[2] is not None else float(r[4]),
+                        "Low": float(r[3]) if r[3] is not None else float(r[4]),
+                        "Close": float(r[4]),
+                        "Volume": int(r[5] or 0),
+                    }
+                    for r in spy_rows
+                ]
+            ).set_index("date")
+        else:
+            spy_df = pd.DataFrame()
+
+        for i in range(0, len(ordered), max(1, batch_size)):
+            chunk = ordered[i : i + batch_size]
+            for sym in chunk:
+                try:
+                    rows = (
+                        session.query(
+                            PriceData.date,
+                            PriceData.open_price,
+                            PriceData.high_price,
+                            PriceData.low_price,
+                            PriceData.close_price,
+                            PriceData.volume,
+                        )
+                        .filter(PriceData.symbol == sym, PriceData.interval == "1d", PriceData.date >= start_dt)
+                        .order_by(PriceData.date.asc())
+                        .all()
+                    )
+                    if not rows:
+                        skipped_no_data += 1
+                        continue
+
+                    df = pd.DataFrame(
+                        [
+                            {
+                                "date": r[0],
+                                "Open": float(r[1]) if r[1] is not None else float(r[4]),
+                                "High": float(r[2]) if r[2] is not None else float(r[4]),
+                                "Low": float(r[3]) if r[3] is not None else float(r[4]),
+                                "Close": float(r[4]),
+                                "Volume": int(r[5] or 0),
+                            }
+                            for r in rows
+                        ]
+                    ).set_index("date")
+                    if df.empty:
+                        skipped_no_data += 1
+                        continue
+
+                    core = compute_core_indicators_series(df)
+                    # Derived daily fields
+                    close = df["Close"]
+                    price = close
+                    atr14 = core.get("atr_14")
+                    atr30 = core.get("atr_30")
+                    sma21 = core.get("sma_21")
+                    sma50 = core.get("sma_50")
+                    sma100 = core.get("sma_100")
+                    sma150 = core.get("sma_150")
+                    sma200 = core.get("sma_200")
+
+                    def range_pos(window: int) -> pd.Series:
+                        hi = df["High"].rolling(window).max()
+                        lo = df["Low"].rolling(window).min()
+                        denom = (hi - lo).replace(0, np.nan)
+                        return ((price - lo) / denom) * 100.0
+
+                    range20 = range_pos(20)
+                    range50 = range_pos(50)
+                    range252 = range_pos(252)
+
+                    atrp14 = (atr14 / price) * 100.0
+                    atrp30 = (atr30 / price) * 100.0
+                    atr_distance = (price - sma50) / atr14
+
+                    atrx_sma21 = (price - sma21) / atr14
+                    atrx_sma50 = (price - sma50) / atr14
+                    atrx_sma100 = (price - sma100) / atr14
+                    atrx_sma150 = (price - sma150) / atr14
+
+                    # Stage / RS (best-effort; may be NaN early if insufficient weekly history)
+                    stage_daily = pd.DataFrame(index=df.index)
+                    if not spy_df.empty:
+                        stage_daily = compute_weinstein_stage_series_from_daily(
+                            df.iloc[::-1].copy(),
+                            spy_df.iloc[::-1].copy(),
+                        )
+
+                    # Build per-date payload rows for last N trading days
+                    wanted = [d for d in as_of_dates if d in df.index]
+                    if not wanted:
+                        skipped_no_data += 1
+                        continue
+
+                    payload_rows = []
+                    for d in wanted:
+                        # MA bucket (daily)
+                        ma_bucket = None
+                        try:
+                            ma_bucket = classify_ma_bucket_from_ma(
+                                {
+                                    "price": float(price.loc[d]),
+                                    "sma_5": float(core.loc[d, "sma_5"]) if not pd.isna(core.loc[d, "sma_5"]) else None,
+                                    "sma_8": float(core.loc[d, "sma_8"]) if not pd.isna(core.loc[d, "sma_8"]) else None,
+                                    "sma_21": float(core.loc[d, "sma_21"]) if not pd.isna(core.loc[d, "sma_21"]) else None,
+                                    "sma_50": float(core.loc[d, "sma_50"]) if not pd.isna(core.loc[d, "sma_50"]) else None,
+                                    "sma_100": float(core.loc[d, "sma_100"]) if not pd.isna(core.loc[d, "sma_100"]) else None,
+                                    "sma_200": float(core.loc[d, "sma_200"]) if not pd.isna(core.loc[d, "sma_200"]) else None,
+                                }
+                            ).get("bucket")
+                        except Exception:
+                            ma_bucket = None
+
+                        stage_label = None
+                        stage_slope_pct = None
+                        stage_dist_pct = None
+                        rs_mansfield_pct = None
+                        try:
+                            if not stage_daily.empty and d in stage_daily.index:
+                                stage_label = stage_daily.loc[d, "stage_label"]
+                                stage_slope_pct = (
+                                    float(stage_daily.loc[d, "stage_slope_pct"])
+                                    if "stage_slope_pct" in stage_daily.columns and not pd.isna(stage_daily.loc[d, "stage_slope_pct"])
+                                    else None
+                                )
+                                stage_dist_pct = (
+                                    float(stage_daily.loc[d, "stage_dist_pct"])
+                                    if "stage_dist_pct" in stage_daily.columns and not pd.isna(stage_daily.loc[d, "stage_dist_pct"])
+                                    else None
+                                )
+                                rs_mansfield_pct = (
+                                    float(stage_daily.loc[d, "rs_mansfield_pct"])
+                                    if "rs_mansfield_pct" in stage_daily.columns and not pd.isna(stage_daily.loc[d, "rs_mansfield_pct"])
+                                    else None
+                                )
+                        except Exception:
+                            pass
+
+                        payload = {
+                            "symbol": sym,
+                            "analysis_type": "technical_snapshot",
+                            "as_of_timestamp": d.isoformat() if hasattr(d, "isoformat") else str(d),
+                            "current_price": float(price.loc[d]) if not pd.isna(price.loc[d]) else None,
+                            "rsi": float(core.loc[d, "rsi"]) if "rsi" in core.columns and not pd.isna(core.loc[d, "rsi"]) else None,
+                            "sma_5": float(core.loc[d, "sma_5"]) if not pd.isna(core.loc[d, "sma_5"]) else None,
+                            "sma_14": float(core.loc[d, "sma_14"]) if not pd.isna(core.loc[d, "sma_14"]) else None,
+                            "sma_21": float(core.loc[d, "sma_21"]) if not pd.isna(core.loc[d, "sma_21"]) else None,
+                            "sma_50": float(core.loc[d, "sma_50"]) if not pd.isna(core.loc[d, "sma_50"]) else None,
+                            "sma_100": float(core.loc[d, "sma_100"]) if not pd.isna(core.loc[d, "sma_100"]) else None,
+                            "sma_150": float(core.loc[d, "sma_150"]) if not pd.isna(core.loc[d, "sma_150"]) else None,
+                            "sma_200": float(core.loc[d, "sma_200"]) if not pd.isna(core.loc[d, "sma_200"]) else None,
+                            "atr_14": float(atr14.loc[d]) if atr14 is not None and not pd.isna(atr14.loc[d]) else None,
+                            "atr_30": float(atr30.loc[d]) if atr30 is not None and not pd.isna(atr30.loc[d]) else None,
+                            "atrp_14": float(atrp14.loc[d]) if not pd.isna(atrp14.loc[d]) else None,
+                            "atrp_30": float(atrp30.loc[d]) if not pd.isna(atrp30.loc[d]) else None,
+                            "atr_distance": float(atr_distance.loc[d]) if not pd.isna(atr_distance.loc[d]) else None,
+                            "range_pos_20d": float(range20.loc[d]) if not pd.isna(range20.loc[d]) else None,
+                            "range_pos_50d": float(range50.loc[d]) if not pd.isna(range50.loc[d]) else None,
+                            "range_pos_52w": float(range252.loc[d]) if not pd.isna(range252.loc[d]) else None,
+                            "atrx_sma_21": float(atrx_sma21.loc[d]) if not pd.isna(atrx_sma21.loc[d]) else None,
+                            "atrx_sma_50": float(atrx_sma50.loc[d]) if not pd.isna(atrx_sma50.loc[d]) else None,
+                            "atrx_sma_100": float(atrx_sma100.loc[d]) if not pd.isna(atrx_sma100.loc[d]) else None,
+                            "atrx_sma_150": float(atrx_sma150.loc[d]) if not pd.isna(atrx_sma150.loc[d]) else None,
+                            "macd": float(core.loc[d, "macd"]) if "macd" in core.columns and not pd.isna(core.loc[d, "macd"]) else None,
+                            "macd_signal": float(core.loc[d, "macd_signal"]) if "macd_signal" in core.columns and not pd.isna(core.loc[d, "macd_signal"]) else None,
+                            "ma_bucket": ma_bucket,
+                            "stage_label": stage_label if isinstance(stage_label, str) else None,
+                            "stage_label_5d_ago": None,  # computed below
+                            "stage_slope_pct": stage_slope_pct,
+                            "stage_dist_pct": stage_dist_pct,
+                            "rs_mansfield_pct": rs_mansfield_pct,
+                        }
+                        payload_rows.append(
+                            {
+                                "symbol": sym,
+                                "analysis_type": "technical_snapshot",
+                                "as_of_date": d.replace(hour=0, minute=0, second=0, microsecond=0),
+                                "current_price": payload.get("current_price"),
+                                "rsi": payload.get("rsi"),
+                                "atr_value": payload.get("atr_14"),
+                                "sma_50": payload.get("sma_50"),
+                                "macd": payload.get("macd"),
+                                "macd_signal": payload.get("macd_signal"),
+                                "analysis_payload": payload,
+                            }
+                        )
+
+                    # Stage 5d ago: compute from daily mapped labels and attach to payloads
+                    try:
+                        if not stage_daily.empty and "stage_label" in stage_daily.columns:
+                            stage_5d = stage_daily["stage_label"].shift(5)
+                            for r in payload_rows:
+                                d = r["as_of_date"]
+                                if d in stage_5d.index:
+                                    lbl = stage_5d.loc[d]
+                                    if isinstance(lbl, str):
+                                        r["analysis_payload"]["stage_label_5d_ago"] = lbl
+                    except Exception:
+                        pass
+
+                    stmt = pg_insert(MarketSnapshotHistory).values(payload_rows)
+                    stmt = stmt.on_conflict_do_update(
+                        constraint="uq_symbol_type_asof",
+                        set_={
+                            "current_price": stmt.excluded.current_price,
+                            "rsi": stmt.excluded.rsi,
+                            "atr_value": stmt.excluded.atr_value,
+                            "sma_50": stmt.excluded.sma_50,
+                            "macd": stmt.excluded.macd,
+                            "macd_signal": stmt.excluded.macd_signal,
+                            "analysis_payload": stmt.excluded.analysis_payload,
+                        },
+                    )
+                    session.execute(stmt)
+                    session.commit()
+                    written_rows += len(payload_rows)
+                    processed_symbols += 1
+                except Exception as exc:
+                    session.rollback()
+                    errors += 1
+                    if len(error_samples) < 25:
+                        error_samples.append({"symbol": sym, "error": str(exc)})
+
+        res = {
+            "status": "ok",
+            "days": int(days),
+            "symbols": len(ordered),
+            "processed_symbols": processed_symbols,
+            "written_rows": written_rows,
+            "skipped_no_data": skipped_no_data,
+            "errors": errors,
+            "error_samples": error_samples,
+        }
+        if error_samples:
+            res["error"] = "Sample errors:\n" + "\n".join(
+                f"- {e.get('symbol')}: {e.get('error')}" for e in error_samples
+            )
+        return res
+    finally:
+        session.close()
+
+
 # ============================= Daily Analysis History =============================
 
 
