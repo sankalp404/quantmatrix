@@ -7,6 +7,7 @@ export function useUserPreferences(): {
   currency: string;
   timezone: string;
   tableDensity: TableDensity;
+  coverageHistogramWindowDays: number | null;
 } {
   const auth = useAuthOptional();
   const user = auth?.user ?? null;
@@ -16,8 +17,16 @@ export function useUserPreferences(): {
     const timezone = user?.timezone || "UTC";
     const td = user?.ui_preferences?.table_density;
     const tableDensity: TableDensity = td === "compact" ? "compact" : "comfortable";
-    return { currency, timezone, tableDensity };
-  }, [user?.currency_preference, user?.timezone, user?.ui_preferences?.table_density]);
+    const raw = Number(user?.ui_preferences?.coverage_histogram_window_days);
+    const coverageHistogramWindowDays =
+      Number.isFinite(raw) && raw > 0 ? raw : null;
+    return { currency, timezone, tableDensity, coverageHistogramWindowDays };
+  }, [
+    user?.currency_preference,
+    user?.timezone,
+    user?.ui_preferences?.table_density,
+    user?.ui_preferences?.coverage_histogram_window_days,
+  ]);
 }
 
 

@@ -150,6 +150,7 @@ export const buildCoverageKpis = (
   const totalSymbols = Number(snapshot?.symbols ?? 0);
   const dailyCount = Number(snapshot?.daily?.count ?? 0);
   const m5Count = Number(snapshot?.m5?.count ?? 0);
+  const expectedDate = statusInfo.daily_expected_date ? String(statusInfo.daily_expected_date) : null;
   return [
     {
       id: 'tracked',
@@ -162,7 +163,9 @@ export const buildCoverageKpis = (
       label: 'Daily Coverage %',
       value: statusInfo.daily_pct ?? 0,
       unit: '%',
-      help: `${dailyCount} / ${totalSymbols || '—'} bars`,
+      help: expectedDate
+        ? `Latest trading day: ${expectedDate}`
+        : `${dailyCount} / ${totalSymbols || '—'} bars`,
     },
     {
       id: 'm5_pct',
@@ -229,11 +232,12 @@ export const formatCoverageHero = (snapshot?: any, staleThresholdSeconds = 1800)
   const staleDaily = Number(status.stale_daily ?? 0);
   const staleM5 = Number(status.stale_m5 ?? 0);
   const summary =
-    staleDaily > 0
-      ? `${staleDaily} symbols have daily bars older than 48h.`
+    status.summary ||
+    (staleDaily > 0
+      ? `${staleDaily} symbols missing the latest daily bar.`
       : staleM5 > 0
         ? `${staleM5} symbols missing 5m data.`
-        : status.summary || 'Coverage healthy across daily + 5m intervals.';
+        : 'Coverage healthy across daily + 5m intervals.');
   const color = getCoverageStatusColor(status.label);
   const updatedAtIso = snapshot?.meta?.updated_at || snapshot?.generated_at;
   const updatedDisplay = updatedAtIso ? new Date(updatedAtIso).toLocaleString() : '—';

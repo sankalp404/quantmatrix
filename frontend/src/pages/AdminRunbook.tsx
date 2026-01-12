@@ -38,8 +38,20 @@ const runbooks = [
       { label: 'Update Tracked Symbols', task: 'update_tracked_symbol_cache' },
       { label: 'Backfill Daily Bars (Tracked)', task: 'backfill_last_200_bars' },
       { label: 'Recompute Indicators', task: 'recompute_indicators_universe' },
-      { label: 'Record History', task: 'record_daily_history' },
+      { label: 'Backfill Snapshot History (200d)', task: 'backfill_snapshot_history_200d' },
       { label: 'Refresh Coverage Cache', task: 'monitor_coverage_health' },
+    ],
+  },
+  {
+    title: 'Backfill Snapshot History (200d)',
+    description: 'Compute and store the last 200 trading days of technical snapshot history (DB-only). This can take a few minutes.',
+    iconKey: 'tool' as const,
+    accent: 'purple.300',
+    steps: [
+      { label: 'Backfill Snapshot History (200d)', task: 'backfill_snapshot_history_200d' },
+    ],
+    details: [
+      { label: 'Backfill Snapshot History (200d)', task: 'backfill_snapshot_history_200d' },
     ],
   },
   {

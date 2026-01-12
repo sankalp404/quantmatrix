@@ -688,13 +688,147 @@ def refresh_index_constituents() -> dict:
         return res
     finally:
         session.close()
+
+
+@shared_task(name="backend.tasks.market_data_tasks.backfill_daily_since_date")
+@task_run("backfill_daily_since_date")
+def backfill_daily_since_date(since_date: str = "2021-01-01", batch_size: int = 25) -> dict:
+    """One-time (or occasional) deep backfill of DAILY bars since a given date for the tracked universe.
+
+    This fetches provider daily history (FMP-first in paid mode) and persists into price_data.
+    It is intentionally separate from the fast 'last 200 bars' flows.
+    """
+    _set_task_status("backfill_daily_since_date", "running", {"since_date": since_date})
+    session = SessionLocal()
+    try:
+        # Universe: prefer Redis tracked:all; fallback to DB-derived tracked universe.
+        tracked: List[str] = []
+        try:
+            raw = market_data_service.redis_client.get("tracked:all")
+            tracked = json.loads(raw) if raw else []
+        except Exception:
+            tracked = []
+        symbols = sorted({str(s).upper() for s in (tracked or []) if s})
+        if not symbols:
+            symbols = sorted({s.upper() for s in _get_tracked_universe_from_db(session)})
+
+        import pandas as pd
+
+        since_dt = pd.to_datetime(since_date, utc=True, errors="coerce")
+        if since_dt is None or pd.isna(since_dt):
+            raise ValueError(f"Invalid since_date: {since_date!r}")
+        since_dt = since_dt.tz_convert(None).normalize()
+
+        loop = _setup_event_loop()
+        try:
+            policy = str(getattr(settings, "MARKET_PROVIDER_POLICY", "paid")).lower()
+            paid = policy == "paid"
+            max_conc = int(getattr(settings, "MARKET_BACKFILL_CONCURRENCY_MAX", 100))
+            conc_default = int(
+                getattr(
+                    settings,
+                    "MARKET_BACKFILL_CONCURRENCY_PAID" if paid else "MARKET_BACKFILL_CONCURRENCY_FREE",
+                    25 if paid else 5,
+                )
+            )
+            concurrency = max(1, min(max_conc, conc_default))
+
+            async def _fetch_all(symbols_to_fetch: list[str]) -> list[dict]:
+                sem = asyncio.Semaphore(concurrency)
+                out: list[dict] = []
+
+                async def _one(sym: str) -> dict:
+                    async with sem:
+                        df, provider = await market_data_service.get_historical_data(
+                            symbol=sym.upper(),
+                            period="max",
+                            interval="1d",
+                            max_bars=None,  # do not trim
+                            return_provider=True,
+                        )
+                        return {"symbol": sym.upper(), "df": df, "provider": provider}
+
+                tasks = [_one(s) for s in sorted(symbols_to_fetch)]
+                for coro in asyncio.as_completed(tasks):
+                    try:
+                        out.append(await coro)
+                    except Exception as e:
+                        out.append({"symbol": "?", "df": None, "provider": None, "error": str(e)})
+                return out
+
+            fetched = loop.run_until_complete(_fetch_all(symbols))
+        finally:
+            loop.close()
+
+        processed_symbols = 0
+        bars_attempted_total = 0
+        bars_inserted_total = 0
+        errors = 0
+        error_samples: list[dict] = []
+        provider_usage: Dict[str, int] = {}
+
+        for item in fetched:
+            sym = item.get("symbol")
+            if not sym or sym == "?":
+                errors += 1
+                continue
+            df = item.get("df")
+            provider = item.get("provider")
+            if df is None or getattr(df, "empty", True):
+                errors += 1
+                if len(error_samples) < 25:
+                    error_samples.append({"symbol": sym, "provider": provider or "unknown", "error": "empty_response"})
+                _increment_provider_usage(provider_usage, {"provider": provider})
+                continue
+            try:
+                # Normalize and filter since-date
+                df2 = df.copy()
+                df2.index = pd.to_datetime(df2.index, utc=True, errors="coerce").tz_convert(None)
+                df2 = df2[df2.index >= since_dt]
+                if df2.empty:
+                    processed_symbols += 1
+                    continue
+                bars_attempted_total += int(len(df2))
+                inserted = market_data_service.persist_price_bars(
+                    session,
+                    sym,
+                    df2,
+                    interval="1d",
+                    data_source=provider or "unknown",
+                    is_adjusted=True,
+                    delta_after=None,  # deep backfill (idempotent via ON CONFLICT)
+                )
+                session.commit()
+                bars_inserted_total += int(inserted or 0)
+                processed_symbols += 1
+                _increment_provider_usage(provider_usage, {"provider": provider})
+            except Exception as exc:
+                errors += 1
+                session.rollback()
+                if len(error_samples) < 25:
+                    error_samples.append({"symbol": sym, "provider": provider or "unknown", "error": str(exc)})
+        res = {
+            "status": "ok" if errors == 0 else "error",
+            "since_date": since_date,
+            "symbols": len(symbols),
+            "processed_symbols": processed_symbols,
+            "bars_attempted_total": bars_attempted_total,
+            "bars_inserted_total": bars_inserted_total,
+            "errors": errors,
+            "error_samples": error_samples,
+            "provider_usage": provider_usage,
+        }
+        _set_task_status("backfill_daily_since_date", "ok" if errors == 0 else "error", res)
+        return res
+    finally:
+        session.close()
         loop.close()
 
 
 # ============================= Coverage Restore (Daily, Tracked Universe) =============================
 @shared_task(name="backend.tasks.market_data_tasks.bootstrap_daily_coverage_tracked")
 @task_run("bootstrap_daily_coverage_tracked", lock_key=lambda: "bootstrap_daily_coverage_tracked")
-def bootstrap_daily_coverage_tracked() -> dict:
+def bootstrap_daily_coverage_tracked(history_days: int = 200, history_batch_size: int = 25) -> dict:
     """Restore DAILY coverage for the tracked universe (no 5m).
 
     Steps:
@@ -702,7 +836,7 @@ def bootstrap_daily_coverage_tracked() -> dict:
     - Update tracked universe cache (tracked:all)
     - Backfill last ~200 daily bars for tracked universe
     - Recompute indicators for tracked universe
-    - Record daily history
+    - Backfill snapshot history (last 200 trading days) into MarketSnapshotHistory
     - Refresh coverage cache (monitor_coverage_health)
     """
 
@@ -721,8 +855,11 @@ def bootstrap_daily_coverage_tracked() -> dict:
             return f"Inserted {data.get('bars_inserted_total', 0)} bars across {data.get('tracked_total', 0)} tracked"
         if step == "recompute_indicators_universe":
             return f"Recomputed {data.get('processed', data.get('symbols', 0))} / {data.get('symbols', 0)}"
-        if step == "record_daily_history":
-            return f"Wrote {data.get('written', 0)} history rows"
+        if step == "backfill_snapshot_history_last_n_days":
+            return (
+                f"Snapshot history: {data.get('processed_symbols', 0)} syms, "
+                f"{data.get('written_rows', 0)} rows (days={data.get('days', 0)})"
+            )
         if step == "monitor_coverage_health":
             return f"Coverage: {data.get('daily_pct', 0)}% daily; stale={data.get('stale_daily', 0)}"
         return data.get("status", "ok")
@@ -750,8 +887,15 @@ def bootstrap_daily_coverage_tracked() -> dict:
     res4 = recompute_indicators_universe(batch_size=50)
     _append("recompute_indicators_universe", res4)
 
-    res5 = record_daily_history()
-    _append("record_daily_history", res5)
+    # Historical ledger: last N trading days into MarketSnapshotHistory.
+    # This is best-effort: if it fails, still refresh coverage so the operator sees the latest state.
+    try:
+        res5 = backfill_snapshot_history_last_n_days(
+            days=int(history_days), batch_size=int(history_batch_size)
+        )
+    except Exception as exc:
+        res5 = {"status": "error", "error": str(exc)}
+    _append("backfill_snapshot_history_last_n_days", res5)
 
     res6 = monitor_coverage_health()
     _append("monitor_coverage_health", res6)
@@ -1002,7 +1146,11 @@ def backfill_snapshot_history_for_date(as_of_date: str, batch_size: int = 50) ->
 
 @shared_task(name="backend.tasks.market_data_tasks.backfill_snapshot_history_last_n_days")
 @task_run("backfill_snapshot_history_last_n_days")
-def backfill_snapshot_history_last_n_days(days: int = 200, batch_size: int = 25) -> dict:
+def backfill_snapshot_history_last_n_days(
+    days: int = 200,
+    batch_size: int = 25,
+    since_date: str | None = None,
+) -> dict:
     """Backfill `market_snapshot_history` for the last N trading days (SPY calendar) from local DB prices.
 
     This computes and stores indicators per day (ledger) so you can later view/backtest
@@ -1021,20 +1169,83 @@ def backfill_snapshot_history_last_n_days(days: int = 200, batch_size: int = 25)
         if not ordered:
             ordered = sorted({s.upper() for s in _get_tracked_universe_from_db(session)})
 
-        # Trading-day calendar: use SPY dates as canonical.
-        spy_dates = (
+        # Trading-day calendar:
+        # Prefer SPY dates as canonical, but fall back to any symbol with 1d bars in the DB.
+        # This keeps the backfill robust even when SPY isn't present yet.
+        calendar_symbol = "SPY"
+        since_dt = None
+        if since_date:
+            try:
+                import pandas as _pd
+
+                since_dt = _pd.to_datetime(since_date, utc=True).tz_convert(None).normalize().to_pydatetime()
+            except Exception:
+                since_dt = None
+        cal_dates = (
             session.query(PriceData.date)
-            .filter(PriceData.symbol == "SPY", PriceData.interval == "1d")
+            .filter(PriceData.symbol == calendar_symbol, PriceData.interval == "1d")
             .order_by(PriceData.date.desc())
-            .limit(max(1, int(days)))
+            .limit(6000 if since_dt is not None else max(1, int(days)))
             .all()
         )
-        as_of_dates = [r[0] for r in spy_dates if r and r[0] is not None]
+        as_of_dates = [r[0] for r in cal_dates if r and r[0] is not None and (since_dt is None or r[0] >= since_dt)]
         if not as_of_dates:
-            return {"status": "error", "error": "No SPY daily bars found to establish a trading-day calendar"}
+            from sqlalchemy import func
 
-        # Oldest->newest list
+            alt = (
+                session.query(PriceData.symbol, func.count(PriceData.date).label("n"))
+                .filter(PriceData.interval == "1d")
+                .group_by(PriceData.symbol)
+                .order_by(func.count(PriceData.date).desc())
+                .limit(1)
+                .all()
+            )
+            if alt:
+                calendar_symbol = str(alt[0][0] or "")
+                cal_dates = (
+                    session.query(PriceData.date)
+                    .filter(PriceData.symbol == calendar_symbol, PriceData.interval == "1d")
+                    .order_by(PriceData.date.desc())
+                    .limit(6000 if since_dt is not None else max(1, int(days)))
+                    .all()
+                )
+                as_of_dates = [r[0] for r in cal_dates if r and r[0] is not None and (since_dt is None or r[0] >= since_dt)]
+
+        if not as_of_dates:
+            err = "No daily bars found in price_data to establish a trading-day calendar (expected SPY or any 1d bars)."
+            _set_task_status("backfill_snapshot_history_last_n_days", "error", {"status": "error", "error": err})
+            return {"status": "error", "error": err}
+
+        # Oldest->newest list (raw timestamps) + normalized midnight UTC keys (naive).
         as_of_dates = sorted(as_of_dates)
+        start_dt = as_of_dates[0]
+
+        import pandas as pd
+
+        def _norm_midnight_utc(dt: object) -> datetime:
+            # Ensure DatetimeIndex-compatible keys while avoiding tz mismatches.
+            ts = pd.to_datetime(dt, utc=True, errors="coerce")
+            if ts is None or pd.isna(ts):
+                raise ValueError(f"Invalid as_of_date value: {dt!r}")
+            return ts.tz_convert(None).normalize().to_pydatetime()
+
+        as_of_days = [_norm_midnight_utc(d) for d in as_of_dates if d is not None]
+
+        # Progress/observability: estimate total rows upfront (upper bound).
+        estimated_rows = int(len(ordered) * len(as_of_days))
+        _set_task_status(
+            "backfill_snapshot_history_last_n_days",
+            "running",
+            {
+                "days": int(days),
+                "since_date": since_date,
+                "symbols": len(ordered),
+                "estimated_rows": estimated_rows,
+                "processed_symbols": 0,
+                "written_rows": 0,
+                "errors": 0,
+            },
+        )
 
         processed_symbols = 0
         written_rows = 0
@@ -1042,8 +1253,7 @@ def backfill_snapshot_history_last_n_days(days: int = 200, batch_size: int = 25)
         errors = 0
         error_samples: list[dict] = []
 
-        # Preload SPY bars covering the window (+ buffer for weekly stage)
-        start_dt = as_of_dates[0]
+        # Preload calendar bars covering the window (+ buffer for weekly stage)
         spy_rows = (
             session.query(
                 PriceData.date,
@@ -1053,7 +1263,7 @@ def backfill_snapshot_history_last_n_days(days: int = 200, batch_size: int = 25)
                 PriceData.close_price,
                 PriceData.volume,
             )
-            .filter(PriceData.symbol == "SPY", PriceData.interval == "1d", PriceData.date >= start_dt)
+            .filter(PriceData.symbol == calendar_symbol, PriceData.interval == "1d", PriceData.date >= start_dt)
             .order_by(PriceData.date.asc())
             .all()
         )
@@ -1082,9 +1292,12 @@ def backfill_snapshot_history_last_n_days(days: int = 200, batch_size: int = 25)
                     for r in spy_rows
                 ]
             ).set_index("date")
+            # Normalize to midnight UTC (naive) so membership checks align with as_of_days.
+            spy_df.index = pd.to_datetime(spy_df.index, utc=True, errors="coerce").tz_convert(None).normalize()
         else:
             spy_df = pd.DataFrame()
 
+        last_progress_emit = 0
         for i in range(0, len(ordered), max(1, batch_size)):
             chunk = ordered[i : i + batch_size]
             for sym in chunk:
@@ -1119,6 +1332,8 @@ def backfill_snapshot_history_last_n_days(days: int = 200, batch_size: int = 25)
                             for r in rows
                         ]
                     ).set_index("date")
+                    # Normalize to midnight UTC (naive) so membership checks align with as_of_days.
+                    df.index = pd.to_datetime(df.index, utc=True, errors="coerce").tz_convert(None).normalize()
                     if df.empty:
                         skipped_no_data += 1
                         continue
@@ -1163,7 +1378,7 @@ def backfill_snapshot_history_last_n_days(days: int = 200, batch_size: int = 25)
                         )
 
                     # Build per-date payload rows for last N trading days
-                    wanted = [d for d in as_of_dates if d in df.index]
+                    wanted = [d for d in as_of_days if d in df.index]
                     if not wanted:
                         skipped_no_data += 1
                         continue
@@ -1250,7 +1465,7 @@ def backfill_snapshot_history_last_n_days(days: int = 200, batch_size: int = 25)
                             {
                                 "symbol": sym,
                                 "analysis_type": "technical_snapshot",
-                                "as_of_date": d.replace(hour=0, minute=0, second=0, microsecond=0),
+                                "as_of_date": d,
                                 "current_price": payload.get("current_price"),
                                 "rsi": payload.get("rsi"),
                                 "atr_value": payload.get("atr_14"),
@@ -1291,6 +1506,23 @@ def backfill_snapshot_history_last_n_days(days: int = 200, batch_size: int = 25)
                     session.commit()
                     written_rows += len(payload_rows)
                     processed_symbols += 1
+
+                    # Emit progress every ~10 symbols to keep UI responsive without spamming Redis.
+                    if processed_symbols - last_progress_emit >= 10:
+                        last_progress_emit = processed_symbols
+                        _set_task_status(
+                            "backfill_snapshot_history_last_n_days",
+                            "running",
+                            {
+                                "days": int(days),
+                                "symbols": len(ordered),
+                                "estimated_rows": estimated_rows,
+                                "processed_symbols": processed_symbols,
+                                "written_rows": written_rows,
+                                "skipped_no_data": skipped_no_data,
+                                "errors": errors,
+                            },
+                        )
                 except Exception as exc:
                     session.rollback()
                     errors += 1
@@ -1298,9 +1530,10 @@ def backfill_snapshot_history_last_n_days(days: int = 200, batch_size: int = 25)
                         error_samples.append({"symbol": sym, "error": str(exc)})
 
         res = {
-            "status": "ok",
+            "status": "ok" if errors == 0 else "error",
             "days": int(days),
             "symbols": len(ordered),
+            "calendar_symbol": calendar_symbol,
             "processed_symbols": processed_symbols,
             "written_rows": written_rows,
             "skipped_no_data": skipped_no_data,
@@ -1311,6 +1544,11 @@ def backfill_snapshot_history_last_n_days(days: int = 200, batch_size: int = 25)
             res["error"] = "Sample errors:\n" + "\n".join(
                 f"- {e.get('symbol')}: {e.get('error')}" for e in error_samples
             )
+        _set_task_status(
+            "backfill_snapshot_history_last_n_days",
+            "ok" if errors == 0 else "error",
+            res,
+        )
         return res
     finally:
         session.close()

@@ -295,7 +295,7 @@ const AdminJobs: React.FC = () => {
                   </Text>
                 </Box>
                 <HStack gap={3} flexWrap="wrap">
-                  <Badge colorPalette={selectedJob?.status === 'success' ? 'green' : selectedJob?.status === 'running' ? 'blue' : 'red'}>
+                  <Badge colorPalette={statusPalette(selectedJob?.status)}>
                     {String(selectedJob?.status || 'unknown')}
                   </Badge>
                   <Text fontSize="xs" color="fg.muted">

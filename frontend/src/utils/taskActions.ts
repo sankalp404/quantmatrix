@@ -8,7 +8,8 @@ type TaskName =
   | 'record_daily_history'
   | 'monitor_coverage_health'
   | 'restore_daily_coverage_tracked'
-  | 'backfill_stale_daily';
+  | 'backfill_stale_daily'
+  | 'backfill_snapshot_history_200d';
 
 const TASK_ENDPOINTS: Record<TaskName, () => Promise<any>> = {
   refresh_index_constituents: () => api.post('/market-data/index/constituents/refresh'),
@@ -19,6 +20,8 @@ const TASK_ENDPOINTS: Record<TaskName, () => Promise<any>> = {
   monitor_coverage_health: () => api.post('/market-data/admin/coverage/refresh'),
   restore_daily_coverage_tracked: () => api.post('/market-data/admin/coverage/restore-daily-tracked'),
   backfill_stale_daily: () => api.post('/market-data/admin/coverage/backfill-stale-daily'),
+  backfill_snapshot_history_200d: () =>
+    api.post('/market-data/admin/snapshots/history/backfill-last-n-days?days=200'),
 };
 
 export const triggerTaskByName = async (taskName: string) => {
