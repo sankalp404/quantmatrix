@@ -25,6 +25,8 @@ from backend.services.market.market_data_service import (
     market_data_service,
     compute_coverage_status,
 )
+from backend.services.market.backfill_params import daily_backfill_params
+from backend.services.market.universe import tracked_symbols_from_db
 from backend.models import Position
 from backend.config import settings
 from .task_utils import task_run
@@ -268,23 +270,8 @@ def _get_tracked_universe_from_db(session: SessionLocal) -> set[str]:
     - We intentionally exclude inactive index constituents, otherwise the tracked universe
       accumulates delisted/removed tickers and coverage will look degraded forever.
     """
-    tracked: set[str] = set()
-    # Index constituents table, if present
-    try:
-        for (sym,) in (
-            session.query(IndexConstituent.symbol)
-            .filter(IndexConstituent.is_active.is_(True))
-            .distinct()
-        ):
-            if sym:
-                tracked.add(sym.upper())
-    except Exception:
-        pass
-    # Portfolio symbols
-    for (sym,) in session.query(Position.symbol).distinct():
-        if sym:
-            tracked.add(sym.upper())
-    return tracked
+    # Keep return type for callers (set), but delegate the actual logic to the shared helper.
+    return set(tracked_symbols_from_db(session))
 
 
 @shared_task(name="backend.tasks.market_data_tasks.update_tracked_symbol_cache")
@@ -502,39 +489,10 @@ def _persist_daily_fetch_results(
     }
 
 
-def _max_bars_for_days(days: int | None, *, default_days: int = 200) -> int:
-    """Translate desired daily 'days' into a bounded max_bars for provider fetches.
-
-    Keep the existing default behavior for ~200 days: max_bars=270.
-    For larger windows (e.g. 500 days), widen max_bars with a buffer for indicators.
-    """
-    d = int(days or 0)
-    if d <= 0:
-        d = int(default_days)
-    return max(270, d + 70)
-
-
-def _period_for_days(days: int | None, *, default_days: int = 200) -> str:
-    """Choose a provider period string that is compatible with multiple providers.
-
-    Keep backwards-compat for the existing default (200d -> '1y').
-    """
-    d = int(days or 0)
-    if d <= 0:
-        d = int(default_days)
-    if d <= 270:
-        return "1y"
-    if d <= 540:
-        return "2y"
-    if d <= 1260:
-        return "5y"
-    return "max"
-
-
 @shared_task(name="backend.tasks.market_data_tasks.backfill_last_bars")
 @task_run("backfill_last_bars")
 def backfill_last_bars(days: int = 200) -> dict:
-    """Delta backfill last N daily bars for all tracked symbols (indices ∪ portfolio).
+    """Delta backfill last N *trading days* (approx) of daily bars for the tracked universe.
 
     Returns detailed counters:
     - tracked_total, updated_total, up_to_date_total, skipped_empty, bars_inserted_total, errors, error_samples
@@ -548,13 +506,12 @@ def backfill_last_bars(days: int = 200) -> dict:
         try:
             tracked_total = len(symbols)
             concurrency = _daily_backfill_concurrency()
-            max_bars = _max_bars_for_days(days)
-            period = _period_for_days(days)
+            params = daily_backfill_params(days=days)
             fetched = loop.run_until_complete(
                 _fetch_daily_for_symbols(
                     symbols=list(symbols),
-                    period=period,
-                    max_bars=max_bars,
+                    period=params.period,
+                    max_bars=params.max_bars,
                     concurrency=concurrency,
                 )
             )
@@ -573,8 +530,8 @@ def backfill_last_bars(days: int = 200) -> dict:
                 retried = loop.run_until_complete(
                     _fetch_daily_for_symbols(
                         symbols=empties,
-                        period=period,
-                        max_bars=max_bars,
+                        period=params.period,
+                        max_bars=params.max_bars,
                         concurrency=retry_conc,
                     )
                 )
@@ -596,6 +553,8 @@ def backfill_last_bars(days: int = 200) -> dict:
         res = {
             "status": "ok",
             "days": int(days),
+            "period": params.period,
+            "max_bars": params.max_bars,
             "tracked_total": tracked_total,
             "updated_total": persist["updated_total"],
             "up_to_date_total": persist["up_to_date_total"],
@@ -622,13 +581,12 @@ def backfill_symbols(symbols: List[str], days: int = 200) -> dict:
         loop = _setup_event_loop()
         try:
             concurrency = _daily_backfill_concurrency()
-            max_bars = _max_bars_for_days(days)
-            period = _period_for_days(days)
+            params = daily_backfill_params(days=days)
             fetched = loop.run_until_complete(
                 _fetch_daily_for_symbols(
                     symbols=[s.upper() for s in (symbols or []) if s],
-                    period=period,
-                    max_bars=max_bars,
+                    period=params.period,
+                    max_bars=params.max_bars,
                     concurrency=concurrency,
                 )
             )
@@ -644,6 +602,9 @@ def backfill_symbols(symbols: List[str], days: int = 200) -> dict:
 
         return {
             "status": "ok",
+            "days": int(days),
+            "period": params.period,
+            "max_bars": params.max_bars,
             "symbols": len(symbols or []),
             "processed": persist["processed_ok"],
             "rows_attempted": persist["bars_inserted_total"],

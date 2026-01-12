@@ -22,6 +22,7 @@ from backend.services.market.market_data_service import (
     MarketDataService,
     compute_coverage_status,
 )
+from backend.services.market.universe import tracked_symbols
 from backend.models.market_data import MarketSnapshot, MarketSnapshotHistory
 from backend.tasks.market_data_tasks import (
     record_daily_history,
@@ -57,33 +58,9 @@ def _visibility_scope() -> str:
 
 
 def _tracked_universe_symbols(db: Session) -> List[str]:
-    """Return tracked universe symbols (tracked:all preferred, DB fallback)."""
-    try:
-        svc = MarketDataService()
-        raw = svc.redis_client.get("tracked:all")
-        tracked = sorted({str(s).upper() for s in (json.loads(raw) if raw else []) if s})
-    except Exception:
-        tracked = []
-    if tracked:
-        return tracked
-    syms = set()
-    try:
-        for (s,) in (
-            db.query(IndexConstituent.symbol)
-            .filter(IndexConstituent.is_active.is_(True))
-            .distinct()
-        ):
-            if s:
-                syms.add(str(s).upper())
-    except Exception:
-        pass
-    try:
-        for (s,) in db.query(Position.symbol).distinct():
-            if s:
-                syms.add(str(s).upper())
-    except Exception:
-        pass
-    return sorted(syms)
+    """Return tracked universe symbols (Redis tracked:all preferred, DB fallback)."""
+    svc = MarketDataService()
+    return tracked_symbols(db, redis_client=svc.redis_client)
 
 
 def _is_backfill_5m_enabled(svc: MarketDataService) -> bool:

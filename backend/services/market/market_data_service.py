@@ -433,9 +433,13 @@ class MarketDataService:
         max_bars: Optional[int] = 270,
         return_provider: bool = False,
     ) -> Optional[pd.DataFrame] | tuple[Optional[pd.DataFrame], Optional[str]]:
-        """Get OHLCV (newest->first index) with provider policy, returning provider when requested.
+        """Get OHLCV (newest->first index) with provider policy.
 
-        - Trims to max_bars for interval==1d to bound downstream compute
+        Semantics (provider-aware):
+        - `period` is a coarse request hint (calendar range) for providers that support it
+          (e.g. yfinance). Some providers effectively ignore it for daily history.
+        - `max_bars` is the hard bound: when set and interval=="1d", we keep only the newest
+          `max_bars` rows so downstream compute is stable and predictable.
         - Cache TTL: 300s for intraday; 3600s for daily+
         """
         cache_key = f"historical:{symbol}:{period}:{interval}"
