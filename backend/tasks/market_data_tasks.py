@@ -531,15 +531,15 @@ def _period_for_days(days: int | None, *, default_days: int = 200) -> str:
     return "max"
 
 
-@shared_task(name="backend.tasks.market_data_tasks.backfill_last_200_bars")
-@task_run("backfill_last_200_bars")
-def backfill_last_200_bars(days: int = 200) -> dict:
-    """Delta backfill last N trading days for all tracked symbols (indices ∪ portfolio).
+@shared_task(name="backend.tasks.market_data_tasks.backfill_last_bars")
+@task_run("backfill_last_bars")
+def backfill_last_bars(days: int = 200) -> dict:
+    """Delta backfill last N daily bars for all tracked symbols (indices ∪ portfolio).
 
     Returns detailed counters:
     - tracked_total, updated_total, up_to_date_total, skipped_empty, bars_inserted_total, errors, error_samples
     """
-    _set_task_status("backfill_last_200_bars", "running")
+    _set_task_status("backfill_last_bars", "running", {"days": int(days)})
     session = SessionLocal()
     try:
         # Use durable tracked universe (index_constituents ∪ portfolio)
@@ -605,10 +605,17 @@ def backfill_last_200_bars(days: int = 200) -> dict:
             "error_samples": persist["error_samples"],
             "provider_usage": persist["provider_usage"],
         }
-        _set_task_status("backfill_last_200_bars", "ok", res)
+        _set_task_status("backfill_last_bars", "ok", res)
         return res
     finally:
         session.close()
+
+
+# Backwards-compatible alias (old name). Prefer backfill_last_bars.
+@shared_task(name="backend.tasks.market_data_tasks.backfill_last_200_bars")
+@task_run("backfill_last_200_bars")
+def backfill_last_200_bars(days: int = 200) -> dict:
+    return backfill_last_bars(days=days)
 
 
 @shared_task(name="backend.tasks.market_data_tasks.backfill_symbols")
@@ -833,7 +840,7 @@ def bootstrap_daily_coverage_tracked(history_days: int = 200, history_batch_size
             return "; ".join(parts) or "Refreshed constituents"
         if step == "update_tracked_symbol_cache":
             return f"{data.get('tracked_all', 0)} tracked ({data.get('new', 0)} new)"
-        if step == "backfill_last_200_bars":
+        if step == "backfill_last_bars":
             return f"Inserted {data.get('bars_inserted_total', 0)} bars across {data.get('tracked_total', 0)} tracked"
         if step == "recompute_indicators_universe":
             return f"Recomputed {data.get('processed', data.get('symbols', 0))} / {data.get('symbols', 0)}"
@@ -863,8 +870,8 @@ def bootstrap_daily_coverage_tracked(history_days: int = 200, history_batch_size
     res2 = update_tracked_symbol_cache()
     _append("update_tracked_symbol_cache", res2)
 
-    res3 = backfill_last_200_bars(days=200)
-    _append("backfill_last_200_bars", res3)
+    res3 = backfill_last_bars(days=200)
+    _append("backfill_last_bars", res3)
 
     res4 = recompute_indicators_universe(batch_size=50)
     _append("recompute_indicators_universe", res4)

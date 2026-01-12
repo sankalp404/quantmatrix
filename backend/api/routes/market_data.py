@@ -32,6 +32,7 @@ from backend.tasks.market_data_tasks import (
     refresh_single_symbol,
     backfill_snapshot_history_last_n_days,
     backfill_daily_since_date,
+    backfill_last_bars,
 )
 from backend.api.dependencies import get_optional_user, get_admin_user, get_market_data_viewer
 from backend.models.index_constituent import IndexConstituent
@@ -446,6 +447,15 @@ async def admin_backfill_daily_since_date(
     return _enqueue_task(backfill_daily_since_date, since_date, batch_size)
 
 
+@router.post("/admin/backfill/daily-last-bars")
+async def admin_backfill_daily_last_bars(
+    days: int = Query(200, ge=30, le=3000, description="Approx trading days (default 200)"),
+    _admin: User = Depends(get_admin_user),
+) -> Dict[str, Any]:
+    """Backfill last N daily bars for the tracked universe (provider fetch, delta insert)."""
+    return _enqueue_task(backfill_last_bars, days=days)
+
+
 # Removed duplicate refresh; use POST /symbol/{symbol}/refresh instead
 
 
@@ -466,7 +476,7 @@ async def admin_task_status(
             "refresh_index_constituents",
             "update_tracked_symbol_cache",
             "bootstrap_daily_coverage_tracked",
-            "backfill_last_200_bars",
+            "backfill_last_bars",
             "recompute_indicators_universe",
             "record_daily_history",
             "backfill_snapshot_history_last_n_days",
@@ -683,7 +693,7 @@ async def post_refresh_symbol(
 ) -> Dict[str, Any]:
     """Delta backfill and recompute indicators for a single symbol (no external TA).
 
-    Flow: backfill_last_200_bars(symbol) → recompute from DB → persist MarketSnapshot.
+    Flow: backfill_last_bars(symbols/days) → recompute from DB → persist MarketSnapshot.
     """
     return _enqueue_task(refresh_single_symbol, symbol.upper())
 
@@ -1036,93 +1046,86 @@ async def get_coverage(
         except Exception:
             history_entries = []
 
-        # Ensure newer coverage fields exist even when an older cached snapshot is served.
-        # (e.g., cache written before fill_by_date/snapshot_fill_by_date were introduced)
+        # Ensure fill-by-date series are always present and up-to-date, even when a cached snapshot is served.
+        # A cached snapshot can contain partial lists (e.g., only newest), which would render older dots grey.
         try:
             daily_section = snapshot.get("daily", {}) or {}
-            if "fill_by_date" not in daily_section or not isinstance(daily_section.get("fill_by_date"), list):
-                last_map = daily_section.get("last") or {}
-                sym_set = {str(s).upper() for s in (last_map.keys() if isinstance(last_map, dict) else []) if s}
-                total_symbols = len(sym_set)
-                if sym_set and total_symbols > 0:
-                    from datetime import timedelta as _timedelta
+            last_map = daily_section.get("last") or {}
+            sym_set = {str(s).upper() for s in (last_map.keys() if isinstance(last_map, dict) else []) if s}
+            total_symbols = len(sym_set)
+            from datetime import timedelta as _timedelta
 
-                    now_utc = datetime.utcnow()
-                    lookback = int(getattr(settings, "COVERAGE_FILL_LOOKBACK_DAYS", 90))
-                    start_dt = now_utc - _timedelta(days=lookback)
-                    rows = (
-                        db.query(
-                            func.date(PriceData.date).label("d"),
-                            func.count(distinct(PriceData.symbol)).label("symbol_count"),
-                        )
-                        .filter(
-                            PriceData.interval == "1d",
-                            PriceData.symbol.in_(sym_set),
-                            PriceData.date >= start_dt,
-                        )
-                        .group_by(func.date(PriceData.date))
-                        .order_by(func.date(PriceData.date).asc())
-                        .all()
-                    )
-                    out: List[Dict[str, Any]] = []
-                    for d, symbol_count in rows:
-                        if not d:
-                            continue
-                        n = int(symbol_count or 0)
-                        out.append(
-                            {
-                                "date": str(d),
-                                "symbol_count": n,
-                                "pct_of_universe": round((n / total_symbols) * 100.0, 1),
-                            }
-                        )
-                    daily_section["fill_by_date"] = out
-                else:
-                    daily_section["fill_by_date"] = []
+            now_utc = datetime.utcnow()
+            lookback = int(
+                int(fill_lookback_days)
+                if fill_lookback_days is not None
+                else getattr(settings, "COVERAGE_FILL_LOOKBACK_DAYS", 90)
+            )
+            start_dt = now_utc - _timedelta(days=lookback)
 
-            if "snapshot_fill_by_date" not in daily_section or not isinstance(daily_section.get("snapshot_fill_by_date"), list):
-                last_map = daily_section.get("last") or {}
-                sym_set = {str(s).upper() for s in (last_map.keys() if isinstance(last_map, dict) else []) if s}
-                total_symbols = len(sym_set)
-                if sym_set and total_symbols > 0:
-                    from datetime import timedelta as _timedelta
+            # Always recompute daily fill_by_date from price_data.
+            if sym_set and total_symbols > 0:
+                rows = (
+                    db.query(
+                        func.date(PriceData.date).label("d"),
+                        func.count(distinct(PriceData.symbol)).label("symbol_count"),
+                    )
+                    .filter(
+                        PriceData.interval == "1d",
+                        PriceData.symbol.in_(sym_set),
+                        PriceData.date >= start_dt,
+                    )
+                    .group_by(func.date(PriceData.date))
+                    .order_by(func.date(PriceData.date).asc())
+                    .all()
+                )
+                out: List[Dict[str, Any]] = []
+                for d, symbol_count in rows:
+                    if not d:
+                        continue
+                    n = int(symbol_count or 0)
+                    out.append(
+                        {
+                            "date": str(d),
+                            "symbol_count": n,
+                            "pct_of_universe": round((n / total_symbols) * 100.0, 1),
+                        }
+                    )
+                daily_section["fill_by_date"] = out
+            else:
+                daily_section["fill_by_date"] = []
 
-                    now_utc = datetime.utcnow()
-                    lookback = int(
-                        int(fill_lookback_days)
-                        if fill_lookback_days is not None
-                        else getattr(settings, "COVERAGE_FILL_LOOKBACK_DAYS", 90)
+            # Always recompute snapshot_fill_by_date from MarketSnapshotHistory (ledger).
+            if sym_set and total_symbols > 0:
+                rows = (
+                    db.query(
+                        func.date(MarketSnapshotHistory.as_of_date).label("d"),
+                        func.count(distinct(MarketSnapshotHistory.symbol)).label("symbol_count"),
                     )
-                    start_dt = now_utc - _timedelta(days=lookback)
-                    rows = (
-                        db.query(
-                            func.date(MarketSnapshotHistory.as_of_date).label("d"),
-                            func.count(distinct(MarketSnapshotHistory.symbol)).label("symbol_count"),
-                        )
-                        .filter(
-                            MarketSnapshotHistory.analysis_type == "technical_snapshot",
-                            MarketSnapshotHistory.symbol.in_(sym_set),
-                            MarketSnapshotHistory.as_of_date >= start_dt,
-                        )
-                        .group_by(func.date(MarketSnapshotHistory.as_of_date))
-                        .order_by(func.date(MarketSnapshotHistory.as_of_date).asc())
-                        .all()
+                    .filter(
+                        MarketSnapshotHistory.analysis_type == "technical_snapshot",
+                        MarketSnapshotHistory.symbol.in_(sym_set),
+                        MarketSnapshotHistory.as_of_date >= start_dt,
                     )
-                    out: List[Dict[str, Any]] = []
-                    for d, symbol_count in rows:
-                        if not d:
-                            continue
-                        n = int(symbol_count or 0)
-                        out.append(
-                            {
-                                "date": str(d),
-                                "symbol_count": n,
-                                "pct_of_universe": round((n / total_symbols) * 100.0, 1),
-                            }
-                        )
-                    daily_section["snapshot_fill_by_date"] = out
-                else:
-                    daily_section["snapshot_fill_by_date"] = []
+                    .group_by(func.date(MarketSnapshotHistory.as_of_date))
+                    .order_by(func.date(MarketSnapshotHistory.as_of_date).asc())
+                    .all()
+                )
+                out: List[Dict[str, Any]] = []
+                for d, symbol_count in rows:
+                    if not d:
+                        continue
+                    n = int(symbol_count or 0)
+                    out.append(
+                        {
+                            "date": str(d),
+                            "symbol_count": n,
+                            "pct_of_universe": round((n / total_symbols) * 100.0, 1),
+                        }
+                    )
+                daily_section["snapshot_fill_by_date"] = out
+            else:
+                daily_section["snapshot_fill_by_date"] = []
 
             snapshot["daily"] = daily_section
         except Exception:

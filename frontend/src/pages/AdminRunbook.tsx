@@ -36,7 +36,7 @@ const runbooks = [
     details: [
       { label: 'Refresh Constituents', task: 'refresh_index_constituents' },
       { label: 'Update Tracked Symbols', task: 'update_tracked_symbol_cache' },
-      { label: 'Backfill Daily Bars (Tracked)', task: 'backfill_last_200_bars' },
+      { label: 'Backfill Daily Bars (Tracked)', task: 'backfill_last_bars' },
       { label: 'Recompute Indicators', task: 'recompute_indicators_universe' },
       { label: 'Backfill Snapshot History (200d)', task: 'backfill_snapshot_history_200d' },
       { label: 'Refresh Coverage Cache', task: 'monitor_coverage_health' },

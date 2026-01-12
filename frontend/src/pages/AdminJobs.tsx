@@ -79,8 +79,10 @@ const AdminJobs: React.FC = () => {
       if (typeof nDays === 'number') p.push(`(${nDays} days)`);
       return p.join(' ');
     }
-    if (task.includes('backfill_last_200_bars')) {
-      return typeof symbolsN === 'number' ? `Backfilled last ~200 daily bars (${symbolsN} symbols)` : 'Backfilled last ~200 daily bars';
+    if (task.includes('backfill_last_bars') || task.includes('backfill_last_200_bars')) {
+      const days = typeof counters?.days === 'number' ? Number(counters.days) : undefined;
+      const label = typeof days === 'number' ? `Backfilled last ~${days} daily bars` : 'Backfilled last daily bars';
+      return typeof symbolsN === 'number' ? `${label} (${symbolsN} symbols)` : label;
     }
     if (task.includes('bootstrap_daily_coverage_tracked')) return 'Restore Daily Coverage (Tracked)';
     if (task.includes('refresh_index_constituents')) return 'Refreshed index constituents';
