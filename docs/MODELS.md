@@ -58,7 +58,7 @@ Market Data
   - Purpose: immutable daily snapshots for backtesting/analytics
   - Unique: (symbol, analysis_type, as_of_date)
   - Headline fields: current_price, rsi, atr_value, sma_50, macd, macd_signal
-  - Payload: `analysis_payload` JSON mirrors snapshot contents for reproducibility
+  - Fields: stored as a flat/wide table (queryable columns, no JSON payload)
 
 Constraints and Integrity
 - Enforced uniqueness on trades, transactions, and options to prevent brokerage dupes

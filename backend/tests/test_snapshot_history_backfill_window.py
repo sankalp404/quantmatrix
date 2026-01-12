@@ -74,7 +74,8 @@ def test_backfill_snapshot_history_last_n_days_writes_rows(db_session, monkeypat
         .all()
     )
     assert len(rows) == 5
-    assert isinstance(rows[0].analysis_payload, dict)
-    assert rows[0].analysis_payload.get("as_of_timestamp") is not None
+    # Wide/flat table: verify some computed fields landed on columns.
+    assert rows[0].current_price is not None
+    assert rows[-1].sma_5 is not None or rows[-1].sma_14 is not None or rows[-1].sma_21 is not None
 
 

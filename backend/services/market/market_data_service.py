@@ -1107,28 +1107,33 @@ class MarketDataService:
                 .first()
             )
             if existing:
+                # Headline fields
                 existing.current_price = snapshot_json.get("current_price")
                 existing.rsi = snapshot_json.get("rsi")
                 existing.atr_value = snapshot_json.get("atr_value")
                 existing.sma_50 = snapshot_json.get("sma_50")
                 existing.macd = snapshot_json.get("macd")
                 existing.macd_signal = snapshot_json.get("macd_signal")
-                existing.analysis_payload = snapshot_json
+                # Wide fields (best-effort: set only if model has the attr)
+                for k, v in snapshot_json.items():
+                    if hasattr(existing, k):
+                        setattr(existing, k, v)
             else:
-                db.add(
-                    MarketSnapshotHistory(
-                        symbol=symbol,
-                        analysis_type=analysis_type,
-                        as_of_date=as_of_date,
-                        current_price=snapshot_json.get("current_price"),
-                        rsi=snapshot_json.get("rsi"),
-                        atr_value=snapshot_json.get("atr_value"),
-                        sma_50=snapshot_json.get("sma_50"),
-                        macd=snapshot_json.get("macd"),
-                        macd_signal=snapshot_json.get("macd_signal"),
-                        analysis_payload=snapshot_json,
-                    )
+                hist = MarketSnapshotHistory(
+                    symbol=symbol,
+                    analysis_type=analysis_type,
+                    as_of_date=as_of_date,
+                    current_price=snapshot_json.get("current_price"),
+                    rsi=snapshot_json.get("rsi"),
+                    atr_value=snapshot_json.get("atr_value"),
+                    sma_50=snapshot_json.get("sma_50"),
+                    macd=snapshot_json.get("macd"),
+                    macd_signal=snapshot_json.get("macd_signal"),
                 )
+                for k, v in snapshot_json.items():
+                    if hasattr(hist, k):
+                        setattr(hist, k, v)
+                db.add(hist)
         db.flush()
         db.commit()
         return row

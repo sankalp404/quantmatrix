@@ -17,7 +17,7 @@ def test_coverage_snapshot_uses_snapshot_history(db_session, monkeypatch):
             symbol="AAA",
             analysis_type="technical_snapshot",
             as_of_date=d1,
-            analysis_payload={"current_price": 1, "as_of_timestamp": "2026-01-08T00:00:00"},
+            current_price=1,
         )
     )
     db_session.add(
@@ -25,7 +25,7 @@ def test_coverage_snapshot_uses_snapshot_history(db_session, monkeypatch):
             symbol="BBB",
             analysis_type="technical_snapshot",
             as_of_date=d2,
-            analysis_payload={"current_price": 2, "as_of_timestamp": "2026-01-09T00:00:00"},
+            current_price=2,
         )
     )
     db_session.commit()

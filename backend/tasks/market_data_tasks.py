@@ -1046,8 +1046,23 @@ def backfill_snapshot_history_for_date(as_of_date: str, batch_size: int = 50) ->
                         existing.sma_50 = snap.get("sma_50")
                         existing.macd = snap.get("macd")
                         existing.macd_signal = snap.get("macd_signal")
-                        existing.analysis_payload = snap
+                        for k, v in (snap or {}).items():
+                            if hasattr(existing, k):
+                                setattr(existing, k, v)
                     else:
+                        _reserved = {
+                            "id",
+                            "symbol",
+                            "analysis_type",
+                            "as_of_date",
+                            "analysis_timestamp",
+                            "current_price",
+                            "rsi",
+                            "atr_value",
+                            "sma_50",
+                            "macd",
+                            "macd_signal",
+                        }
                         session.add(
                             MarketSnapshotHistory(
                                 symbol=sym,
@@ -1059,7 +1074,11 @@ def backfill_snapshot_history_for_date(as_of_date: str, batch_size: int = 50) ->
                                 sma_50=snap.get("sma_50"),
                                 macd=snap.get("macd"),
                                 macd_signal=snap.get("macd_signal"),
-                                analysis_payload=snap,
+                                **{
+                                    k: v
+                                    for k, v in (snap or {}).items()
+                                    if k not in _reserved and hasattr(MarketSnapshotHistory, k)
+                                },
                             )
                         )
                     session.commit()
@@ -1406,20 +1425,22 @@ def backfill_snapshot_history_last_n_days(
                             "stage_dist_pct": stage_dist_pct,
                             "rs_mansfield_pct": rs_mansfield_pct,
                         }
-                        payload_rows.append(
-                            {
-                                "symbol": sym,
-                                "analysis_type": "technical_snapshot",
-                                "as_of_date": d,
-                                "current_price": payload.get("current_price"),
-                                "rsi": payload.get("rsi"),
-                                "atr_value": payload.get("atr_14"),
-                                "sma_50": payload.get("sma_50"),
-                                "macd": payload.get("macd"),
-                                "macd_signal": payload.get("macd_signal"),
-                                "analysis_payload": payload,
-                            }
-                        )
+                        row = {
+                            "symbol": sym,
+                            "analysis_type": "technical_snapshot",
+                            "as_of_date": d,
+                            "current_price": payload.get("current_price"),
+                            "rsi": payload.get("rsi"),
+                            "atr_value": payload.get("atr_14"),
+                            "sma_50": payload.get("sma_50"),
+                            "macd": payload.get("macd"),
+                            "macd_signal": payload.get("macd_signal"),
+                        }
+                        # Add any wide columns that exist on the model.
+                        for k, v in payload.items():
+                            if hasattr(MarketSnapshotHistory, k):
+                                row[k] = v
+                        payload_rows.append(row)
 
                     # Stage 5d ago: compute from daily mapped labels and attach to payloads
                     try:
@@ -1430,7 +1451,7 @@ def backfill_snapshot_history_last_n_days(
                                 if d in stage_5d.index:
                                     lbl = stage_5d.loc[d]
                                     if isinstance(lbl, str):
-                                        r["analysis_payload"]["stage_label_5d_ago"] = lbl
+                                        r["stage_label_5d_ago"] = lbl
                     except Exception:
                         pass
 
@@ -1444,7 +1465,19 @@ def backfill_snapshot_history_last_n_days(
                             "sma_50": stmt.excluded.sma_50,
                             "macd": stmt.excluded.macd,
                             "macd_signal": stmt.excluded.macd_signal,
-                            "analysis_payload": stmt.excluded.analysis_payload,
+                            # Wide columns: update everything we provided (excluding identity cols).
+                            **{
+                                c.name: getattr(stmt.excluded, c.name)
+                                for c in MarketSnapshotHistory.__table__.columns
+                                if c.name
+                                not in {
+                                    "id",
+                                    "symbol",
+                                    "analysis_type",
+                                    "as_of_date",
+                                    "analysis_timestamp",
+                                }
+                            },
                         },
                     )
                     session.execute(stmt)
@@ -1581,8 +1614,23 @@ def record_daily_history(symbols: List[str] | None = None) -> dict:
                     existing.sma_50 = snapshot.get("sma_50")
                     existing.macd = snapshot.get("macd")
                     existing.macd_signal = snapshot.get("macd_signal")
-                    existing.analysis_payload = snapshot
+                    for k, v in (snapshot or {}).items():
+                        if hasattr(existing, k):
+                            setattr(existing, k, v)
                 else:
+                    _reserved = {
+                        "id",
+                        "symbol",
+                        "analysis_type",
+                        "as_of_date",
+                        "analysis_timestamp",
+                        "current_price",
+                        "rsi",
+                        "atr_value",
+                        "sma_50",
+                        "macd",
+                        "macd_signal",
+                    }
                     row = MarketSnapshotHistory(
                         symbol=sym,
                         analysis_type="technical_snapshot",
@@ -1593,7 +1641,11 @@ def record_daily_history(symbols: List[str] | None = None) -> dict:
                         sma_50=snapshot.get("sma_50"),
                         macd=snapshot.get("macd"),
                         macd_signal=snapshot.get("macd_signal"),
-                        analysis_payload=snapshot,
+                        **{
+                            k: v
+                            for k, v in (snapshot or {}).items()
+                            if k not in _reserved and hasattr(MarketSnapshotHistory, k)
+                        },
                     )
                     session.add(row)
                 session.commit()

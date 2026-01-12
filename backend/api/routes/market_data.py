@@ -394,7 +394,45 @@ async def get_snapshot_history(
     )
     out = []
     for r in reversed(rows):  # oldest->newest
-        payload = r.analysis_payload if isinstance(r.analysis_payload, dict) else {}
+        # Build a stable snapshot dict from wide columns (no JSON payload).
+        col_names = [c.name for c in r.__table__.columns]
+        preferred = [
+            "symbol",
+            "analysis_type",
+            "analysis_timestamp",
+            "as_of_date",
+            "current_price",
+            "market_cap",
+            "sector",
+            "industry",
+            "sub_industry",
+            "stage_label",
+            "stage_label_5d_ago",
+            "rs_mansfield_pct",
+            "sma_5",
+            "sma_14",
+            "sma_21",
+            "sma_50",
+            "sma_100",
+            "sma_150",
+            "sma_200",
+            "atr_14",
+            "atr_30",
+            "atrp_14",
+            "atrp_30",
+            "atr_distance",
+            "atr_value",
+            "atr_percent",
+            "range_pos_20d",
+            "range_pos_50d",
+            "range_pos_52w",
+            "rsi",
+            "macd",
+            "macd_signal",
+        ]
+        ordered = [k for k in preferred if k in col_names]
+        ordered.extend([k for k in col_names if k not in set(ordered) and k not in {"id"}])
+        payload = {k: getattr(r, k) for k in ordered}
         out.append(
             {
                 "as_of_date": r.as_of_date.isoformat() if hasattr(r.as_of_date, "isoformat") else str(r.as_of_date),
