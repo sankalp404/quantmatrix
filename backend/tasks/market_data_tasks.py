@@ -611,11 +611,6 @@ def backfill_last_bars(days: int = 200) -> dict:
         session.close()
 
 
-# Backwards-compatible alias (old name). Prefer backfill_last_bars.
-@shared_task(name="backend.tasks.market_data_tasks.backfill_last_200_bars")
-@task_run("backfill_last_200_bars")
-def backfill_last_200_bars(days: int = 200) -> dict:
-    return backfill_last_bars(days=days)
 
 
 @shared_task(name="backend.tasks.market_data_tasks.backfill_symbols")

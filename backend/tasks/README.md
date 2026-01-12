@@ -8,7 +8,7 @@ End-to-end market data pipeline built around a simple, scalable principle: fetch
 Task Inventory
 --------------
 Backfill (writes `price_data`)
-- backfill_last_200_bars(): Fetch last-year-ish daily OHLCV for tracked symbols (delta-only; concurrent fetch, bulk upsert).
+- backfill_last_bars(days=200): Fetch last-N daily OHLCV for tracked symbols (delta-only; concurrent fetch, bulk upsert).
 - backfill_symbols(symbols=[...]): Fetch last-year-ish daily OHLCV for a provided list (delta-only).
 
 Indicators (writes `market_analysis_cache`)
