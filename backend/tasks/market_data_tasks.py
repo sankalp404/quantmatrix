@@ -502,10 +502,39 @@ def _persist_daily_fetch_results(
     }
 
 
+def _max_bars_for_days(days: int | None, *, default_days: int = 200) -> int:
+    """Translate desired daily 'days' into a bounded max_bars for provider fetches.
+
+    Keep the existing default behavior for ~200 days: max_bars=270.
+    For larger windows (e.g. 500 days), widen max_bars with a buffer for indicators.
+    """
+    d = int(days or 0)
+    if d <= 0:
+        d = int(default_days)
+    return max(270, d + 70)
+
+
+def _period_for_days(days: int | None, *, default_days: int = 200) -> str:
+    """Choose a provider period string that is compatible with multiple providers.
+
+    Keep backwards-compat for the existing default (200d -> '1y').
+    """
+    d = int(days or 0)
+    if d <= 0:
+        d = int(default_days)
+    if d <= 270:
+        return "1y"
+    if d <= 540:
+        return "2y"
+    if d <= 1260:
+        return "5y"
+    return "max"
+
+
 @shared_task(name="backend.tasks.market_data_tasks.backfill_last_200_bars")
 @task_run("backfill_last_200_bars")
-def backfill_last_200_bars() -> dict:
-    """Delta backfill last ~200 trading days for all tracked symbols (indices ∪ portfolio).
+def backfill_last_200_bars(days: int = 200) -> dict:
+    """Delta backfill last N trading days for all tracked symbols (indices ∪ portfolio).
 
     Returns detailed counters:
     - tracked_total, updated_total, up_to_date_total, skipped_empty, bars_inserted_total, errors, error_samples
@@ -519,11 +548,13 @@ def backfill_last_200_bars() -> dict:
         try:
             tracked_total = len(symbols)
             concurrency = _daily_backfill_concurrency()
+            max_bars = _max_bars_for_days(days)
+            period = _period_for_days(days)
             fetched = loop.run_until_complete(
                 _fetch_daily_for_symbols(
                     symbols=list(symbols),
-                    period="1y",
-                    max_bars=270,
+                    period=period,
+                    max_bars=max_bars,
                     concurrency=concurrency,
                 )
             )
@@ -542,8 +573,8 @@ def backfill_last_200_bars() -> dict:
                 retried = loop.run_until_complete(
                     _fetch_daily_for_symbols(
                         symbols=empties,
-                        period="1y",
-                        max_bars=270,
+                        period=period,
+                        max_bars=max_bars,
                         concurrency=retry_conc,
                     )
                 )
@@ -564,6 +595,7 @@ def backfill_last_200_bars() -> dict:
             loop.close()
         res = {
             "status": "ok",
+            "days": int(days),
             "tracked_total": tracked_total,
             "updated_total": persist["updated_total"],
             "up_to_date_total": persist["up_to_date_total"],
@@ -581,18 +613,20 @@ def backfill_last_200_bars() -> dict:
 
 @shared_task(name="backend.tasks.market_data_tasks.backfill_symbols")
 @task_run("backfill_symbols")
-def backfill_symbols(symbols: List[str]) -> dict:
+def backfill_symbols(symbols: List[str], days: int = 200) -> dict:
     """Delta backfill last-year-ish daily bars for a provided symbol list (concurrent fetch, safe persist)."""
     session = SessionLocal()
     try:
         loop = _setup_event_loop()
         try:
             concurrency = _daily_backfill_concurrency()
+            max_bars = _max_bars_for_days(days)
+            period = _period_for_days(days)
             fetched = loop.run_until_complete(
                 _fetch_daily_for_symbols(
                     symbols=[s.upper() for s in (symbols or []) if s],
-                    period="1y",
-                    max_bars=270,
+                    period=period,
+                    max_bars=max_bars,
                     concurrency=concurrency,
                 )
             )
@@ -829,7 +863,7 @@ def bootstrap_daily_coverage_tracked(history_days: int = 200, history_batch_size
     res2 = update_tracked_symbol_cache()
     _append("update_tracked_symbol_cache", res2)
 
-    res3 = backfill_last_200_bars()
+    res3 = backfill_last_200_bars(days=200)
     _append("backfill_last_200_bars", res3)
 
     res4 = recompute_indicators_universe(batch_size=50)
