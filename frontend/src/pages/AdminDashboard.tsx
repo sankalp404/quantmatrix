@@ -576,37 +576,6 @@ const AdminDashboard: React.FC = () => {
                     <Box as="li">Use <b>Sanity Check (DB)</b> to verify latest daily + snapshot-history counts without relying on cache.</Box>
                   </Box>
                 </Box>
-                <Box
-                  borderWidth="1px"
-                  borderColor="border.subtle"
-                  borderRadius="md"
-                  bg="bg.card"
-                  px={3}
-                  py={2}
-                >
-                  <HStack gap={2} flexWrap="wrap" align="center">
-                    <Text fontSize="xs" fontWeight="semibold" color="fg.default">
-                      Since date
-                    </Text>
-                    <input
-                      type="date"
-                      value={sinceDate}
-                      onChange={(e) => setSinceDate(e.target.value)}
-                      style={{
-                        fontSize: 12,
-                        padding: '6px 8px',
-                        borderRadius: 10,
-                        border: '1px solid var(--chakra-colors-border-subtle)',
-                        background: 'var(--chakra-colors-bg-input)',
-                        color: 'var(--chakra-colors-fg-default)',
-                      }}
-                    />
-                    <Text fontSize="xs" color="fg.muted">
-                      Applies to “since” backfills.
-                    </Text>
-                  </HStack>
-                </Box>
-
                 <Box mt={3} display="flex" flexDirection="column" gap={3}>
                   <Box
                     borderWidth="1px"
@@ -638,17 +607,32 @@ const AdminDashboard: React.FC = () => {
                     py={2}
                   >
                     <Text fontSize="xs" fontWeight="semibold" color="fg.default" mb={2}>
-                      Daily
+                      Backfills (since)
                     </Text>
                     <Box display="flex" gap={2} flexWrap="wrap">
+                      <HStack gap={2} flexWrap="wrap" align="center">
+                        <Text fontSize="xs" color="fg.muted">
+                          Since date
+                        </Text>
+                        <input
+                          type="date"
+                          value={sinceDate}
+                          onChange={(e) => setSinceDate(e.target.value)}
+                          style={{
+                            fontSize: 12,
+                            padding: '6px 8px',
+                            borderRadius: 10,
+                            border: '1px solid var(--chakra-colors-border-subtle)',
+                            background: 'var(--chakra-colors-bg-input)',
+                            color: 'var(--chakra-colors-fg-default)',
+                          }}
+                        />
+                      </HStack>
                       <Button size="xs" variant="outline" onClick={() => void backfillDailySinceDate()}>
                         Backfill Daily Bars (since)
                       </Button>
-                      <Button size="xs" variant="outline" onClick={() => void runNamedTask('recompute_indicators_universe', 'Recompute indicators')}>
-                        Recompute Indicators (Market Snapshot)
-                      </Button>
-                      <Button size="xs" variant="outline" onClick={() => void runNamedTask('record_daily_history', 'Record history')}>
-                        Record History
+                      <Button size="xs" variant="outline" onClick={() => void backfillSnapshotHistorySinceDate()}>
+                        Backfill Snapshot History (since)
                       </Button>
                     </Box>
                   </Box>
@@ -662,13 +646,13 @@ const AdminDashboard: React.FC = () => {
                     py={2}
                   >
                     <Text fontSize="xs" fontWeight="semibold" color="fg.default" mb={2}>
-                      History
+                      Backfills (period)
                     </Text>
                     <Box display="flex" gap={2} flexWrap="wrap">
-                      <Button size="xs" variant="outline" onClick={() => void backfillSnapshotHistorySinceDate()}>
-                        Backfill Snapshot History (since)
-                      </Button>
                       <HStack gap={2} flexWrap="wrap">
+                        <Text fontSize="xs" color="fg.muted">
+                          Period
+                        </Text>
                         <select
                           aria-label="Snapshot history period"
                           value={snapshotHistoryPeriod}
@@ -697,6 +681,27 @@ const AdminDashboard: React.FC = () => {
                           Backfill Snapshot History (period)
                         </Button>
                       </HStack>
+                    </Box>
+                  </Box>
+
+                  <Box
+                    borderWidth="1px"
+                    borderColor="border.subtle"
+                    borderRadius="md"
+                    bg="bg.card"
+                    px={3}
+                    py={2}
+                  >
+                    <Text fontSize="xs" fontWeight="semibold" color="fg.default" mb={2}>
+                      Compute
+                    </Text>
+                    <Box display="flex" gap={2} flexWrap="wrap">
+                      <Button size="xs" variant="outline" onClick={() => void runNamedTask('recompute_indicators_universe', 'Recompute indicators')}>
+                        Recompute Indicators (Market Snapshot)
+                      </Button>
+                      <Button size="xs" variant="outline" onClick={() => void runNamedTask('record_daily_history', 'Record history')}>
+                        Record History
+                      </Button>
                     </Box>
                   </Box>
 
