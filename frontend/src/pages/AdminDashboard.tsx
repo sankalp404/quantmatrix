@@ -309,6 +309,14 @@ const AdminDashboard: React.FC = () => {
     const { rows, newestDate, total } = dailyFillDist;
     if (!rows.length || !newestDate || !total) return null;
 
+    const normDateKey = (d: any) => {
+      if (!d) return '';
+      // Be resilient to backend variations (date vs datetime strings).
+      // We only care about the YYYY-MM-DD part for histogram alignment.
+      const s = String(d);
+      return s.length >= 10 ? s.slice(0, 10) : s;
+    };
+
     const pctFor = (row: { pct_of_universe: number }) => Number(row?.pct_of_universe || 0);
     const colorForPct = (pct: number) => {
       // HSL: red(0) -> green(120), driven by % (height)
@@ -319,8 +327,10 @@ const AdminDashboard: React.FC = () => {
 
     const barMaxH = 36;
       const dotH = 8; // dot + spacing below bar
-    const fillMap = new Map(rows.map((r) => [r.date, r]));
-    const snapshotPctByDate = new Map((snapshotFillSeries || []).map((r) => [r.date, Number(r.pct_of_universe || 0)]));
+    const fillMap = new Map(rows.map((r) => [normDateKey(r.date), r]));
+    const snapshotPctByDate = new Map(
+      (snapshotFillSeries || []).map((r) => [normDateKey(r.date), Number(r.pct_of_universe || 0)]),
+    );
 
     // Trading-day series: use the last N observed dates in fill_by_date.
     // This naturally excludes weekends/holidays (no OHLCV rows expected) and avoids confusing gaps.
@@ -333,7 +343,7 @@ const AdminDashboard: React.FC = () => {
       .reverse() // oldest-first
       .slice(-windowDays) // keep last N trading days
       .map((r) => ({
-        date: r.date,
+        date: normDateKey(r.date),
         symbol_count: Number(r.symbol_count || 0),
         pct_of_universe: Number(r.pct_of_universe || 0),
       }));
@@ -354,7 +364,7 @@ const AdminDashboard: React.FC = () => {
             {bars.map((r) => {
               const pct = pctFor(r);
               const h = Math.max(2, Math.round((pct / 100) * barMaxH));
-              const snapPct = snapshotPctByDate.get(r.date);
+              const snapPct = snapshotPctByDate.get(normDateKey(r.date));
               const snapOk = typeof snapPct === 'number' && snapPct >= 95;
               const snapNone = typeof snapPct !== 'number';
               // Dot thresholds: green = basically complete, orange = partial, red = low coverage, gray = no snapshot run recorded.
