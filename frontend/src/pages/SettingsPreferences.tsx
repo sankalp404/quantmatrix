@@ -68,64 +68,18 @@ const SettingsPreferences: React.FC = () => {
   };
 
   return (
-    <Box>
-      <PageHeader title="Preferences" subtitle="Customize the UI and your personal defaults." />
-      <VStack align="stretch" gap={4}>
-        <AppCard>
-          <VStack align="stretch" gap={4}>
-            <Text fontWeight="semibold">Appearance</Text>
-            <Box>
-              <Text fontSize="sm" color="fg.muted" mb={2}>Theme</Text>
-              <select
-                value={themePref}
-                onChange={(e) => setThemePref(e.target.value as any)}
-                style={{
-                  width: 280,
-                  fontSize: 12,
-                  padding: '8px 10px',
-                  borderRadius: 10,
-                  border: '1px solid var(--chakra-colors-border-subtle)',
-                  background: 'var(--chakra-colors-bg-input)',
-                  color: 'var(--chakra-colors-fg-default)',
-                }}
-              >
-                <option value="system">Use system preference</option>
-                <option value="light">Light</option>
-                <option value="dark">Dark</option>
-              </select>
-            </Box>
-
-            <Box>
-              <Text fontSize="sm" color="fg.muted" mb={2}>Table density</Text>
-              <select
-                value={tableDensity}
-                onChange={(e) => setTableDensity(e.target.value as any)}
-                style={{
-                  width: 280,
-                  fontSize: 12,
-                  padding: '8px 10px',
-                  borderRadius: 10,
-                  border: '1px solid var(--chakra-colors-border-subtle)',
-                  background: 'var(--chakra-colors-bg-input)',
-                  color: 'var(--chakra-colors-fg-default)',
-                }}
-              >
-                <option value="comfortable">Comfortable</option>
-                <option value="compact">Compact</option>
-              </select>
-            </Box>
-          </VStack>
-        </AppCard>
-
-        <AppCard>
-          <VStack align="stretch" gap={4}>
-            <Text fontWeight="semibold">Locale</Text>
-            <HStack gap={4} align="start" flexWrap="wrap">
-              <Box flex="1" minW={{ base: "100%", md: "320px" }}>
-                <Text fontSize="sm" color="fg.muted" mb={1}>Timezone</Text>
+    <Box w="full">
+      <Box w="full" maxW="960px" mx="auto">
+        <PageHeader title="Preferences" subtitle="Customize the UI and your personal defaults." />
+        <VStack align="stretch" gap={4}>
+          <AppCard>
+            <VStack align="stretch" gap={4}>
+              <Text fontWeight="semibold">Appearance</Text>
+              <Box>
+                <Text fontSize="sm" color="fg.muted" mb={2}>Theme</Text>
                 <select
-                  value={timezone}
-                  onChange={(e) => setTimezone(e.target.value)}
+                  value={themePref}
+                  onChange={(e) => setThemePref(e.target.value as any)}
                   style={{
                     width: 280,
                     fontSize: 12,
@@ -136,24 +90,72 @@ const SettingsPreferences: React.FC = () => {
                     color: 'var(--chakra-colors-fg-default)',
                   }}
                 >
-                  {timezones.map((tz) => (
-                    <option key={tz} value={tz}>{tz}</option>
-                  ))}
+                  <option value="system">Use system preference</option>
+                  <option value="light">Light</option>
+                  <option value="dark">Dark</option>
                 </select>
               </Box>
-              <Box minW={{ base: "100%", md: "200px" }}>
-                <Text fontSize="sm" color="fg.muted" mb={1}>Currency</Text>
-                <Input value={currency} onChange={(e) => setCurrency(e.target.value.toUpperCase())} placeholder="USD" />
-                <Text fontSize="xs" color="fg.muted" mt={1}>3-letter code (e.g. USD)</Text>
-              </Box>
-            </HStack>
-          </VStack>
-        </AppCard>
 
-        <HStack justify="flex-end">
-          <Button loading={saving} onClick={save}>Save preferences</Button>
-        </HStack>
-      </VStack>
+              <Box>
+                <Text fontSize="sm" color="fg.muted" mb={2}>Table density</Text>
+                <select
+                  value={tableDensity}
+                  onChange={(e) => setTableDensity(e.target.value as any)}
+                  style={{
+                    width: 280,
+                    fontSize: 12,
+                    padding: '8px 10px',
+                    borderRadius: 10,
+                    border: '1px solid var(--chakra-colors-border-subtle)',
+                    background: 'var(--chakra-colors-bg-input)',
+                    color: 'var(--chakra-colors-fg-default)',
+                  }}
+                >
+                  <option value="comfortable">Comfortable</option>
+                  <option value="compact">Compact</option>
+                </select>
+              </Box>
+            </VStack>
+          </AppCard>
+
+          <AppCard>
+            <VStack align="stretch" gap={4}>
+              <Text fontWeight="semibold">Locale</Text>
+              <HStack gap={4} align="start" flexWrap="wrap">
+                <Box flex="1" minW={{ base: "100%", md: "320px" }}>
+                  <Text fontSize="sm" color="fg.muted" mb={1}>Timezone</Text>
+                  <select
+                    value={timezone}
+                    onChange={(e) => setTimezone(e.target.value)}
+                    style={{
+                      width: 280,
+                      fontSize: 12,
+                      padding: '8px 10px',
+                      borderRadius: 10,
+                      border: '1px solid var(--chakra-colors-border-subtle)',
+                      background: 'var(--chakra-colors-bg-input)',
+                      color: 'var(--chakra-colors-fg-default)',
+                    }}
+                  >
+                    {timezones.map((tz) => (
+                      <option key={tz} value={tz}>{tz}</option>
+                    ))}
+                  </select>
+                </Box>
+                <Box minW={{ base: "100%", md: "200px" }}>
+                  <Text fontSize="sm" color="fg.muted" mb={1}>Currency</Text>
+                  <Input value={currency} onChange={(e) => setCurrency(e.target.value.toUpperCase())} placeholder="USD" />
+                  <Text fontSize="xs" color="fg.muted" mt={1}>3-letter code (e.g. USD)</Text>
+                </Box>
+              </HStack>
+            </VStack>
+          </AppCard>
+
+          <HStack justify="flex-end">
+            <Button loading={saving} onClick={save}>Save preferences</Button>
+          </HStack>
+        </VStack>
+      </Box>
     </Box>
   );
 };

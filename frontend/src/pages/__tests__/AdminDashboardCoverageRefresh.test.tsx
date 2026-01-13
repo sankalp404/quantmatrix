@@ -14,6 +14,7 @@ vi.mock('../../hooks/useUserPreferences', () => ({
     currency: 'USD',
     timezone: 'UTC',
     tableDensity: 'comfortable',
+    coverageHistogramWindowDays: 50,
   }),
 }));
 
@@ -108,6 +109,16 @@ describe('AdminDashboard coverage refresh', () => {
     expect(restore.length).toBeGreaterThanOrEqual(1);
     const stale = await screen.findAllByRole('button', { name: /Backfill Daily \(Stale Only\)/i });
     expect(stale.length).toBeGreaterThanOrEqual(1);
+  });
+
+  it('exposes period backfill controls in Advanced', async () => {
+    const user = userEvent.setup();
+    renderWithProviders(<AdminDashboard />, { route: '/settings/admin/dashboard' });
+    const toggles = await screen.findAllByRole('button', { name: /show advanced/i });
+    await user.click(toggles[0]);
+    const btn = await screen.findByRole('button', { name: /Backfill Daily Bars \(period\)/i });
+    await user.click(btn);
+    expect(apiPost).toHaveBeenCalledWith('/market-data/admin/backfill/daily-last-bars?days=252');
   });
 
   it('renders daily fill-by-date distribution', async () => {

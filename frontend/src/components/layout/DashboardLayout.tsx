@@ -43,6 +43,9 @@ import { useAccountContext } from '../../context/AccountContext';
 import { useAuth } from '../../context/AuthContext';
 import AppDivider from '../ui/AppDivider';
 
+const SIDEBAR_OPEN_STORAGE_KEY = 'qm.ui.sidebar_open';
+const LAST_ROUTE_STORAGE_KEY = 'qm.ui.last_route';
+
 // Navigation items inspired by Snowball Analytics
 const navigationItems = [
   { label: 'Dashboard', icon: FiHome, path: '/' },
@@ -134,11 +137,37 @@ const DashboardLayout: React.FC = () => {
   const appBg = 'bg.canvas';
   const { accounts, loading: accountsLoading, selected, setSelected } = useAccountContext();
   const { user, logout } = useAuth();
-  const [isSidebarOpen, setIsSidebarOpen] = useState<boolean>(true);
+  const [isSidebarOpen, setIsSidebarOpen] = useState<boolean>(() => {
+    try {
+      const raw = window.localStorage.getItem(SIDEBAR_OPEN_STORAGE_KEY);
+      if (raw === null) return true;
+      return raw === '1';
+    } catch {
+      return true;
+    }
+  });
   const [isMobileNavOpen, setIsMobileNavOpen] = useState(false);
   const [isDesktop] = useMediaQuery(['(min-width: 48em)']);
   const [totals, setTotals] = useState<{ value: number; dayPnL: number; positions: number }>({ value: 0, dayPnL: 0, positions: 0 });
   const [headerStats, setHeaderStats] = useState<{ label: string; sublabel: string }>({ label: 'Combined Portfolio', sublabel: '' });
+
+  useEffect(() => {
+    try {
+      window.localStorage.setItem(SIDEBAR_OPEN_STORAGE_KEY, isSidebarOpen ? '1' : '0');
+    } catch {
+      // ignore storage errors
+    }
+  }, [isSidebarOpen]);
+
+  // Remember last successful route so we can restore after login/session refresh.
+  useEffect(() => {
+    try {
+      const fullPath = `${location.pathname}${location.search || ''}${location.hash || ''}`;
+      window.localStorage.setItem(LAST_ROUTE_STORAGE_KEY, fullPath);
+    } catch {
+      // ignore storage errors
+    }
+  }, [location.hash, location.pathname, location.search]);
 
   useEffect(() => {
     const load = async () => {

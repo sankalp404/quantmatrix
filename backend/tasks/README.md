@@ -19,7 +19,7 @@ Constituents (DB + cache)
 - update_tracked_symbol_cache(): Build Redis `tracked:all` and `tracked:new` from DB (index_constituents ∪ portfolio).
 
 Coverage & operator flow
-- bootstrap_daily_coverage_tracked(): Primary operator chain (refresh → tracked → daily backfill → recompute → history → coverage refresh; no 5m).
+- bootstrap_daily_coverage_tracked(): Primary operator chain (refresh → tracked → daily backfill → recompute → rolling history backfill (default 5 trading days) → coverage refresh; no 5m).
 - monitor_coverage_health(): Computes and caches coverage snapshot/history in Redis.
 
 History (writes `market_analysis_history`)

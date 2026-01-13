@@ -1,12 +1,14 @@
-import React, { useState } from 'react';
+import React, { useMemo, useState } from 'react';
 import { Button, Input, VStack, Text, InputGroup, IconButton, Box } from '@chakra-ui/react';
-import { useNavigate, Link } from 'react-router-dom';
+import { useLocation, useNavigate, Link } from 'react-router-dom';
 import { useAuth } from '../context/AuthContext';
 import { FiEye, FiEyeOff } from 'react-icons/fi';
 import toast from 'react-hot-toast';
 import AuthLayout from '../components/layout/AuthLayout';
 import AppCard from '../components/ui/AppCard';
 import FormField from '../components/ui/FormField';
+
+const LAST_ROUTE_STORAGE_KEY = 'qm.ui.last_route';
 
 const Login: React.FC = () => {
   const { login } = useAuth();
@@ -15,13 +17,30 @@ const Login: React.FC = () => {
   const [showPw, setShowPw] = useState(false);
   const [loading, setLoading] = useState(false);
   const navigate = useNavigate();
+  const location = useLocation();
+
+  const redirectTo = useMemo(() => {
+    const stateFrom = (location.state as any)?.from;
+    const candidate =
+      typeof stateFrom?.pathname === 'string'
+        ? `${stateFrom.pathname || ''}${stateFrom.search || ''}${stateFrom.hash || ''}`
+        : null;
+    if (candidate && candidate !== '/login' && candidate !== '/register') return candidate;
+    try {
+      const saved = localStorage.getItem(LAST_ROUTE_STORAGE_KEY);
+      if (saved && saved !== '/login' && saved !== '/register') return saved;
+    } catch {
+      // ignore storage errors
+    }
+    return '/';
+  }, [location.state]);
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     setLoading(true);
     try {
       await login(username, password);
-      navigate('/');
+      navigate(redirectTo, { replace: true });
     } catch (err: any) {
       toast.error(err?.response?.data?.detail || err?.message || 'Login failed');
     } finally {

@@ -40,7 +40,6 @@ const AdminJobs = React.lazy(() => import('./pages/AdminJobs'));
 const AdminSchedules = React.lazy(() => import('./pages/AdminSchedules'));
 const MarketCoverage = React.lazy(() => import('./pages/MarketCoverage'));
 const MarketTracked = React.lazy(() => import('./pages/MarketTracked'));
-const AdminRunbook = React.lazy(() => import('./pages/AdminRunbook'));
 
 // Create a client for React Query
 const queryClient = new QueryClient({
@@ -96,7 +95,6 @@ function App() {
                           <Route path="admin/dashboard" element={<AdminDashboard />} />
                           <Route path="admin/jobs" element={<AdminJobs />} />
                           <Route path="admin/schedules" element={<AdminSchedules />} />
-                          <Route path="admin/runbook" element={<AdminRunbook />} />
                         </Route>
                         <Route path="workspace" element={<PortfolioWorkspace />} />
                       </Route>

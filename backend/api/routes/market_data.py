@@ -155,6 +155,76 @@ def _enqueue_task(task_fn: Callable, *args, **kwargs) -> Dict[str, Any]:
     result = task_fn.delay(*args, **kwargs)
     return {"task_id": result.id}
 
+@router.get("/admin/sanity/coverage")
+async def admin_sanity_coverage(
+    _admin: User = Depends(get_admin_user),
+    db: Session = Depends(get_db),
+) -> Dict[str, Any]:
+    """Quick DB sanity checks for coverage (no Redis cache dependence).
+
+    Returns:
+    - latest daily OHLCV date + distinct symbol count on that date
+    - latest snapshot-history as_of_date + distinct symbol count on that date
+    - snapshot-history fill % vs tracked universe for that day (+ missing sample)
+    """
+    tracked = _tracked_universe_symbols(db)
+    tracked_set = set(tracked)
+    tracked_total = len(tracked_set)
+
+    latest_daily_dt = (
+        db.query(func.max(PriceData.date))
+        .filter(PriceData.interval == "1d")
+        .scalar()
+    )
+    latest_daily_date = latest_daily_dt.date().isoformat() if latest_daily_dt else None
+    daily_count = 0
+    if latest_daily_dt and tracked_set:
+        daily_count = (
+            db.query(func.count(distinct(PriceData.symbol)))
+            .filter(
+                PriceData.interval == "1d",
+                PriceData.symbol.in_(tracked_set),
+                func.date(PriceData.date) == func.date(latest_daily_dt),
+            )
+            .scalar()
+            or 0
+        )
+
+    latest_hist_dt = (
+        db.query(func.max(MarketSnapshotHistory.as_of_date))
+        .filter(MarketSnapshotHistory.analysis_type == "technical_snapshot")
+        .scalar()
+    )
+    latest_hist_date = latest_hist_dt.date().isoformat() if latest_hist_dt else None
+    hist_count = 0
+    missing_sample: list[str] = []
+    if latest_hist_dt and tracked_set:
+        hist_syms = (
+            db.query(MarketSnapshotHistory.symbol)
+            .filter(
+                MarketSnapshotHistory.analysis_type == "technical_snapshot",
+                MarketSnapshotHistory.symbol.in_(tracked_set),
+                func.date(MarketSnapshotHistory.as_of_date) == func.date(latest_hist_dt),
+            )
+            .distinct()
+            .all()
+        )
+        hist_set = {s[0].upper() for s in hist_syms if s and s[0]}
+        hist_count = len(hist_set)
+        if tracked_total:
+            missing_sample = sorted(list(tracked_set - hist_set))[:20]
+
+    pct = round((hist_count / tracked_total) * 100.0, 1) if tracked_total else 0.0
+    return {
+        "tracked_total": tracked_total,
+        "latest_daily_date": latest_daily_date,
+        "latest_daily_symbol_count": int(daily_count),
+        "latest_snapshot_history_date": latest_hist_date,
+        "latest_snapshot_history_symbol_count": int(hist_count),
+        "latest_snapshot_history_fill_pct": pct,
+        "missing_snapshot_history_sample": missing_sample,
+    }
+
 
 def _load_tracked_details(db: Session, symbols: List[str]) -> Dict[str, Any]:
     if not symbols:
@@ -372,6 +442,78 @@ async def get_snapshot(
     ordered_keys.extend([k for k in col_names if k not in set(ordered_keys)])
     payload = {k: getattr(row, k) for k in ordered_keys}
     return {"symbol": symbol.upper(), "snapshot": payload}
+
+
+@router.get("/technical/snapshots")
+async def get_snapshots(
+    limit: int = Query(2000, ge=1, le=5000),
+    user: User | None = Depends(get_optional_user),
+    db: Session = Depends(get_db),
+) -> Dict[str, Any]:
+    """Return latest technical snapshots for the tracked universe from MarketSnapshot.
+
+    Intended for read-only scanners/tables (e.g., Market Coverage page). Sorting is client-side.
+    """
+    tracked = _tracked_universe_symbols(db)
+    if not tracked:
+        return {"count": 0, "rows": []}
+
+    rows = (
+        db.query(MarketSnapshot)
+        .filter(
+            MarketSnapshot.analysis_type == "technical_snapshot",
+            MarketSnapshot.symbol.in_(tracked),
+        )
+        .order_by(MarketSnapshot.symbol.asc())
+        .limit(limit)
+        .all()
+    )
+
+    preferred = [
+        "symbol",
+        "analysis_timestamp",
+        "as_of_timestamp",
+        "current_price",
+        "market_cap",
+        "sector",
+        "industry",
+        "sub_industry",
+        "stage_label",
+        "stage_label_5d_ago",
+        "rs_mansfield_pct",
+        "sma_5",
+        "sma_14",
+        "sma_21",
+        "sma_50",
+        "sma_100",
+        "sma_150",
+        "sma_200",
+        "ema_8",
+        "ema_21",
+        "atr_14",
+        "atr_30",
+        "atrp_14",
+        "atrp_30",
+        "range_pos_20d",
+        "range_pos_50d",
+        "range_pos_52w",
+        "atrx_sma_21",
+        "atrx_sma_50",
+        "atrx_sma_100",
+        "atrx_sma_150",
+        "rsi",
+        "macd",
+        "macd_signal",
+    ]
+    col_names = list(getattr(MarketSnapshot, "__table__").columns.keys())
+    ordered = [k for k in preferred if k in col_names]
+    ordered.extend([k for k in col_names if k not in set(ordered) and k not in {"id"}])
+
+    out: list[dict] = []
+    for r in rows:
+        out.append({k: getattr(r, k) for k in ordered})
+
+    return {"count": len(out), "rows": out}
 
 
 @router.get("/technical/snapshot-history/{symbol}")
