@@ -137,22 +137,19 @@ const DashboardLayout: React.FC = () => {
   const appBg = 'bg.canvas';
   const { accounts, loading: accountsLoading, selected, setSelected } = useAccountContext();
   const { user, logout } = useAuth();
-  const [isSidebarOpen, setIsSidebarOpen] = useState<boolean>(true);
+  const [isSidebarOpen, setIsSidebarOpen] = useState<boolean>(() => {
+    try {
+      const raw = window.localStorage.getItem(SIDEBAR_OPEN_STORAGE_KEY);
+      if (raw === null) return true;
+      return raw === '1';
+    } catch {
+      return true;
+    }
+  });
   const [isMobileNavOpen, setIsMobileNavOpen] = useState(false);
   const [isDesktop] = useMediaQuery(['(min-width: 48em)']);
   const [totals, setTotals] = useState<{ value: number; dayPnL: number; positions: number }>({ value: 0, dayPnL: 0, positions: 0 });
   const [headerStats, setHeaderStats] = useState<{ label: string; sublabel: string }>({ label: 'Combined Portfolio', sublabel: '' });
-
-  // Persist sidebar collapse/expand (desktop rail).
-  useEffect(() => {
-    try {
-      const raw = window.localStorage.getItem(SIDEBAR_OPEN_STORAGE_KEY);
-      if (raw === null) return;
-      setIsSidebarOpen(raw === '1');
-    } catch {
-      // ignore storage errors
-    }
-  }, []);
 
   useEffect(() => {
     try {
