@@ -35,6 +35,7 @@ const AdminDashboard: React.FC = () => {
   const [restoringDaily, setRestoringDaily] = React.useState<boolean>(false);
   const [backfillingStale, setBackfillingStale] = React.useState<boolean>(false);
   const [backfillingSnapshotHistory, setBackfillingSnapshotHistory] = React.useState<boolean>(false);
+  const [backfillingDailyPeriod, setBackfillingDailyPeriod] = React.useState<boolean>(false);
   const [snapshotHistoryPeriod, setSnapshotHistoryPeriod] = React.useState<'6mo' | '1y' | '2y' | '5y' | 'max'>('1y');
   const [advancedOpen, setAdvancedOpen] = React.useState<boolean>(false);
   const [sendingDiscord, setSendingDiscord] = React.useState<boolean>(false);
@@ -187,6 +188,23 @@ const AdminDashboard: React.FC = () => {
       toast.error(err?.response?.data?.detail || err?.message || 'Failed to queue snapshot history backfill');
     } finally {
       setBackfillingSnapshotHistory(false);
+    }
+  };
+
+  const backfillDailyBarsPeriod = async () => {
+    if (backfillingDailyPeriod) return;
+    setBackfillingDailyPeriod(true);
+    try {
+      const days = snapshotHistoryDaysForPeriod(snapshotHistoryPeriod);
+      await api.post(`/market-data/admin/backfill/daily-last-bars?days=${days}`);
+      toast.success(`Daily bars (${snapshotHistoryPeriod}) queued. Track progress in Admin → Jobs.`);
+      setTimeout(() => void refreshCoverage(), 1500);
+      setTimeout(() => void refreshCoverage(), 4500);
+      void loadTaskStatus();
+    } catch (err: any) {
+      toast.error(err?.response?.data?.detail || err?.message || 'Failed to queue daily bars backfill');
+    } finally {
+      setBackfillingDailyPeriod(false);
     }
   };
 
@@ -672,6 +690,14 @@ const AdminDashboard: React.FC = () => {
                           <option value="5y">5y (~1260d)</option>
                           <option value="max">max (≤3000d)</option>
                         </select>
+                        <Button
+                          size="xs"
+                          variant="outline"
+                          loading={backfillingDailyPeriod}
+                          onClick={() => void backfillDailyBarsPeriod()}
+                        >
+                          Backfill Daily Bars (period)
+                        </Button>
                         <Button
                           size="xs"
                           variant="outline"
