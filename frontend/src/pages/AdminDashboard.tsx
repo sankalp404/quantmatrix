@@ -15,6 +15,8 @@ import { triggerTaskByName } from '../utils/taskActions';
 import useCoverageSnapshot from '../hooks/useCoverageSnapshot';
 import { useUserPreferences } from '../hooks/useUserPreferences';
 import { formatDateTime } from '../utils/format';
+import { authApi, handleApiError } from '../services/api';
+import { useAuthOptional } from '../context/AuthContext';
 import {
   CoverageBucketsGrid,
   CoverageKpiGrid,
@@ -23,17 +25,59 @@ import {
 } from '../components/coverage/CoverageSummaryCard';
 
 const AdminDashboard: React.FC = () => {
-  const { timezone } = useUserPreferences();
+  const auth = useAuthOptional();
+  const user = auth?.user ?? null;
+  const refreshMe = auth?.refreshMe;
+  const { timezone, coverageHistogramWindowDays } = useUserPreferences();
   const [backfill5mEnabled, setBackfill5mEnabled] = React.useState<boolean>(true);
   const [toggling5m, setToggling5m] = React.useState<boolean>(false);
   const [refreshingCoverage, setRefreshingCoverage] = React.useState<boolean>(false);
   const [restoringDaily, setRestoringDaily] = React.useState<boolean>(false);
   const [backfillingStale, setBackfillingStale] = React.useState<boolean>(false);
+  const [backfillingSnapshotHistory, setBackfillingSnapshotHistory] = React.useState<boolean>(false);
   const [advancedOpen, setAdvancedOpen] = React.useState<boolean>(false);
   const [sendingDiscord, setSendingDiscord] = React.useState<boolean>(false);
   const [taskStatus, setTaskStatus] = React.useState<Record<string, any> | null>(null);
-  const { snapshot: coverage, refresh: refreshCoverage, sparkline, kpis, actions: coverageActions, hero } = useCoverageSnapshot();
+  const [histWindowDays, setHistWindowDays] = React.useState<number>(
+    coverageHistogramWindowDays || 50,
+  );
+  const [sinceDate, setSinceDate] = React.useState<string>('2021-01-01');
+  const fillLookbackDays = React.useMemo(() => Math.max(90, histWindowDays * 3), [histWindowDays]);
+  const { snapshot: coverage, refresh: refreshCoverage, sparkline, kpis, actions: coverageActions, hero } = useCoverageSnapshot({
+    fillTradingDaysWindow: histWindowDays,
+    fillLookbackDays,
+  });
   const autoRefreshAttemptedRef = React.useRef(false);
+
+  React.useEffect(() => {
+    // Preference wins; otherwise fall back to backend-provided default window.
+    if (coverageHistogramWindowDays && coverageHistogramWindowDays !== histWindowDays) {
+      setHistWindowDays(coverageHistogramWindowDays);
+      return;
+    }
+    if (!coverageHistogramWindowDays) {
+      const backendDefault = Number((coverage as any)?.meta?.fill_trading_days_window ?? NaN);
+      if (Number.isFinite(backendDefault) && backendDefault > 0 && backendDefault !== histWindowDays) {
+        setHistWindowDays(backendDefault);
+      }
+    }
+  }, [coverageHistogramWindowDays, (coverage as any)?.meta?.fill_trading_days_window]);
+
+  const saveHistogramWindowPref = async (next: number) => {
+    try {
+      if (!user || typeof refreshMe !== 'function') return;
+      const existing = (user?.ui_preferences && typeof user.ui_preferences === 'object') ? user.ui_preferences : {};
+      await authApi.updateMe({
+        ui_preferences: {
+          ...existing,
+          coverage_histogram_window_days: next,
+        },
+      });
+      await refreshMe();
+    } catch (e) {
+      toast.error(handleApiError(e));
+    }
+  };
 
   React.useEffect(() => {
     if (coverage?.meta?.backfill_5m_enabled !== undefined) {
@@ -108,6 +152,48 @@ const AdminDashboard: React.FC = () => {
       toast.error(err?.response?.data?.detail || err?.message || 'Failed to backfill stale daily');
     } finally {
       setBackfillingStale(false);
+    }
+  };
+
+  const backfillSnapshotHistory200d = async () => {
+    if (backfillingSnapshotHistory) return;
+    setBackfillingSnapshotHistory(true);
+    try {
+      const tracked = Number((coverage as any)?.tracked_count ?? totalSymbols ?? 0) || 0;
+      const estimatedRows = tracked ? tracked * 200 : null;
+      await api.post('/market-data/admin/snapshots/history/backfill-last-n-days?days=200');
+      toast.success(
+        estimatedRows
+          ? `Snapshot history (200d) queued (~${estimatedRows.toLocaleString()} rows). Track progress in Admin → Jobs.`
+          : 'Snapshot history (200d) queued. Track progress in Admin → Jobs.',
+      );
+      setTimeout(() => void refreshCoverage(), 1500);
+      setTimeout(() => void refreshCoverage(), 4500);
+      void loadTaskStatus();
+    } catch (err: any) {
+      toast.error(err?.response?.data?.detail || err?.message || 'Failed to queue snapshot history backfill');
+    } finally {
+      setBackfillingSnapshotHistory(false);
+    }
+  };
+
+  const backfillDailySinceDate = async () => {
+    try {
+      await api.post(`/market-data/admin/backfill/daily-since-date?since_date=${encodeURIComponent(sinceDate)}&batch_size=25`);
+      toast.success(`Queued daily backfill since ${sinceDate}`);
+      void loadTaskStatus();
+    } catch (err: any) {
+      toast.error(err?.response?.data?.detail || err?.message || 'Failed to queue daily backfill since date');
+    }
+  };
+
+  const backfillSnapshotHistorySinceDate = async () => {
+    try {
+      await api.post(`/market-data/admin/snapshots/history/backfill-last-n-days?days=3000&since_date=${encodeURIComponent(sinceDate)}`);
+      toast.success(`Queued snapshot history backfill since ${sinceDate}`);
+      void loadTaskStatus();
+    } catch (err: any) {
+      toast.error(err?.response?.data?.detail || err?.message || 'Failed to queue snapshot history backfill since date');
     }
   };
 
@@ -223,6 +309,14 @@ const AdminDashboard: React.FC = () => {
     const { rows, newestDate, total } = dailyFillDist;
     if (!rows.length || !newestDate || !total) return null;
 
+    const normDateKey = (d: any) => {
+      if (!d) return '';
+      // Be resilient to backend variations (date vs datetime strings).
+      // We only care about the YYYY-MM-DD part for histogram alignment.
+      const s = String(d);
+      return s.length >= 10 ? s.slice(0, 10) : s;
+    };
+
     const pctFor = (row: { pct_of_universe: number }) => Number(row?.pct_of_universe || 0);
     const colorForPct = (pct: number) => {
       // HSL: red(0) -> green(120), driven by % (height)
@@ -232,9 +326,11 @@ const AdminDashboard: React.FC = () => {
     };
 
     const barMaxH = 36;
-      const dotH = 8; // dot + spacing below bar
-    const fillMap = new Map(rows.map((r) => [r.date, r]));
-    const snapshotPctByDate = new Map((snapshotFillSeries || []).map((r) => [r.date, Number(r.pct_of_universe || 0)]));
+    const dotH = 8; // dot + spacing below bar
+    const fillMap = new Map(rows.map((r) => [normDateKey(r.date), r]));
+    const snapshotPctByDate = new Map(
+      (snapshotFillSeries || []).map((r) => [normDateKey(r.date), Number(r.pct_of_universe || 0)]),
+    );
 
     // Trading-day series: use the last N observed dates in fill_by_date.
     // This naturally excludes weekends/holidays (no OHLCV rows expected) and avoids confusing gaps.
@@ -247,7 +343,7 @@ const AdminDashboard: React.FC = () => {
       .reverse() // oldest-first
       .slice(-windowDays) // keep last N trading days
       .map((r) => ({
-        date: r.date,
+        date: normDateKey(r.date),
         symbol_count: Number(r.symbol_count || 0),
         pct_of_universe: Number(r.pct_of_universe || 0),
       }));
@@ -264,11 +360,11 @@ const AdminDashboard: React.FC = () => {
           overflowX="auto"
           overflowY="hidden"
         >
-            <HStack align="end" gap={1} h={`${barMaxH + dotH}px`} w="full">
+          <HStack align="end" gap={1} h={`${barMaxH + dotH}px`} w="full">
             {bars.map((r) => {
               const pct = pctFor(r);
               const h = Math.max(2, Math.round((pct / 100) * barMaxH));
-              const snapPct = snapshotPctByDate.get(r.date);
+              const snapPct = snapshotPctByDate.get(normDateKey(r.date));
               const snapOk = typeof snapPct === 'number' && snapPct >= 95;
               const snapNone = typeof snapPct !== 'number';
               // Dot thresholds: green = basically complete, orange = partial, red = low coverage, gray = no snapshot run recorded.
@@ -336,6 +432,31 @@ const AdminDashboard: React.FC = () => {
                       : 'No daily bars found'}
                   </Text>
                 </Box>
+                <HStack gap={2} align="center">
+                  <Text fontSize="xs" color="fg.muted">
+                    Window
+                  </Text>
+                  <select
+                    value={histWindowDays}
+                    onChange={(e) => {
+                      const next = Number(e.target.value);
+                      setHistWindowDays(next);
+                      void saveHistogramWindowPref(next);
+                    }}
+                    style={{
+                      fontSize: 12,
+                      padding: '6px 8px',
+                      borderRadius: 10,
+                      border: '1px solid var(--chakra-colors-border-subtle)',
+                      background: 'var(--chakra-colors-bg-input)',
+                      color: 'var(--chakra-colors-fg-default)',
+                    }}
+                  >
+                    <option value={50}>50d</option>
+                    <option value={100}>100d</option>
+                    <option value={200}>200d</option>
+                  </select>
+                </HStack>
                 <Badge variant="subtle" colorScheme="green">
                   {dailyFillDist.total > 0
                     ? `${Math.round((dailyFillDist.newestPct || 0) * 10) / 10}% filled on newest`
@@ -410,6 +531,24 @@ const AdminDashboard: React.FC = () => {
                 <Text fontSize="xs" color="fg.muted" mb={2}>
                   Advanced controls (use when debugging). These are more granular and may be slower/noisier.
                 </Text>
+                <HStack gap={2} mb={2} flexWrap="wrap">
+                  <Text fontSize="xs" color="fg.muted">
+                    Since date
+                  </Text>
+                  <input
+                    type="date"
+                    value={sinceDate}
+                    onChange={(e) => setSinceDate(e.target.value)}
+                    style={{
+                      fontSize: 12,
+                      padding: '6px 8px',
+                      borderRadius: 10,
+                      border: '1px solid var(--chakra-colors-border-subtle)',
+                      background: 'var(--chakra-colors-bg-input)',
+                      color: 'var(--chakra-colors-fg-default)',
+                    }}
+                  />
+                </HStack>
                 <Box display="flex" gap={2} flexWrap="wrap">
                   <Button size="xs" variant="outline" onClick={() => void runNamedTask('refresh_index_constituents', 'Refresh constituents')}>
                     Refresh Constituents
@@ -417,12 +556,49 @@ const AdminDashboard: React.FC = () => {
                   <Button size="xs" variant="outline" onClick={() => void runNamedTask('update_tracked_symbol_cache', 'Update tracked')}>
                     Update Tracked
                   </Button>
+                  <Button size="xs" variant="outline" onClick={() => void backfillDailySinceDate()}>
+                    Backfill Daily Bars (since)
+                  </Button>
                   <Button size="xs" variant="outline" onClick={() => void runNamedTask('recompute_indicators_universe', 'Recompute indicators')}>
                     Recompute Indicators (Market Snapshot)
                   </Button>
                   <Button size="xs" variant="outline" onClick={() => void runNamedTask('record_daily_history', 'Record history')}>
                     Record History
                   </Button>
+                  <Button size="xs" variant="outline" onClick={() => void backfillSnapshotHistorySinceDate()}>
+                    Backfill Snapshot History (since)
+                  </Button>
+                  <Tooltip.Root>
+                    <Tooltip.Trigger>
+                      <Button
+                        size="xs"
+                        variant="outline"
+                        loading={backfillingSnapshotHistory}
+                        onClick={() => void backfillSnapshotHistory200d()}
+                      >
+                        Backfill Snapshot History (200d)
+                      </Button>
+                    </Tooltip.Trigger>
+                    <Tooltip.Positioner>
+                      <Tooltip.Content>
+                        <Box>
+                          <Text fontSize="xs" color="fg.muted">
+                            Estimated rows: {(Number((coverage as any)?.tracked_count ?? totalSymbols ?? 0) || 0) * 200}
+                          </Text>
+                          <Text fontSize="xs" color="fg.muted">
+                            This can take a few minutes. Progress is visible in Admin → Jobs.
+                          </Text>
+                          {(taskStatus || {})['backfill_snapshot_history_last_n_days']?.payload ? (
+                            <Text fontSize="xs" color="fg.muted" mt={1}>
+                              Latest status: {(taskStatus || {})['backfill_snapshot_history_last_n_days']?.status || 'n/a'} ·{' '}
+                              processed {(taskStatus || {})['backfill_snapshot_history_last_n_days']?.payload?.processed_symbols ?? 0}/
+                              {(taskStatus || {})['backfill_snapshot_history_last_n_days']?.payload?.symbols ?? 0} symbols
+                            </Text>
+                          ) : null}
+                        </Box>
+                      </Tooltip.Content>
+                    </Tooltip.Positioner>
+                  </Tooltip.Root>
                   <Button size="xs" variant="outline" loading={sendingDiscord} onClick={() => void sendSnapshotDigestToDiscord()}>
                     Send Snapshot Digest to Discord
                   </Button>

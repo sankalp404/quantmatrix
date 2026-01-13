@@ -21,16 +21,28 @@ interface UseCoverageSnapshotResult {
   hero: CoverageHeroMeta;
 }
 
+type CoverageSnapshotOptions = {
+  fillTradingDaysWindow?: number;
+  fillLookbackDays?: number;
+};
+
 const defaultSparkline = deriveSparklineSeries();
 
-const useCoverageSnapshot = (): UseCoverageSnapshotResult => {
+const useCoverageSnapshot = (opts?: CoverageSnapshotOptions): UseCoverageSnapshotResult => {
   const [snapshot, setSnapshot] = useState<any | null>(null);
   const [loading, setLoading] = useState(false);
 
   const fetchSnapshot = useCallback(async () => {
     setLoading(true);
     try {
-      const response = await api.get('/market-data/coverage');
+      const params: any = {};
+      if (typeof opts?.fillTradingDaysWindow === 'number') {
+        params.fill_trading_days_window = opts.fillTradingDaysWindow;
+      }
+      if (typeof opts?.fillLookbackDays === 'number') {
+        params.fill_lookback_days = opts.fillLookbackDays;
+      }
+      const response = await api.get('/market-data/coverage', Object.keys(params).length ? { params } : undefined);
       setSnapshot(response.data || null);
     } catch (error) {
       if (import.meta.env.DEV) {
@@ -40,7 +52,7 @@ const useCoverageSnapshot = (): UseCoverageSnapshotResult => {
     } finally {
       setLoading(false);
     }
-  }, []);
+  }, [opts?.fillTradingDaysWindow, opts?.fillLookbackDays]);
 
   useEffect(() => {
     fetchSnapshot();

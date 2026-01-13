@@ -79,8 +79,10 @@ const AdminJobs: React.FC = () => {
       if (typeof nDays === 'number') p.push(`(${nDays} days)`);
       return p.join(' ');
     }
-    if (task.includes('backfill_last_200_bars')) {
-      return typeof symbolsN === 'number' ? `Backfilled last ~200 daily bars (${symbolsN} symbols)` : 'Backfilled last ~200 daily bars';
+    if (task.includes('backfill_last_bars')) {
+      const days = typeof counters?.days === 'number' ? Number(counters.days) : undefined;
+      const label = typeof days === 'number' ? `Backfilled last ~${days} daily bars` : 'Backfilled last daily bars';
+      return typeof symbolsN === 'number' ? `${label} (${symbolsN} symbols)` : label;
     }
     if (task.includes('bootstrap_daily_coverage_tracked')) return 'Restore Daily Coverage (Tracked)';
     if (task.includes('refresh_index_constituents')) return 'Refreshed index constituents';
@@ -295,7 +297,7 @@ const AdminJobs: React.FC = () => {
                   </Text>
                 </Box>
                 <HStack gap={3} flexWrap="wrap">
-                  <Badge colorPalette={selectedJob?.status === 'success' ? 'green' : selectedJob?.status === 'running' ? 'blue' : 'red'}>
+                  <Badge colorPalette={statusPalette(selectedJob?.status)}>
                     {String(selectedJob?.status || 'unknown')}
                   </Badge>
                   <Text fontSize="xs" color="fg.muted">

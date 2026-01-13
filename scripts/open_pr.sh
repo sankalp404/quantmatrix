@@ -26,6 +26,38 @@ if ! command -v gh >/dev/null 2>&1; then
   exit 2
 fi
 
+# Guardrail: do not start a new agent PR from an existing agent branch unless that branch is already merged.
+# This avoids "branch-on-branch" confusion and keeps our workflow deterministic:
+# - If current branch is agent/** and its PR is merged -> switch to main, fast-forward, proceed.
+# - If current branch is agent/** and its PR is open/unmerged -> stop and ask operator to finish/merge first.
+CURRENT_BRANCH="$(git rev-parse --abbrev-ref HEAD)"
+if [[ "$CURRENT_BRANCH" == agent/* ]]; then
+  # If there are local changes, don't attempt to switch branches automatically.
+  if [[ -n "$(git status --porcelain)" ]]; then
+    echo "You are on $CURRENT_BRANCH with uncommitted changes."
+    echo "Finish this branch (commit/push) or stash changes before starting a new PR."
+    exit 2
+  fi
+
+  # If no PR exists, treat as unmerged (operator should decide what to do).
+  if gh pr view "$CURRENT_BRANCH" --json number,state,isMerged >/dev/null 2>&1; then
+    PR_STATE="$(gh pr view "$CURRENT_BRANCH" --json state,isMerged --jq '.state + \"|\" + (if .isMerged then \"true\" else \"false\" end)')"
+    if [[ "$PR_STATE" != *"|true" ]]; then
+      echo "Refusing to start a new PR while current agent branch PR is not merged: $CURRENT_BRANCH"
+      echo "Merge/close the PR (or switch to main) and re-run this script."
+      exit 2
+    fi
+  else
+    echo "Refusing to start a new PR from $CURRENT_BRANCH because no PR is associated (treating as unmerged)."
+    echo "Switch to main (or open/merge the PR for this branch) and re-run."
+    exit 2
+  fi
+
+  # Current agent PR is merged; reset workflow baseline to main.
+  git switch main
+  git pull --ff-only origin main
+fi
+
 BRANCH="agent/${TYPE}/$(echo "${TITLE}" | tr '[:upper:]' '[:lower:]' | tr -cs 'a-z0-9' '-' | sed 's/^-//;s/-$//')-$(date +%Y%m%d)"
 
 git status --porcelain >/dev/null

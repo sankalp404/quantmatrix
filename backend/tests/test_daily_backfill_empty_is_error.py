@@ -1,7 +1,7 @@
 import pytest
 
 
-def test_backfill_last_200_bars_counts_empty_as_error(db_session, monkeypatch):
+def test_backfill_last_bars_counts_empty_as_error(db_session, monkeypatch):
     """
     Regression: transient provider failures can return df=None/empty and were previously counted as skipped_empty with errors=0.
     We now count these as errors and surface samples.
@@ -33,7 +33,7 @@ def test_backfill_last_200_bars_counts_empty_as_error(db_session, monkeypatch):
 
     monkeypatch.setattr(market_data_service, "get_historical_data", fake_get_historical_data)
 
-    res = market_data_tasks.backfill_last_200_bars()
+    res = market_data_tasks.backfill_last_bars()
     assert res["tracked_total"] == 2
     assert res["updated_total"] == 1
     assert res["skipped_empty"] == 1

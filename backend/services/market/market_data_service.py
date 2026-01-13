@@ -433,9 +433,13 @@ class MarketDataService:
         max_bars: Optional[int] = 270,
         return_provider: bool = False,
     ) -> Optional[pd.DataFrame] | tuple[Optional[pd.DataFrame], Optional[str]]:
-        """Get OHLCV (newest->first index) with provider policy, returning provider when requested.
+        """Get OHLCV (newest->first index) with provider policy.
 
-        - Trims to max_bars for interval==1d to bound downstream compute
+        Semantics (provider-aware):
+        - `period` is a coarse request hint (calendar range) for providers that support it
+          (e.g. yfinance). Some providers effectively ignore it for daily history.
+        - `max_bars` is the hard bound: when set and interval=="1d", we keep only the newest
+          `max_bars` rows so downstream compute is stable and predictable.
         - Cache TTL: 300s for intraday; 3600s for daily+
         """
         cache_key = f"historical:{symbol}:{period}:{interval}"
@@ -799,7 +803,13 @@ class MarketDataService:
         }
         return out
 
-    def compute_snapshot_from_db(self, db: Session, symbol: str) -> Dict[str, Any]:
+    def compute_snapshot_from_db(
+        self,
+        db: Session,
+        symbol: str,
+        *,
+        as_of_dt: datetime | None = None,
+    ) -> Dict[str, Any]:
         """Compute a snapshot purely from local PriceData (and enrich it) for speed and consistency.
 
         - Reads the last ~270 daily bars (newest->first) from price_data
@@ -809,20 +819,17 @@ class MarketDataService:
         from backend.models import PriceData
 
         limit_bars = int(getattr(settings, "SNAPSHOT_DAILY_BARS_LIMIT", 400))
-        rows = (
-            db.query(
-                PriceData.date,
-                PriceData.open_price,
-                PriceData.high_price,
-                PriceData.low_price,
-                PriceData.close_price,
-                PriceData.volume,
-            )
-            .filter(PriceData.symbol == symbol, PriceData.interval == "1d")
-            .order_by(PriceData.date.desc())
-            .limit(limit_bars)
-            .all()
-        )
+        q = db.query(
+            PriceData.date,
+            PriceData.open_price,
+            PriceData.high_price,
+            PriceData.low_price,
+            PriceData.close_price,
+            PriceData.volume,
+        ).filter(PriceData.symbol == symbol, PriceData.interval == "1d")
+        if as_of_dt is not None:
+            q = q.filter(PriceData.date <= as_of_dt)
+        rows = q.order_by(PriceData.date.desc()).limit(limit_bars).all()
         if not rows:
             return {}
         df = pd.DataFrame(
@@ -842,6 +849,16 @@ class MarketDataService:
         snapshot = self._snapshot_from_dataframe(df)
         if not snapshot:
             return {}
+        # Record "as-of" timestamp (latest daily bar used for this snapshot).
+        # Keep it JSON-friendly (ISO string). The typed DB column is persisted separately.
+        try:
+            as_of_ts = df.index.max()
+            if as_of_ts is not None:
+                snapshot["as_of_timestamp"] = (
+                    as_of_ts.isoformat() if hasattr(as_of_ts, "isoformat") else str(as_of_ts)
+                )
+        except Exception:
+            pass
 
         # Level 3/4: Relative strength vs SPY + Weinstein stage (DB-only if benchmark available).
         try:
@@ -994,11 +1011,58 @@ class MarketDataService:
         analysis_type: str = "technical_snapshot",
         ttl_hours: int = 24,
         ) -> MarketSnapshot:
-        """Upsert-like persistence for MarketSnapshot with mapped fields copied."""
+        """Persist latest snapshot (MarketSnapshot) and append to immutable history (MarketSnapshotHistory).
+
+        Architecture:
+        - `market_snapshot`: fast "latest view" per (symbol, analysis_type)
+        - `market_snapshot_history`: immutable daily ledger keyed by (symbol, analysis_type, as_of_date)
+        """
         if not snapshot:
             raise ValueError("empty snapshot")
         now = datetime.utcnow()
         expiry = now + pd.Timedelta(hours=ttl_hours)
+
+        # Normalize as-of timestamp:
+        # - MarketSnapshot.as_of_timestamp (timestamptz)
+        # - MarketSnapshotHistory.as_of_date (timestamp without tz, midnight)
+        from backend.models import PriceData
+        from backend.models.market_data import MarketSnapshotHistory
+        from datetime import timezone, time as _time
+
+        as_of_ts: datetime | None = None
+        raw_as_of = snapshot.get("as_of_timestamp")
+        try:
+            if isinstance(raw_as_of, datetime):
+                as_of_ts = raw_as_of
+            elif isinstance(raw_as_of, str) and raw_as_of.strip():
+                s = raw_as_of.strip()
+                # Treat timezone-less ISO strings as UTC.
+                if s.endswith("Z"):
+                    as_of_ts = datetime.fromisoformat(s.replace("Z", "+00:00"))
+                else:
+                    dt = datetime.fromisoformat(s)
+                    as_of_ts = dt if dt.tzinfo else dt.replace(tzinfo=timezone.utc)
+        except Exception:
+            as_of_ts = None
+        if as_of_ts is None:
+            try:
+                as_of_ts = (
+                    db.query(PriceData.date)
+                    .filter(PriceData.symbol == symbol.upper(), PriceData.interval == "1d")
+                    .order_by(PriceData.date.desc())
+                    .limit(1)
+                    .scalar()
+                )
+                if isinstance(as_of_ts, datetime) and as_of_ts.tzinfo is None:
+                    as_of_ts = as_of_ts.replace(tzinfo=timezone.utc)
+            except Exception:
+                as_of_ts = None
+
+        # Ensure raw snapshot stays JSON-serializable.
+        snapshot_json = dict(snapshot)
+        if isinstance(as_of_ts, datetime):
+            snapshot_json["as_of_timestamp"] = as_of_ts.replace(tzinfo=None).isoformat()
+
         row = (
             db.query(MarketSnapshot)
             .filter(
@@ -1013,18 +1077,63 @@ class MarketDataService:
                 symbol=symbol,
                 analysis_type=analysis_type,
                 expiry_timestamp=expiry,
-                raw_analysis=snapshot,
+                raw_analysis=snapshot_json,
             )
             for k, v in snapshot.items():
                 if hasattr(row, k):
                     setattr(row, k, v)
+            if as_of_ts is not None and hasattr(row, "as_of_timestamp"):
+                row.as_of_timestamp = as_of_ts
             db.add(row)
         else:
             row.expiry_timestamp = expiry
-            row.raw_analysis = snapshot
+            row.raw_analysis = snapshot_json
             for k, v in snapshot.items():
                 if hasattr(row, k):
                     setattr(row, k, v)
+            if as_of_ts is not None and hasattr(row, "as_of_timestamp"):
+                row.as_of_timestamp = as_of_ts
+
+        # Append to immutable daily ledger (idempotent upsert by unique constraint).
+        if as_of_ts is not None:
+            as_of_date = datetime.combine(as_of_ts.date(), _time.min)
+            existing = (
+                db.query(MarketSnapshotHistory)
+                .filter(
+                    MarketSnapshotHistory.symbol == symbol,
+                    MarketSnapshotHistory.analysis_type == analysis_type,
+                    MarketSnapshotHistory.as_of_date == as_of_date,
+                )
+                .first()
+            )
+            if existing:
+                # Headline fields
+                existing.current_price = snapshot_json.get("current_price")
+                existing.rsi = snapshot_json.get("rsi")
+                existing.atr_value = snapshot_json.get("atr_value")
+                existing.sma_50 = snapshot_json.get("sma_50")
+                existing.macd = snapshot_json.get("macd")
+                existing.macd_signal = snapshot_json.get("macd_signal")
+                # Wide fields (best-effort: set only if model has the attr)
+                for k, v in snapshot_json.items():
+                    if hasattr(existing, k):
+                        setattr(existing, k, v)
+            else:
+                hist = MarketSnapshotHistory(
+                    symbol=symbol,
+                    analysis_type=analysis_type,
+                    as_of_date=as_of_date,
+                    current_price=snapshot_json.get("current_price"),
+                    rsi=snapshot_json.get("rsi"),
+                    atr_value=snapshot_json.get("atr_value"),
+                    sma_50=snapshot_json.get("sma_50"),
+                    macd=snapshot_json.get("macd"),
+                    macd_signal=snapshot_json.get("macd_signal"),
+                )
+                for k, v in snapshot_json.items():
+                    if hasattr(hist, k):
+                        setattr(hist, k, v)
+                db.add(hist)
         db.flush()
         db.commit()
         return row
@@ -1377,6 +1486,7 @@ class MarketDataService:
     def coverage_snapshot(self, db: Session) -> Dict[str, Any]:
         """Compute coverage freshness, stale lists, and tracked stats for instrumentation/UI."""
         now = datetime.utcnow()
+        from backend.models.market_data import MarketSnapshotHistory
 
         idx_counts: Dict[str, int] = {}
         for idx in ("SP500", "NASDAQ100", "DOW30"):
@@ -1441,19 +1551,19 @@ class MarketDataService:
             return out
 
         def _snapshot_fill_by_date(days: int = 60) -> List[Dict[str, Any]]:
-            """Per-date snapshot coverage for technical snapshots (MarketSnapshot)."""
+            """Per-date snapshot coverage for technical snapshots (MarketSnapshotHistory ledger)."""
             if not universe or total_symbols == 0:
                 return []
             start_dt = now - timedelta(days=days)
-            snap_dt = func.coalesce(MarketSnapshot.as_of_timestamp, MarketSnapshot.analysis_timestamp)
+            snap_dt = MarketSnapshotHistory.as_of_date
             rows = (
                 db.query(
                     func.date(snap_dt).label("d"),
-                    func.count(distinct(MarketSnapshot.symbol)).label("symbol_count"),
+                    func.count(distinct(MarketSnapshotHistory.symbol)).label("symbol_count"),
                 )
                 .filter(
-                    MarketSnapshot.analysis_type == "technical_snapshot",
-                    MarketSnapshot.symbol.in_(set(universe)),
+                    MarketSnapshotHistory.analysis_type == "technical_snapshot",
+                    MarketSnapshotHistory.symbol.in_(set(universe)),
                     snap_dt >= start_dt,
                 )
                 .group_by(func.date(snap_dt))
@@ -1546,7 +1656,29 @@ def compute_coverage_status(snapshot: Dict[str, Any]) -> Dict[str, Any]:
     def pct(count: int) -> float:
         return round((count / total_symbols) * 100.0, 1) if total_symbols else 0.0
 
-    daily_pct = pct(daily_count)
+    # Trading-day aware daily %:
+    # Prefer the latest observed trading day in daily.fill_by_date (based on stored OHLCV rows),
+    # and compute % as-of that date. This avoids false "degraded" on weekends/holidays.
+    expected_daily_date = None
+    expected_daily_pct = None
+    missing_latest = None
+    try:
+        series = list(daily.get("fill_by_date") or [])
+        # entries are like: {date: "YYYY-MM-DD", symbol_count: n, pct_of_universe: x}
+        series = [r for r in series if isinstance(r, dict) and r.get("date")]
+        if series:
+            newest = max(series, key=lambda r: str(r.get("date")))
+            expected_daily_date = str(newest.get("date"))
+            expected_daily_pct = float(newest.get("pct_of_universe") or 0.0)
+            # symbol_count is distinct symbols with a 1d bar on that date
+            sc = int(newest.get("symbol_count") or 0)
+            missing_latest = max(0, int(total_symbols) - sc) if total_symbols else 0
+    except Exception:
+        expected_daily_date = None
+        expected_daily_pct = None
+        missing_latest = None
+
+    daily_pct = round(expected_daily_pct, 1) if isinstance(expected_daily_pct, (int, float)) else pct(daily_count)
     m5_pct = pct(m5_count)
 
     label = "ok"
@@ -1554,10 +1686,37 @@ def compute_coverage_status(snapshot: Dict[str, Any]) -> Dict[str, Any]:
     if total_symbols == 0:
         label = "idle"
         summary = "No symbols discovered yet. Run refresh + tracked tasks."
-    if total_symbols > 0 and daily_pct < 90:
+    if total_symbols > 0 and expected_daily_date is not None and missing_latest is not None:
+        # “Green” means: everyone has the latest trading-day bar.
+        if missing_latest > 0:
+            label = "degraded"
+            summary = f"{missing_latest} symbols missing daily bar for {expected_daily_date}."
+        else:
+            # Market-hours hint (computed in NY timezone, but stored timestamps remain UTC).
+            try:
+                from zoneinfo import ZoneInfo
+                from datetime import timedelta, time as _time
+
+                ny = ZoneInfo("America/New_York")
+                now_ny = datetime.utcnow().replace(tzinfo=ZoneInfo("UTC")).astimezone(ny)
+                is_weekend = now_ny.weekday() >= 5
+                open_t = _time(hour=9, minute=30)
+                close_t = _time(hour=16, minute=0)
+                is_open = (not is_weekend) and (open_t <= now_ny.time() <= close_t)
+                close_dt = datetime.combine(now_ny.date(), close_t, tzinfo=ny)
+                within_grace = (not is_weekend) and (now_ny >= close_dt) and (now_ny <= close_dt + timedelta(hours=18))
+                if not is_open:
+                    hint = "Market closed" if not within_grace else "Market closed (within close grace)"
+                    summary = f"{hint}. Daily coverage is green (latest bar {expected_daily_date})."
+                else:
+                    summary = f"Daily coverage is green (latest bar {expected_daily_date})."
+            except Exception:
+                summary = f"Daily coverage is green (latest bar {expected_daily_date})."
+    elif total_symbols > 0 and daily_pct < 90:
         label = "degraded"
         summary = f"Daily coverage {daily_pct}% below 90% SLA."
     elif stale_daily:
+        # Fallback to legacy bucket-based stale counts if fill_by_date isn't present.
         label = "degraded"
         none_n = int((daily.get("freshness") or {}).get("none") or daily.get("missing") or 0)
         summary = (
@@ -1578,14 +1737,15 @@ def compute_coverage_status(snapshot: Dict[str, Any]) -> Dict[str, Any]:
         "summary": summary,
         "daily_pct": daily_pct,
         "m5_pct": m5_pct,
-        "stale_daily": stale_daily,
+        "stale_daily": int(missing_latest) if isinstance(missing_latest, int) else stale_daily,
         "stale_m5": stale_m5,
         "symbols": total_symbols,
         "tracked_count": tracked,
         "thresholds": {
-            "daily_pct": 90,
+            "daily_pct": 100,
             "m5_expectation": ">=1 refresh/day" if backfill_5m_enabled else "ignored (disabled by admin)",
         },
+        "daily_expected_date": expected_daily_date,
     }
 
 

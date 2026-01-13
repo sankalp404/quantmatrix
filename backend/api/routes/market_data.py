@@ -22,7 +22,8 @@ from backend.services.market.market_data_service import (
     MarketDataService,
     compute_coverage_status,
 )
-from backend.models.market_data import MarketSnapshot
+from backend.services.market.universe import tracked_symbols
+from backend.models.market_data import MarketSnapshot, MarketSnapshotHistory
 from backend.tasks.market_data_tasks import (
     record_daily_history,
     update_tracked_symbol_cache,
@@ -30,6 +31,9 @@ from backend.tasks.market_data_tasks import (
     recompute_indicators_universe,
     refresh_index_constituents,
     refresh_single_symbol,
+    backfill_snapshot_history_last_n_days,
+    backfill_daily_since_date,
+    backfill_last_bars,
 )
 from backend.api.dependencies import get_optional_user, get_admin_user, get_market_data_viewer
 from backend.models.index_constituent import IndexConstituent
@@ -54,33 +58,9 @@ def _visibility_scope() -> str:
 
 
 def _tracked_universe_symbols(db: Session) -> List[str]:
-    """Return tracked universe symbols (tracked:all preferred, DB fallback)."""
-    try:
-        svc = MarketDataService()
-        raw = svc.redis_client.get("tracked:all")
-        tracked = sorted({str(s).upper() for s in (json.loads(raw) if raw else []) if s})
-    except Exception:
-        tracked = []
-    if tracked:
-        return tracked
-    syms = set()
-    try:
-        for (s,) in (
-            db.query(IndexConstituent.symbol)
-            .filter(IndexConstituent.is_active.is_(True))
-            .distinct()
-        ):
-            if s:
-                syms.add(str(s).upper())
-    except Exception:
-        pass
-    try:
-        for (s,) in db.query(Position.symbol).distinct():
-            if s:
-                syms.add(str(s).upper())
-    except Exception:
-        pass
-    return sorted(syms)
+    """Return tracked universe symbols (Redis tracked:all preferred, DB fallback)."""
+    svc = MarketDataService()
+    return tracked_symbols(db, redis_client=svc.redis_client)
 
 
 def _is_backfill_5m_enabled(svc: MarketDataService) -> bool:
@@ -394,6 +374,103 @@ async def get_snapshot(
     return {"symbol": symbol.upper(), "snapshot": payload}
 
 
+@router.get("/technical/snapshot-history/{symbol}")
+async def get_snapshot_history(
+    symbol: str,
+    days: int = Query(200, ge=1, le=3000),
+    user: User | None = Depends(get_optional_user),
+    db: Session = Depends(get_db),
+) -> Dict[str, Any]:
+    """Return historical technical snapshots (MarketSnapshotHistory ledger) for a symbol."""
+    rows = (
+        db.query(MarketSnapshotHistory)
+        .filter(
+            MarketSnapshotHistory.symbol == symbol.upper(),
+            MarketSnapshotHistory.analysis_type == "technical_snapshot",
+        )
+        .order_by(MarketSnapshotHistory.as_of_date.desc())
+        .limit(days)
+        .all()
+    )
+    out = []
+    for r in reversed(rows):  # oldest->newest
+        # Build a stable snapshot dict from wide columns (no JSON payload).
+        col_names = [c.name for c in r.__table__.columns]
+        preferred = [
+            "symbol",
+            "analysis_type",
+            "analysis_timestamp",
+            "as_of_date",
+            "current_price",
+            "market_cap",
+            "sector",
+            "industry",
+            "sub_industry",
+            "stage_label",
+            "stage_label_5d_ago",
+            "rs_mansfield_pct",
+            "sma_5",
+            "sma_14",
+            "sma_21",
+            "sma_50",
+            "sma_100",
+            "sma_150",
+            "sma_200",
+            "atr_14",
+            "atr_30",
+            "atrp_14",
+            "atrp_30",
+            "atr_distance",
+            "atr_value",
+            "atr_percent",
+            "range_pos_20d",
+            "range_pos_50d",
+            "range_pos_52w",
+            "rsi",
+            "macd",
+            "macd_signal",
+        ]
+        ordered = [k for k in preferred if k in col_names]
+        ordered.extend([k for k in col_names if k not in set(ordered) and k not in {"id"}])
+        payload = {k: getattr(r, k) for k in ordered}
+        out.append(
+            {
+                "as_of_date": r.as_of_date.isoformat() if hasattr(r.as_of_date, "isoformat") else str(r.as_of_date),
+                "snapshot": payload,
+            }
+        )
+    return {"symbol": symbol.upper(), "days": int(days), "rows": out}
+
+
+@router.post("/admin/snapshots/history/backfill-last-n-days")
+async def admin_backfill_snapshot_history_last_n_days(
+    days: int = Query(200, ge=1, le=3000),
+    since_date: str | None = Query(None, description="Optional YYYY-MM-DD; overrides days by selecting all available trading days since date"),
+    user: User = Depends(get_admin_user),
+) -> Dict[str, Any]:
+    """Backfill MarketSnapshotHistory for the last N trading days (DB-only)."""
+    return _enqueue_task(backfill_snapshot_history_last_n_days, days, since_date=since_date)
+
+
+@router.post("/admin/backfill/daily-since-date")
+async def admin_backfill_daily_since_date(
+    since_date: str = Query("2021-01-01", description="YYYY-MM-DD"),
+    batch_size: int = Query(25, ge=1, le=200),
+    _admin: User = Depends(get_admin_user),
+) -> Dict[str, Any]:
+    """Deep daily OHLCV backfill since a given date for the tracked universe (provider fetch)."""
+    return _enqueue_task(backfill_daily_since_date, since_date, batch_size)
+
+
+@router.post("/admin/backfill/daily-last-bars")
+async def admin_backfill_daily_last_bars(
+    days: int = Query(200, ge=30, le=3000, description="Approx trading days (default 200)"),
+    _admin: User = Depends(get_admin_user),
+) -> Dict[str, Any]:
+    """Backfill last N daily bars for the tracked universe (provider fetch, delta insert)."""
+    return _enqueue_task(backfill_last_bars, days=days)
+
+
 # Removed duplicate refresh; use POST /symbol/{symbol}/refresh instead
 
 
@@ -414,9 +491,10 @@ async def admin_task_status(
             "refresh_index_constituents",
             "update_tracked_symbol_cache",
             "bootstrap_daily_coverage_tracked",
-            "backfill_last_200_bars",
+            "backfill_last_bars",
             "recompute_indicators_universe",
             "record_daily_history",
+            "backfill_snapshot_history_last_n_days",
             "monitor_coverage_health",
         ]
         out: Dict[str, Any] = {}
@@ -630,7 +708,7 @@ async def post_refresh_symbol(
 ) -> Dict[str, Any]:
     """Delta backfill and recompute indicators for a single symbol (no external TA).
 
-    Flow: backfill_last_200_bars(symbol) → recompute from DB → persist MarketSnapshot.
+    Flow: backfill_last_bars(symbols/days) → recompute from DB → persist MarketSnapshot.
     """
     return _enqueue_task(refresh_single_symbol, symbol.upper())
 
@@ -698,6 +776,12 @@ async def get_db_history(
 async def get_coverage(
     db: Session = Depends(get_db),
     _viewer: User = Depends(get_market_data_viewer),
+    fill_trading_days_window: int | None = Query(
+        None, ge=10, le=300, description="UI histogram window (trading days)"
+    ),
+    fill_lookback_days: int | None = Query(
+        None, ge=30, le=4000, description="Calendar-day lookback for fill_by_date series"
+    ),
 ) -> Dict[str, Any]:
     """Return coverage summary across intervals with last bar timestamps and freshness buckets."""
     try:
@@ -850,7 +934,15 @@ async def get_coverage(
                 if not sym_set:
                     return []
                 now_utc = datetime.utcnow()
-                lookback = int(days if days is not None else getattr(settings, "COVERAGE_FILL_LOOKBACK_DAYS", 90))
+                lookback = int(
+                    days
+                    if days is not None
+                    else (
+                        int(fill_lookback_days)
+                        if fill_lookback_days is not None
+                        else getattr(settings, "COVERAGE_FILL_LOOKBACK_DAYS", 90)
+                    )
+                )
                 start_dt = now_utc - timedelta(days=lookback)
                 rows = (
                     db.query(
@@ -885,18 +977,26 @@ async def get_coverage(
                 if not sym_set:
                     return []
                 now_utc = datetime.utcnow()
-                lookback = int(days if days is not None else getattr(settings, "COVERAGE_FILL_LOOKBACK_DAYS", 90))
+                lookback = int(
+                    days
+                    if days is not None
+                    else (
+                        int(fill_lookback_days)
+                        if fill_lookback_days is not None
+                        else getattr(settings, "COVERAGE_FILL_LOOKBACK_DAYS", 90)
+                    )
+                )
                 start_dt = now_utc - timedelta(days=lookback)
-                # Prefer as-of timestamp (what date the snapshot represents), fallback to analysis timestamp.
-                snap_dt = func.coalesce(MarketSnapshot.as_of_timestamp, MarketSnapshot.analysis_timestamp)
+                # MarketSnapshotHistory is the per-day ledger; use it for snapshot coverage by date.
+                snap_dt = MarketSnapshotHistory.as_of_date
                 rows = (
                     db.query(
                         func.date(snap_dt).label("d"),
-                        func.count(distinct(MarketSnapshot.symbol)).label("symbol_count"),
+                        func.count(distinct(MarketSnapshotHistory.symbol)).label("symbol_count"),
                     )
                     .filter(
-                        MarketSnapshot.analysis_type == "technical_snapshot",
-                        MarketSnapshot.symbol.in_(sym_set),
+                        MarketSnapshotHistory.analysis_type == "technical_snapshot",
+                        MarketSnapshotHistory.symbol.in_(sym_set),
                         snap_dt >= start_dt,
                     )
                     .group_by(func.date(snap_dt))
@@ -961,89 +1061,86 @@ async def get_coverage(
         except Exception:
             history_entries = []
 
-        # Ensure newer coverage fields exist even when an older cached snapshot is served.
-        # (e.g., cache written before fill_by_date/snapshot_fill_by_date were introduced)
+        # Ensure fill-by-date series are always present and up-to-date, even when a cached snapshot is served.
+        # A cached snapshot can contain partial lists (e.g., only newest), which would render older dots grey.
         try:
             daily_section = snapshot.get("daily", {}) or {}
-            if "fill_by_date" not in daily_section or not isinstance(daily_section.get("fill_by_date"), list):
-                last_map = daily_section.get("last") or {}
-                sym_set = {str(s).upper() for s in (last_map.keys() if isinstance(last_map, dict) else []) if s}
-                total_symbols = len(sym_set)
-                if sym_set and total_symbols > 0:
-                    from datetime import timedelta as _timedelta
+            last_map = daily_section.get("last") or {}
+            sym_set = {str(s).upper() for s in (last_map.keys() if isinstance(last_map, dict) else []) if s}
+            total_symbols = len(sym_set)
+            from datetime import timedelta as _timedelta
 
-                    now_utc = datetime.utcnow()
-                    lookback = int(getattr(settings, "COVERAGE_FILL_LOOKBACK_DAYS", 90))
-                    start_dt = now_utc - _timedelta(days=lookback)
-                    rows = (
-                        db.query(
-                            func.date(PriceData.date).label("d"),
-                            func.count(distinct(PriceData.symbol)).label("symbol_count"),
-                        )
-                        .filter(
-                            PriceData.interval == "1d",
-                            PriceData.symbol.in_(sym_set),
-                            PriceData.date >= start_dt,
-                        )
-                        .group_by(func.date(PriceData.date))
-                        .order_by(func.date(PriceData.date).asc())
-                        .all()
+            now_utc = datetime.utcnow()
+            lookback = int(
+                int(fill_lookback_days)
+                if fill_lookback_days is not None
+                else getattr(settings, "COVERAGE_FILL_LOOKBACK_DAYS", 90)
+            )
+            start_dt = now_utc - _timedelta(days=lookback)
+
+            # Always recompute daily fill_by_date from price_data.
+            if sym_set and total_symbols > 0:
+                rows = (
+                    db.query(
+                        func.date(PriceData.date).label("d"),
+                        func.count(distinct(PriceData.symbol)).label("symbol_count"),
                     )
-                    out: List[Dict[str, Any]] = []
-                    for d, symbol_count in rows:
-                        if not d:
-                            continue
-                        n = int(symbol_count or 0)
-                        out.append(
-                            {
-                                "date": str(d),
-                                "symbol_count": n,
-                                "pct_of_universe": round((n / total_symbols) * 100.0, 1),
-                            }
-                        )
-                    daily_section["fill_by_date"] = out
-                else:
-                    daily_section["fill_by_date"] = []
-
-            if "snapshot_fill_by_date" not in daily_section or not isinstance(daily_section.get("snapshot_fill_by_date"), list):
-                last_map = daily_section.get("last") or {}
-                sym_set = {str(s).upper() for s in (last_map.keys() if isinstance(last_map, dict) else []) if s}
-                total_symbols = len(sym_set)
-                if sym_set and total_symbols > 0:
-                    from datetime import timedelta as _timedelta
-
-                    now_utc = datetime.utcnow()
-                    lookback = int(getattr(settings, "COVERAGE_FILL_LOOKBACK_DAYS", 90))
-                    start_dt = now_utc - _timedelta(days=lookback)
-                    rows = (
-                        db.query(
-                            func.date(MarketSnapshot.analysis_timestamp).label("d"),
-                            func.count(distinct(MarketSnapshot.symbol)).label("symbol_count"),
-                        )
-                        .filter(
-                            MarketSnapshot.analysis_type == "technical_snapshot",
-                            MarketSnapshot.symbol.in_(sym_set),
-                            MarketSnapshot.analysis_timestamp >= start_dt,
-                        )
-                        .group_by(func.date(MarketSnapshot.analysis_timestamp))
-                        .order_by(func.date(MarketSnapshot.analysis_timestamp).asc())
-                        .all()
+                    .filter(
+                        PriceData.interval == "1d",
+                        PriceData.symbol.in_(sym_set),
+                        PriceData.date >= start_dt,
                     )
-                    out: List[Dict[str, Any]] = []
-                    for d, symbol_count in rows:
-                        if not d:
-                            continue
-                        n = int(symbol_count or 0)
-                        out.append(
-                            {
-                                "date": str(d),
-                                "symbol_count": n,
-                                "pct_of_universe": round((n / total_symbols) * 100.0, 1),
-                            }
-                        )
-                    daily_section["snapshot_fill_by_date"] = out
-                else:
-                    daily_section["snapshot_fill_by_date"] = []
+                    .group_by(func.date(PriceData.date))
+                    .order_by(func.date(PriceData.date).asc())
+                    .all()
+                )
+                out: List[Dict[str, Any]] = []
+                for d, symbol_count in rows:
+                    if not d:
+                        continue
+                    n = int(symbol_count or 0)
+                    out.append(
+                        {
+                            "date": str(d),
+                            "symbol_count": n,
+                            "pct_of_universe": round((n / total_symbols) * 100.0, 1),
+                        }
+                    )
+                daily_section["fill_by_date"] = out
+            else:
+                daily_section["fill_by_date"] = []
+
+            # Always recompute snapshot_fill_by_date from MarketSnapshotHistory (ledger).
+            if sym_set and total_symbols > 0:
+                rows = (
+                    db.query(
+                        func.date(MarketSnapshotHistory.as_of_date).label("d"),
+                        func.count(distinct(MarketSnapshotHistory.symbol)).label("symbol_count"),
+                    )
+                    .filter(
+                        MarketSnapshotHistory.analysis_type == "technical_snapshot",
+                        MarketSnapshotHistory.symbol.in_(sym_set),
+                        MarketSnapshotHistory.as_of_date >= start_dt,
+                    )
+                    .group_by(func.date(MarketSnapshotHistory.as_of_date))
+                    .order_by(func.date(MarketSnapshotHistory.as_of_date).asc())
+                    .all()
+                )
+                out: List[Dict[str, Any]] = []
+                for d, symbol_count in rows:
+                    if not d:
+                        continue
+                    n = int(symbol_count or 0)
+                    out.append(
+                        {
+                            "date": str(d),
+                            "symbol_count": n,
+                            "pct_of_universe": round((n / total_symbols) * 100.0, 1),
+                        }
+                    )
+                daily_section["snapshot_fill_by_date"] = out
+            else:
+                daily_section["snapshot_fill_by_date"] = []
 
             snapshot["daily"] = daily_section
         except Exception:
@@ -1167,8 +1264,16 @@ async def get_coverage(
             "kpis": _kpi_cards(),
             "backfill_5m_enabled": backfill_5m_enabled,
             # Fill series windows (backend-owned defaults; frontend should not hardcode).
-            "fill_lookback_days": int(getattr(settings, "COVERAGE_FILL_LOOKBACK_DAYS", 90)),
-            "fill_trading_days_window": int(getattr(settings, "COVERAGE_FILL_TRADING_DAYS_WINDOW", 50)),
+            "fill_lookback_days": int(
+                int(fill_lookback_days)
+                if fill_lookback_days is not None
+                else getattr(settings, "COVERAGE_FILL_LOOKBACK_DAYS", 90)
+            ),
+            "fill_trading_days_window": int(
+                int(fill_trading_days_window)
+                if fill_trading_days_window is not None
+                else getattr(settings, "COVERAGE_FILL_TRADING_DAYS_WINDOW", 50)
+            ),
         }
         return snapshot
     except Exception as e:
