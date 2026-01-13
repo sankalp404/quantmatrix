@@ -773,7 +773,7 @@ def backfill_daily_since_date(since_date: str = "2021-01-01", batch_size: int = 
 # ============================= Coverage Restore (Daily, Tracked Universe) =============================
 @shared_task(name="backend.tasks.market_data_tasks.bootstrap_daily_coverage_tracked")
 @task_run("bootstrap_daily_coverage_tracked", lock_key=lambda: "bootstrap_daily_coverage_tracked")
-def bootstrap_daily_coverage_tracked(history_days: int = 200, history_batch_size: int = 25) -> dict:
+def bootstrap_daily_coverage_tracked(history_days: int = 5, history_batch_size: int = 25) -> dict:
     """Restore DAILY coverage for the tracked universe (no 5m).
 
     Steps:
@@ -781,7 +781,7 @@ def bootstrap_daily_coverage_tracked(history_days: int = 200, history_batch_size
     - Update tracked universe cache (tracked:all)
     - Backfill last ~200 daily bars for tracked universe
     - Recompute indicators for tracked universe
-    - Backfill snapshot history (last 200 trading days) into MarketSnapshotHistory
+    - Backfill snapshot history (rolling window; default last 5 trading days) into MarketSnapshotHistory
     - Refresh coverage cache (monitor_coverage_health)
     """
 

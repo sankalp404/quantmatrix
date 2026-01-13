@@ -14,6 +14,7 @@ vi.mock('../../hooks/useUserPreferences', () => ({
     currency: 'USD',
     timezone: 'UTC',
     tableDensity: 'comfortable',
+    coverageHistogramWindowDays: 50,
   }),
 }));
 
