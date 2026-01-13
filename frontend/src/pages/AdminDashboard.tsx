@@ -262,7 +262,12 @@ const AdminDashboard: React.FC = () => {
         `history ${d.latest_snapshot_history_date || '—'} ${d.latest_snapshot_history_symbol_count || 0}/${d.tracked_total || 0} (${d.latest_snapshot_history_fill_pct || 0}%)`,
       );
     } catch (err: any) {
-      toast.error(err?.response?.data?.detail || err?.message || 'Sanity check failed');
+      const status = Number(err?.response?.status || 0);
+      if (status === 404) {
+        toast.error('Sanity check endpoint not found. Restart backend: make up');
+      } else {
+        toast.error(err?.response?.data?.detail || err?.message || 'Sanity check failed');
+      }
     } finally {
       setSanityLoading(false);
     }
@@ -603,8 +608,15 @@ const AdminDashboard: React.FC = () => {
                 </Box>
 
                 <Box mt={3} display="flex" flexDirection="column" gap={3}>
-                  <Box>
-                    <Text fontSize="xs" fontWeight="semibold" color="fg.default" mb={1}>
+                  <Box
+                    borderWidth="1px"
+                    borderColor="border.subtle"
+                    borderRadius="md"
+                    bg="bg.card"
+                    px={3}
+                    py={2}
+                  >
+                    <Text fontSize="xs" fontWeight="semibold" color="fg.default" mb={2}>
                       Universe
                     </Text>
                     <Box display="flex" gap={2} flexWrap="wrap">
@@ -617,8 +629,15 @@ const AdminDashboard: React.FC = () => {
                     </Box>
                   </Box>
 
-                  <Box>
-                    <Text fontSize="xs" fontWeight="semibold" color="fg.default" mb={1}>
+                  <Box
+                    borderWidth="1px"
+                    borderColor="border.subtle"
+                    borderRadius="md"
+                    bg="bg.card"
+                    px={3}
+                    py={2}
+                  >
+                    <Text fontSize="xs" fontWeight="semibold" color="fg.default" mb={2}>
                       Daily
                     </Text>
                     <Box display="flex" gap={2} flexWrap="wrap">
@@ -634,8 +653,15 @@ const AdminDashboard: React.FC = () => {
                     </Box>
                   </Box>
 
-                  <Box>
-                    <Text fontSize="xs" fontWeight="semibold" color="fg.default" mb={1}>
+                  <Box
+                    borderWidth="1px"
+                    borderColor="border.subtle"
+                    borderRadius="md"
+                    bg="bg.card"
+                    px={3}
+                    py={2}
+                  >
+                    <Text fontSize="xs" fontWeight="semibold" color="fg.default" mb={2}>
                       History
                     </Text>
                     <Box display="flex" gap={2} flexWrap="wrap">
@@ -674,8 +700,15 @@ const AdminDashboard: React.FC = () => {
                     </Box>
                   </Box>
 
-                  <Box>
-                    <Text fontSize="xs" fontWeight="semibold" color="fg.default" mb={1}>
+                  <Box
+                    borderWidth="1px"
+                    borderColor="border.subtle"
+                    borderRadius="md"
+                    bg="bg.card"
+                    px={3}
+                    py={2}
+                  >
+                    <Text fontSize="xs" fontWeight="semibold" color="fg.default" mb={2}>
                       Diagnostics
                     </Text>
                     <Box display="flex" gap={2} flexWrap="wrap">
