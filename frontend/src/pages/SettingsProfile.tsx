@@ -76,126 +76,128 @@ const SettingsProfile: React.FC = () => {
   };
 
   return (
-    <Box>
-      <PageHeader title="Profile" subtitle="Update your personal info and security settings." />
-      <VStack align="stretch" gap={4}>
-        <AppCard>
-          <VStack align="stretch" gap={4}>
-            <Text fontWeight="semibold">Account</Text>
-            <HStack gap={4} align="start" flexWrap="wrap">
-              <Box minW={{ base: "100%", md: "280px" }}>
-                <Text fontSize="sm" color="fg.muted" mb={1}>Username</Text>
-                <Input value={user?.username || ''} disabled />
-              </Box>
-              <Box flex="1" minW={{ base: "100%", md: "320px" }}>
-                <Text fontSize="sm" color="fg.muted" mb={1}>Full name</Text>
-                <Input value={fullName} onChange={(e) => setFullName(e.target.value)} placeholder="Your name" />
-              </Box>
-            </HStack>
+    <Box w="full">
+      <Box w="full" maxW="960px" mx="auto">
+        <PageHeader title="Profile" subtitle="Update your personal info and security settings." />
+        <VStack align="stretch" gap={4}>
+          <AppCard>
+            <VStack align="stretch" gap={4}>
+              <Text fontWeight="semibold">Account</Text>
+              <HStack gap={4} align="start" flexWrap="wrap">
+                <Box minW={{ base: "100%", md: "280px" }}>
+                  <Text fontSize="sm" color="fg.muted" mb={1}>Username</Text>
+                  <Input value={user?.username || ''} disabled />
+                </Box>
+                <Box flex="1" minW={{ base: "100%", md: "320px" }}>
+                  <Text fontSize="sm" color="fg.muted" mb={1}>Full name</Text>
+                  <Input value={fullName} onChange={(e) => setFullName(e.target.value)} placeholder="Your name" />
+                </Box>
+              </HStack>
 
-            <HStack gap={4} align="start" flexWrap="wrap">
-              <Box flex="1" minW={{ base: "100%", md: "320px" }}>
-                <Text fontSize="sm" color="fg.muted" mb={1}>Email</Text>
-                <Input value={email} onChange={(e) => setEmail(e.target.value)} placeholder="name@domain.com" />
-              </Box>
-              {user?.has_password ? (
+              <HStack gap={4} align="start" flexWrap="wrap">
+                <Box flex="1" minW={{ base: "100%", md: "320px" }}>
+                  <Text fontSize="sm" color="fg.muted" mb={1}>Email</Text>
+                  <Input value={email} onChange={(e) => setEmail(e.target.value)} placeholder="name@domain.com" />
+                </Box>
+                {user?.has_password ? (
+                  <Box minW={{ base: "100%", md: "320px" }}>
+                    <Text fontSize="sm" color="fg.muted" mb={1}>Current password (required to change email)</Text>
+                    <InputGroup
+                      endElement={
+                        <IconButton
+                          aria-label={showPw ? 'Hide password' : 'Show password'}
+                          size="sm"
+                          variant="ghost"
+                          onClick={() => setShowPw(!showPw)}
+                        >
+                          {showPw ? <FiEyeOff /> : <FiEye />}
+                        </IconButton>
+                      }
+                    >
+                      <Input
+                        aria-label="Current password for email change"
+                        type={showPw ? 'text' : 'password'}
+                        value={currentPasswordForEmail}
+                        onChange={(e) => setCurrentPasswordForEmail(e.target.value)}
+                        placeholder="Email change password"
+                      />
+                    </InputGroup>
+                  </Box>
+                ) : null}
+              </HStack>
+
+              <HStack justify="flex-end">
+                <Button loading={savingProfile} onClick={saveProfile}>
+                  Save changes
+                </Button>
+              </HStack>
+            </VStack>
+          </AppCard>
+
+          <AppCard>
+            <VStack align="stretch" gap={4}>
+              <Text fontWeight="semibold">Password</Text>
+              <Text fontSize="sm" color="fg.muted">
+                {user?.has_password
+                  ? 'Change your password.'
+                  : 'No password is set for this account yet. Set one to enable password-based login.'}
+              </Text>
+              <HStack gap={4} align="start" flexWrap="wrap">
+                {user?.has_password ? (
+                  <Box minW={{ base: "100%", md: "320px" }}>
+                    <Text fontSize="sm" color="fg.muted" mb={1}>Current password</Text>
+                    <Input
+                      aria-label="Current password for password change"
+                      type="password"
+                      value={currentPassword}
+                      onChange={(e) => setCurrentPassword(e.target.value)}
+                      placeholder="Current password"
+                    />
+                  </Box>
+                ) : null}
                 <Box minW={{ base: "100%", md: "320px" }}>
-                  <Text fontSize="sm" color="fg.muted" mb={1}>Current password (required to change email)</Text>
+                  <Text fontSize="sm" color="fg.muted" mb={1}>New password</Text>
                   <InputGroup
                     endElement={
                       <IconButton
-                        aria-label={showPw ? 'Hide password' : 'Show password'}
+                        aria-label={showNewPw ? 'Hide password' : 'Show password'}
                         size="sm"
                         variant="ghost"
-                        onClick={() => setShowPw(!showPw)}
+                        onClick={() => setShowNewPw(!showNewPw)}
                       >
-                        {showPw ? <FiEyeOff /> : <FiEye />}
+                        {showNewPw ? <FiEyeOff /> : <FiEye />}
                       </IconButton>
                     }
                   >
                     <Input
-                      aria-label="Current password for email change"
-                      type={showPw ? 'text' : 'password'}
-                      value={currentPasswordForEmail}
-                      onChange={(e) => setCurrentPasswordForEmail(e.target.value)}
-                      placeholder="Email change password"
+                      type={showNewPw ? 'text' : 'password'}
+                      value={newPassword}
+                      onChange={(e) => setNewPassword(e.target.value)}
+                      placeholder="At least 8 characters"
                     />
                   </InputGroup>
                 </Box>
-              ) : null}
-            </HStack>
-
-            <HStack justify="flex-end">
-              <Button loading={savingProfile} onClick={saveProfile}>
-                Save changes
-              </Button>
-            </HStack>
-          </VStack>
-        </AppCard>
-
-        <AppCard>
-          <VStack align="stretch" gap={4}>
-            <Text fontWeight="semibold">Password</Text>
-            <Text fontSize="sm" color="fg.muted">
-              {user?.has_password
-                ? 'Change your password.'
-                : 'No password is set for this account yet. Set one to enable password-based login.'}
-            </Text>
-            <HStack gap={4} align="start" flexWrap="wrap">
-              {user?.has_password ? (
                 <Box minW={{ base: "100%", md: "320px" }}>
-                  <Text fontSize="sm" color="fg.muted" mb={1}>Current password</Text>
-                  <Input
-                    aria-label="Current password for password change"
-                    type="password"
-                    value={currentPassword}
-                    onChange={(e) => setCurrentPassword(e.target.value)}
-                    placeholder="Current password"
-                  />
-                </Box>
-              ) : null}
-              <Box minW={{ base: "100%", md: "320px" }}>
-                <Text fontSize="sm" color="fg.muted" mb={1}>New password</Text>
-                <InputGroup
-                  endElement={
-                    <IconButton
-                      aria-label={showNewPw ? 'Hide password' : 'Show password'}
-                      size="sm"
-                      variant="ghost"
-                      onClick={() => setShowNewPw(!showNewPw)}
-                    >
-                      {showNewPw ? <FiEyeOff /> : <FiEye />}
-                    </IconButton>
-                  }
-                >
+                  <Text fontSize="sm" color="fg.muted" mb={1}>Confirm new password</Text>
                   <Input
                     type={showNewPw ? 'text' : 'password'}
-                    value={newPassword}
-                    onChange={(e) => setNewPassword(e.target.value)}
-                    placeholder="At least 8 characters"
+                    value={confirmPassword}
+                    onChange={(e) => setConfirmPassword(e.target.value)}
+                    placeholder="Repeat new password"
                   />
-                </InputGroup>
-              </Box>
-              <Box minW={{ base: "100%", md: "320px" }}>
-                <Text fontSize="sm" color="fg.muted" mb={1}>Confirm new password</Text>
-                <Input
-                  type={showNewPw ? 'text' : 'password'}
-                  value={confirmPassword}
-                  onChange={(e) => setConfirmPassword(e.target.value)}
-                  placeholder="Repeat new password"
-                />
-              </Box>
-            </HStack>
+                </Box>
+              </HStack>
 
-            <AppDivider />
-            <HStack justify="flex-end">
-              <Button loading={savingPassword} onClick={savePassword}>
-                {user?.has_password ? 'Change password' : 'Set password'}
-              </Button>
-            </HStack>
-          </VStack>
-        </AppCard>
-      </VStack>
+              <AppDivider />
+              <HStack justify="flex-end">
+                <Button loading={savingPassword} onClick={savePassword}>
+                  {user?.has_password ? 'Change password' : 'Set password'}
+                </Button>
+              </HStack>
+            </VStack>
+          </AppCard>
+        </VStack>
+      </Box>
     </Box>
   );
 };

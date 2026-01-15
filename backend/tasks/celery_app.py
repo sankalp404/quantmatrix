@@ -60,6 +60,8 @@ MARKET_DATA_BEAT_SCHEDULE = {
         "task": "backend.tasks.market_data_tasks.bootstrap_daily_coverage_tracked",
         "schedule": crontab(hour=3, minute=0),
         "args": (),
+        # Nightly should be fast: keep snapshot history refresh to a small rolling window.
+        "kwargs": {"history_days": 5, "history_batch_size": 25},
     },
     "monitor-coverage-health-hourly": {
         "task": "backend.tasks.market_data_tasks.monitor_coverage_health",

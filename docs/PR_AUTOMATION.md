@@ -27,6 +27,7 @@ Recommended workflow for an agent change-set:
     - Creates an `agent/<type>/...` branch
     - Commits and pushes
     - Opens a **Draft** PR with the standard PR template
+    - Guardrail: refuses to start a new PR if you are currently on an `agent/**` branch whose PR is not merged
 
 Automatic PR opening (on push)
 ------------------------------

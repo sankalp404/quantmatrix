@@ -118,6 +118,11 @@ const AdminSchedules: React.FC = () => {
     load();
   }, []);
 
+  const openPreset = (preset: { name: string; task: string; cron: string; timezone: string }) => {
+    setForm(preset);
+    setCreateOpen(true);
+  };
+
   return (
     <Box p={0}>
       <HStack justify="space-between" mb={3}>
@@ -126,6 +131,22 @@ const AdminSchedules: React.FC = () => {
           <Text fontSize="sm" color="fg.muted">
             Manage Celery beat schedules (RedBeat). Create, pause/resume, run-now, and delete.
           </Text>
+          <HStack mt={2} gap={2} flexWrap="wrap">
+            <Button
+              size="xs"
+              variant="outline"
+              onClick={() =>
+                openPreset({
+                  name: 'restore-daily-coverage-tracked',
+                  task: 'backend.tasks.market_data_tasks.bootstrap_daily_coverage_tracked',
+                  cron: '0 3 * * *',
+                  timezone: 'UTC',
+                })
+              }
+            >
+              Preset: Nightly Restore (Tracked) + History (5d)
+            </Button>
+          </HStack>
         </Box>
         <HStack gap={2}>
           <Button size="sm" variant="outline" onClick={() => setCreateOpen(true)}>

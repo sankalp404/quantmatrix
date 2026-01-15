@@ -15,6 +15,8 @@ import { triggerTaskByName } from '../utils/taskActions';
 import useCoverageSnapshot from '../hooks/useCoverageSnapshot';
 import { useUserPreferences } from '../hooks/useUserPreferences';
 import { formatDateTime } from '../utils/format';
+import { authApi, handleApiError } from '../services/api';
+import { useAuthOptional } from '../context/AuthContext';
 import {
   CoverageBucketsGrid,
   CoverageKpiGrid,
@@ -23,17 +25,62 @@ import {
 } from '../components/coverage/CoverageSummaryCard';
 
 const AdminDashboard: React.FC = () => {
-  const { timezone } = useUserPreferences();
+  const auth = useAuthOptional();
+  const user = auth?.user ?? null;
+  const refreshMe = auth?.refreshMe;
+  const { timezone, coverageHistogramWindowDays } = useUserPreferences();
   const [backfill5mEnabled, setBackfill5mEnabled] = React.useState<boolean>(true);
   const [toggling5m, setToggling5m] = React.useState<boolean>(false);
   const [refreshingCoverage, setRefreshingCoverage] = React.useState<boolean>(false);
   const [restoringDaily, setRestoringDaily] = React.useState<boolean>(false);
   const [backfillingStale, setBackfillingStale] = React.useState<boolean>(false);
+  const [backfillingSnapshotHistory, setBackfillingSnapshotHistory] = React.useState<boolean>(false);
+  const [backfillingDailyPeriod, setBackfillingDailyPeriod] = React.useState<boolean>(false);
+  const [snapshotHistoryPeriod, setSnapshotHistoryPeriod] = React.useState<'6mo' | '1y' | '2y' | '5y' | 'max'>('1y');
   const [advancedOpen, setAdvancedOpen] = React.useState<boolean>(false);
   const [sendingDiscord, setSendingDiscord] = React.useState<boolean>(false);
+  const [sanityLoading, setSanityLoading] = React.useState<boolean>(false);
   const [taskStatus, setTaskStatus] = React.useState<Record<string, any> | null>(null);
-  const { snapshot: coverage, refresh: refreshCoverage, sparkline, kpis, actions: coverageActions, hero } = useCoverageSnapshot();
+  const [histWindowDays, setHistWindowDays] = React.useState<number>(
+    coverageHistogramWindowDays || 50,
+  );
+  const [sinceDate, setSinceDate] = React.useState<string>('2021-01-01');
+  const fillLookbackDays = React.useMemo(() => Math.max(90, histWindowDays * 3), [histWindowDays]);
+  const { snapshot: coverage, refresh: refreshCoverage, sparkline, kpis, actions: coverageActions, hero } = useCoverageSnapshot({
+    fillTradingDaysWindow: histWindowDays,
+    fillLookbackDays,
+  });
   const autoRefreshAttemptedRef = React.useRef(false);
+
+  React.useEffect(() => {
+    // Preference wins; otherwise fall back to backend-provided default window.
+    if (coverageHistogramWindowDays && coverageHistogramWindowDays !== histWindowDays) {
+      setHistWindowDays(coverageHistogramWindowDays);
+      return;
+    }
+    if (!coverageHistogramWindowDays) {
+      const backendDefault = Number((coverage as any)?.meta?.fill_trading_days_window ?? NaN);
+      if (Number.isFinite(backendDefault) && backendDefault > 0 && backendDefault !== histWindowDays) {
+        setHistWindowDays(backendDefault);
+      }
+    }
+  }, [coverageHistogramWindowDays, (coverage as any)?.meta?.fill_trading_days_window]);
+
+  const saveHistogramWindowPref = async (next: number) => {
+    try {
+      if (!user || typeof refreshMe !== 'function') return;
+      const existing = (user?.ui_preferences && typeof user.ui_preferences === 'object') ? user.ui_preferences : {};
+      await authApi.updateMe({
+        ui_preferences: {
+          ...existing,
+          coverage_histogram_window_days: next,
+        },
+      });
+      await refreshMe();
+    } catch (e) {
+      toast.error(handleApiError(e));
+    }
+  };
 
   React.useEffect(() => {
     if (coverage?.meta?.backfill_5m_enabled !== undefined) {
@@ -111,6 +158,76 @@ const AdminDashboard: React.FC = () => {
     }
   };
 
+  const snapshotHistoryDaysForPeriod = (p: '6mo' | '1y' | '2y' | '5y' | 'max'): number => {
+    // Snapshot history backfill is DB-only and uses *trading days*.
+    // We keep period labels in UI because that’s what operators think in; map to standard approximations.
+    if (p === '6mo') return 126;
+    if (p === '1y') return 252;
+    if (p === '2y') return 504;
+    if (p === '5y') return 1260;
+    return 3000; // max (bounded by backend)
+  };
+
+  const backfillSnapshotHistoryPeriod = async () => {
+    if (backfillingSnapshotHistory) return;
+    setBackfillingSnapshotHistory(true);
+    try {
+      const days = snapshotHistoryDaysForPeriod(snapshotHistoryPeriod);
+      const tracked = Number((coverage as any)?.tracked_count ?? totalSymbols ?? 0) || 0;
+      const estimatedRows = tracked ? tracked * days : null;
+      await api.post(`/market-data/admin/snapshots/history/backfill-last-n-days?days=${days}`);
+      toast.success(
+        estimatedRows
+          ? `Snapshot history (${snapshotHistoryPeriod}) queued (~${estimatedRows.toLocaleString()} rows). Track progress in Admin → Jobs.`
+          : `Snapshot history (${snapshotHistoryPeriod}) queued. Track progress in Admin → Jobs.`,
+      );
+      setTimeout(() => void refreshCoverage(), 1500);
+      setTimeout(() => void refreshCoverage(), 4500);
+      void loadTaskStatus();
+    } catch (err: any) {
+      toast.error(err?.response?.data?.detail || err?.message || 'Failed to queue snapshot history backfill');
+    } finally {
+      setBackfillingSnapshotHistory(false);
+    }
+  };
+
+  const backfillDailyBarsPeriod = async () => {
+    if (backfillingDailyPeriod) return;
+    setBackfillingDailyPeriod(true);
+    try {
+      const days = snapshotHistoryDaysForPeriod(snapshotHistoryPeriod);
+      await api.post(`/market-data/admin/backfill/daily-last-bars?days=${days}`);
+      toast.success(`Daily bars (${snapshotHistoryPeriod}) queued. Track progress in Admin → Jobs.`);
+      setTimeout(() => void refreshCoverage(), 1500);
+      setTimeout(() => void refreshCoverage(), 4500);
+      void loadTaskStatus();
+    } catch (err: any) {
+      toast.error(err?.response?.data?.detail || err?.message || 'Failed to queue daily bars backfill');
+    } finally {
+      setBackfillingDailyPeriod(false);
+    }
+  };
+
+  const backfillDailySinceDate = async () => {
+    try {
+      await api.post(`/market-data/admin/backfill/daily-since-date?since_date=${encodeURIComponent(sinceDate)}&batch_size=25`);
+      toast.success(`Queued daily backfill since ${sinceDate}`);
+      void loadTaskStatus();
+    } catch (err: any) {
+      toast.error(err?.response?.data?.detail || err?.message || 'Failed to queue daily backfill since date');
+    }
+  };
+
+  const backfillSnapshotHistorySinceDate = async () => {
+    try {
+      await api.post(`/market-data/admin/snapshots/history/backfill-last-n-days?days=3000&since_date=${encodeURIComponent(sinceDate)}`);
+      toast.success(`Queued snapshot history backfill since ${sinceDate}`);
+      void loadTaskStatus();
+    } catch (err: any) {
+      toast.error(err?.response?.data?.detail || err?.message || 'Failed to queue snapshot history backfill since date');
+    }
+  };
+
   const runNamedTask = async (taskName: string, label?: string) => {
     // Special-case: schedule coverage monitor as an hourly beat entry
     if (taskName === 'schedule_coverage_monitor') {
@@ -149,6 +266,28 @@ const AdminDashboard: React.FC = () => {
       toast.error(err?.response?.data?.detail || err?.message || 'Failed to send digest to Discord');
     } finally {
       setSendingDiscord(false);
+    }
+  };
+
+  const runSanityCheck = async () => {
+    if (sanityLoading) return;
+    setSanityLoading(true);
+    try {
+      const res = await api.get('/market-data/admin/sanity/coverage');
+      const d = res?.data || {};
+      toast.success(
+        `Sanity: daily ${d.latest_daily_date || '—'} ${d.latest_daily_symbol_count || 0}/${d.tracked_total || 0}; ` +
+        `history ${d.latest_snapshot_history_date || '—'} ${d.latest_snapshot_history_symbol_count || 0}/${d.tracked_total || 0} (${d.latest_snapshot_history_fill_pct || 0}%)`,
+      );
+    } catch (err: any) {
+      const status = Number(err?.response?.status || 0);
+      if (status === 404) {
+        toast.error('Sanity check endpoint not found. Restart backend: make up');
+      } else {
+        toast.error(err?.response?.data?.detail || err?.message || 'Sanity check failed');
+      }
+    } finally {
+      setSanityLoading(false);
     }
   };
 
@@ -223,6 +362,14 @@ const AdminDashboard: React.FC = () => {
     const { rows, newestDate, total } = dailyFillDist;
     if (!rows.length || !newestDate || !total) return null;
 
+    const normDateKey = (d: any) => {
+      if (!d) return '';
+      // Be resilient to backend variations (date vs datetime strings).
+      // We only care about the YYYY-MM-DD part for histogram alignment.
+      const s = String(d);
+      return s.length >= 10 ? s.slice(0, 10) : s;
+    };
+
     const pctFor = (row: { pct_of_universe: number }) => Number(row?.pct_of_universe || 0);
     const colorForPct = (pct: number) => {
       // HSL: red(0) -> green(120), driven by % (height)
@@ -232,9 +379,11 @@ const AdminDashboard: React.FC = () => {
     };
 
     const barMaxH = 36;
-      const dotH = 8; // dot + spacing below bar
-    const fillMap = new Map(rows.map((r) => [r.date, r]));
-    const snapshotPctByDate = new Map((snapshotFillSeries || []).map((r) => [r.date, Number(r.pct_of_universe || 0)]));
+    const dotH = 8; // dot + spacing below bar
+    const fillMap = new Map(rows.map((r) => [normDateKey(r.date), r]));
+    const snapshotPctByDate = new Map(
+      (snapshotFillSeries || []).map((r) => [normDateKey(r.date), Number(r.pct_of_universe || 0)]),
+    );
 
     // Trading-day series: use the last N observed dates in fill_by_date.
     // This naturally excludes weekends/holidays (no OHLCV rows expected) and avoids confusing gaps.
@@ -247,7 +396,7 @@ const AdminDashboard: React.FC = () => {
       .reverse() // oldest-first
       .slice(-windowDays) // keep last N trading days
       .map((r) => ({
-        date: r.date,
+        date: normDateKey(r.date),
         symbol_count: Number(r.symbol_count || 0),
         pct_of_universe: Number(r.pct_of_universe || 0),
       }));
@@ -264,11 +413,11 @@ const AdminDashboard: React.FC = () => {
           overflowX="auto"
           overflowY="hidden"
         >
-            <HStack align="end" gap={1} h={`${barMaxH + dotH}px`} w="full">
+          <HStack align="end" gap={1} h={`${barMaxH + dotH}px`} w="full">
             {bars.map((r) => {
               const pct = pctFor(r);
               const h = Math.max(2, Math.round((pct / 100) * barMaxH));
-              const snapPct = snapshotPctByDate.get(r.date);
+              const snapPct = snapshotPctByDate.get(normDateKey(r.date));
               const snapOk = typeof snapPct === 'number' && snapPct >= 95;
               const snapNone = typeof snapPct !== 'number';
               // Dot thresholds: green = basically complete, orange = partial, red = low coverage, gray = no snapshot run recorded.
@@ -336,6 +485,31 @@ const AdminDashboard: React.FC = () => {
                       : 'No daily bars found'}
                   </Text>
                 </Box>
+                <HStack gap={2} align="center">
+                  <Text fontSize="xs" color="fg.muted">
+                    Window
+                  </Text>
+                  <select
+                    value={histWindowDays}
+                    onChange={(e) => {
+                      const next = Number(e.target.value);
+                      setHistWindowDays(next);
+                      void saveHistogramWindowPref(next);
+                    }}
+                    style={{
+                      fontSize: 12,
+                      padding: '6px 8px',
+                      borderRadius: 10,
+                      border: '1px solid var(--chakra-colors-border-subtle)',
+                      background: 'var(--chakra-colors-bg-input)',
+                      color: 'var(--chakra-colors-fg-default)',
+                    }}
+                  >
+                    <option value={50}>50d</option>
+                    <option value={100}>100d</option>
+                    <option value={200}>200d</option>
+                  </select>
+                </HStack>
                 <Badge variant="subtle" colorScheme="green">
                   {dailyFillDist.total > 0
                     ? `${Math.round((dailyFillDist.newestPct || 0) * 10) / 10}% filled on newest`
@@ -410,22 +584,173 @@ const AdminDashboard: React.FC = () => {
                 <Text fontSize="xs" color="fg.muted" mb={2}>
                   Advanced controls (use when debugging). These are more granular and may be slower/noisier.
                 </Text>
-                <Box display="flex" gap={2} flexWrap="wrap">
-                  <Button size="xs" variant="outline" onClick={() => void runNamedTask('refresh_index_constituents', 'Refresh constituents')}>
-                    Refresh Constituents
-                  </Button>
-                  <Button size="xs" variant="outline" onClick={() => void runNamedTask('update_tracked_symbol_cache', 'Update tracked')}>
-                    Update Tracked
-                  </Button>
-                  <Button size="xs" variant="outline" onClick={() => void runNamedTask('recompute_indicators_universe', 'Recompute indicators')}>
-                    Recompute Indicators (Market Snapshot)
-                  </Button>
-                  <Button size="xs" variant="outline" onClick={() => void runNamedTask('record_daily_history', 'Record history')}>
-                    Record History
-                  </Button>
-                  <Button size="xs" variant="outline" loading={sendingDiscord} onClick={() => void sendSnapshotDigestToDiscord()}>
-                    Send Snapshot Digest to Discord
-                  </Button>
+                <Box mb={2}>
+                  <Text fontSize="xs" color="fg.muted">
+                    Operator guidance:
+                  </Text>
+                  <Box as="ul" pl={4} mt={1} color="fg.muted" fontSize="xs">
+                    <Box as="li">Use <b>Restore Daily Coverage</b> after missing days (it catches up daily + recomputes indicators).</Box>
+                    <Box as="li">Use <b>Snapshot History</b> backfills for analytics/backtesting (since-date for deep repairs, period for rolling windows).</Box>
+                    <Box as="li">Use <b>Sanity Check (DB)</b> to verify latest daily + snapshot-history counts without relying on cache.</Box>
+                  </Box>
+                </Box>
+                <Box mt={3} display="flex" flexDirection="column" gap={3}>
+                  <Box
+                    borderWidth="1px"
+                    borderColor="border.subtle"
+                    borderRadius="md"
+                    bg="bg.card"
+                    px={3}
+                    py={2}
+                  >
+                    <Text fontSize="xs" fontWeight="semibold" color="fg.default" mb={2}>
+                      Universe
+                    </Text>
+                    <Box display="flex" gap={2} flexWrap="wrap">
+                      <Button size="xs" variant="outline" onClick={() => void runNamedTask('refresh_index_constituents', 'Refresh constituents')}>
+                        Refresh Constituents
+                      </Button>
+                      <Button size="xs" variant="outline" onClick={() => void runNamedTask('update_tracked_symbol_cache', 'Update tracked')}>
+                        Update Tracked
+                      </Button>
+                    </Box>
+                  </Box>
+
+                  <Box
+                    borderWidth="1px"
+                    borderColor="border.subtle"
+                    borderRadius="md"
+                    bg="bg.card"
+                    px={3}
+                    py={2}
+                  >
+                    <Text fontSize="xs" fontWeight="semibold" color="fg.default" mb={2}>
+                      Backfills (since)
+                    </Text>
+                    <Box display="flex" gap={2} flexWrap="wrap">
+                      <HStack gap={2} flexWrap="wrap" align="center">
+                        <Text fontSize="xs" color="fg.muted">
+                          Since date
+                        </Text>
+                        <input
+                          type="date"
+                          value={sinceDate}
+                          onChange={(e) => setSinceDate(e.target.value)}
+                          style={{
+                            fontSize: 12,
+                            padding: '6px 8px',
+                            borderRadius: 10,
+                            border: '1px solid var(--chakra-colors-border-subtle)',
+                            background: 'var(--chakra-colors-bg-input)',
+                            color: 'var(--chakra-colors-fg-default)',
+                          }}
+                        />
+                      </HStack>
+                      <Button size="xs" variant="outline" onClick={() => void backfillDailySinceDate()}>
+                        Backfill Daily Bars (since)
+                      </Button>
+                      <Button size="xs" variant="outline" onClick={() => void backfillSnapshotHistorySinceDate()}>
+                        Backfill Snapshot History (since)
+                      </Button>
+                    </Box>
+                  </Box>
+
+                  <Box
+                    borderWidth="1px"
+                    borderColor="border.subtle"
+                    borderRadius="md"
+                    bg="bg.card"
+                    px={3}
+                    py={2}
+                  >
+                    <Text fontSize="xs" fontWeight="semibold" color="fg.default" mb={2}>
+                      Backfills (period)
+                    </Text>
+                    <Box display="flex" gap={2} flexWrap="wrap">
+                      <HStack gap={2} flexWrap="wrap">
+                        <Text fontSize="xs" color="fg.muted">
+                          Period
+                        </Text>
+                        <select
+                          aria-label="Snapshot history period"
+                          value={snapshotHistoryPeriod}
+                          onChange={(e) => setSnapshotHistoryPeriod(e.target.value as any)}
+                          style={{
+                            fontSize: 12,
+                            padding: '6px 8px',
+                            borderRadius: 10,
+                            border: '1px solid var(--chakra-colors-border-subtle)',
+                            background: 'var(--chakra-colors-bg-input)',
+                            color: 'var(--chakra-colors-fg-default)',
+                          }}
+                        >
+                          <option value="6mo">6mo (~126d)</option>
+                          <option value="1y">1y (~252d)</option>
+                          <option value="2y">2y (~504d)</option>
+                          <option value="5y">5y (~1260d)</option>
+                          <option value="max">max (≤3000d)</option>
+                        </select>
+                        <Button
+                          size="xs"
+                          variant="outline"
+                          loading={backfillingDailyPeriod}
+                          onClick={() => void backfillDailyBarsPeriod()}
+                        >
+                          Backfill Daily Bars (period)
+                        </Button>
+                        <Button
+                          size="xs"
+                          variant="outline"
+                          loading={backfillingSnapshotHistory}
+                          onClick={() => void backfillSnapshotHistoryPeriod()}
+                        >
+                          Backfill Snapshot History (period)
+                        </Button>
+                      </HStack>
+                    </Box>
+                  </Box>
+
+                  <Box
+                    borderWidth="1px"
+                    borderColor="border.subtle"
+                    borderRadius="md"
+                    bg="bg.card"
+                    px={3}
+                    py={2}
+                  >
+                    <Text fontSize="xs" fontWeight="semibold" color="fg.default" mb={2}>
+                      Compute
+                    </Text>
+                    <Box display="flex" gap={2} flexWrap="wrap">
+                      <Button size="xs" variant="outline" onClick={() => void runNamedTask('recompute_indicators_universe', 'Recompute indicators')}>
+                        Recompute Indicators (Market Snapshot)
+                      </Button>
+                      <Button size="xs" variant="outline" onClick={() => void runNamedTask('record_daily_history', 'Record history')}>
+                        Record History
+                      </Button>
+                    </Box>
+                  </Box>
+
+                  <Box
+                    borderWidth="1px"
+                    borderColor="border.subtle"
+                    borderRadius="md"
+                    bg="bg.card"
+                    px={3}
+                    py={2}
+                  >
+                    <Text fontSize="xs" fontWeight="semibold" color="fg.default" mb={2}>
+                      Diagnostics
+                    </Text>
+                    <Box display="flex" gap={2} flexWrap="wrap">
+                      <Button size="xs" variant="outline" loading={sanityLoading} onClick={() => void runSanityCheck()}>
+                        Sanity Check (DB)
+                      </Button>
+                      <Button size="xs" variant="outline" loading={sendingDiscord} onClick={() => void sendSnapshotDigestToDiscord()}>
+                        Send Snapshot Digest to Discord
+                      </Button>
+                    </Box>
+                  </Box>
                 </Box>
               </Box>
             ) : null}

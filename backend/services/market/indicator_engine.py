@@ -96,6 +96,53 @@ def compute_core_indicators(data_oldest_first: pd.DataFrame) -> Dict[str, Any]:
     return out
 
 
+def compute_core_indicators_series(data_oldest_first: pd.DataFrame) -> pd.DataFrame:
+    """Compute core indicator *series* (vectorized) over the full time index.
+
+    Returns a DataFrame indexed like `data_oldest_first` with columns aligned to our snapshot schema:
+    - SMA: sma_5/8/14/21/50/100/150/200
+    - EMA: ema_10/8/21/200
+    - RSI: rsi (14)
+    - ATR: atr_14/atr_30
+    - MACD: macd/macd_signal
+    """
+    if data_oldest_first is None or data_oldest_first.empty:
+        return pd.DataFrame(index=pd.Index([]))
+    if "Close" not in data_oldest_first.columns:
+        return pd.DataFrame(index=data_oldest_first.index)
+
+    df = data_oldest_first.copy()
+    closes = df["Close"]
+    out = pd.DataFrame(index=df.index)
+
+    for n in [5, 8, 14, 21, 50, 100, 150, 200]:
+        out[f"sma_{n}"] = closes.rolling(n).mean()
+
+    for n in [10, 8, 21, 200]:
+        key = "ema_10" if n == 10 else f"ema_{n}"
+        out[key] = closes.ewm(span=n, adjust=False).mean()
+
+    rsi = calculate_rsi_series(closes, 14)
+    out["rsi"] = rsi if rsi is not None else np.nan
+
+    # ATR windows (needs High/Low)
+    if set(["High", "Low", "Close"]).issubset(df.columns):
+        out["atr_14"] = calculate_atr_series(df, 14)
+        out["atr_30"] = calculate_atr_series(df, 30)
+    else:
+        out["atr_14"] = np.nan
+        out["atr_30"] = np.nan
+
+    # MACD (12,26,9)
+    ema12 = closes.ewm(span=12, adjust=False).mean()
+    ema26 = closes.ewm(span=26, adjust=False).mean()
+    macd_line = ema12 - ema26
+    signal = macd_line.ewm(span=9, adjust=False).mean()
+    out["macd"] = macd_line
+    out["macd_signal"] = signal
+    return out
+
+
 def calculate_performance_windows(
     data_newest_first: pd.DataFrame,
 ) -> Dict[str, Optional[float]]:
@@ -363,6 +410,89 @@ def compute_weinstein_stage_from_daily(
         "vol_ratio_50w": vol_ratio,
         "as_of": idx[-1].isoformat() if len(idx) else None,
     }
+
+
+def compute_weinstein_stage_series_from_daily(
+    daily_sym_newest_first: pd.DataFrame,
+    daily_bm_newest_first: pd.DataFrame,
+) -> pd.DataFrame:
+    """Compute a *daily* stage/RS series (approx) by computing weekly stage and forward-filling to days.
+
+    Output columns:
+    - stage_label: "1"|"2"|"3"|"4"|"UNKNOWN"
+    - stage_slope_pct, stage_dist_pct, rs_mansfield_pct
+    """
+    if (
+        daily_sym_newest_first is None
+        or daily_sym_newest_first.empty
+        or daily_bm_newest_first is None
+        or daily_bm_newest_first.empty
+    ):
+        return pd.DataFrame(index=pd.Index([]))
+
+    # Weekly bars (oldest->newest)
+    w_sym = weekly_from_daily(daily_sym_newest_first)
+    w_bm = weekly_from_daily(daily_bm_newest_first)
+    if w_sym.empty or w_bm.empty:
+        return pd.DataFrame(index=daily_sym_newest_first.iloc[::-1].index)
+
+    idx = w_sym.index.intersection(w_bm.index)
+    w_sym = w_sym.loc[idx]
+    w_bm = w_bm.loc[idx]
+    if w_sym.empty:
+        return pd.DataFrame(index=daily_sym_newest_first.iloc[::-1].index)
+
+    close = w_sym["Close"]
+    sma30 = close.rolling(30).mean()
+
+    def slope_series(series: pd.Series, window: int = 10) -> pd.Series:
+        # Similar to (last-first)/(n-1) over a trailing window.
+        return (series - series.shift(window - 1)) / max(1.0, window - 1)
+
+    sma30_slope = slope_series(sma30, window=10)
+
+    rs = (close / w_bm["Close"].replace(0, pd.NA)).astype("float64")
+    rs_slope = slope_series(rs, window=10)
+
+    # Stage slope/dist metrics
+    stage_dist_pct = (close / sma30 - 1.0) * 100.0
+    stage_slope_pct = (sma30 / sma30.shift(5) - 1.0) * 100.0
+
+    # Mansfield RS % (weekly RS vs 52-week SMA of RS)
+    rs_mansfield_pct = (rs / rs.rolling(52).mean() - 1.0) * 100.0
+
+    # Stage label classification
+    stage_label = pd.Series(index=idx, dtype="object")
+    stage_label[:] = "UNKNOWN"
+    has_sma = ~sma30.isna()
+
+    up = has_sma & (close > sma30) & (sma30_slope > 0) & (rs_slope > 0)
+    down = has_sma & (close < sma30) & (sma30_slope < 0) & (rs_slope < 0)
+    stage_label[up] = "2"
+    stage_label[down] = "4"
+
+    # Remaining: base/distribution
+    remaining = has_sma & ~(up | down)
+    flat = remaining & (sma30_slope.abs() <= (sma30.abs() * 0.0001).fillna(0))
+    near = remaining & ((close - sma30).abs() <= (sma30.abs() * 0.03))
+    base = flat & near
+    stage_label[base] = "1"
+    stage_label[remaining & ~base] = "3"
+
+    weekly_out = pd.DataFrame(
+        {
+            "stage_label": stage_label,
+            "stage_slope_pct": stage_slope_pct,
+            "stage_dist_pct": stage_dist_pct,
+            "rs_mansfield_pct": rs_mansfield_pct,
+        },
+        index=idx,
+    )
+
+    # Expand weekly -> daily (oldest->newest daily index)
+    daily_idx = daily_sym_newest_first.iloc[::-1].index
+    daily_out = weekly_out.reindex(daily_idx, method="ffill")
+    return daily_out
 
 
 def classify_ma_bucket_from_ma(ma: Dict[str, Any]) -> Dict[str, Any]:

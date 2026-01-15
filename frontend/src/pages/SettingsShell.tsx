@@ -94,7 +94,6 @@ const SettingsShell: React.FC = () => {
                 <MenuLink to="/settings/admin/dashboard">Dashboard</MenuLink>
                 <MenuLink to="/settings/admin/jobs">Jobs</MenuLink>
                 <MenuLink to="/settings/admin/schedules">Schedules</MenuLink>
-                <MenuLink to="/settings/admin/runbook">Runbook</MenuLink>
               </>
             )}
           </VStack>
@@ -118,7 +117,6 @@ const SettingsShell: React.FC = () => {
                 {iconNav('/settings/admin/dashboard', 'Admin Dashboard', <FiGrid />)}
                 {iconNav('/settings/admin/jobs', 'Admin Jobs', <FiActivity />)}
                 {iconNav('/settings/admin/schedules', 'Admin Schedules', <FiGrid />)}
-                {iconNav('/settings/admin/runbook', 'Admin Runbook', <FiShield />)}
               </>
             ) : null}
           </VStack>
