@@ -1,7 +1,7 @@
 # Core
 fastapi==0.128.0
 uvicorn[standard]==0.40.0
-sqlalchemy==2.0.45
+sqlalchemy==2.0.46
 psycopg2-binary==2.9.11
 pydantic==2.12.5
 pydantic-settings==2.12.0
@@ -41,7 +41,7 @@ celery-redbeat==2.3.3
 
 # Linters & Dev
 black==24.10.0
-ruff==0.14.13
+ruff==0.14.14
 
 # APM/Monitoring
 newrelic==9.3.0
